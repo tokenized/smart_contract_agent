@@ -31,10 +31,11 @@ type Contract struct {
 	sync.Mutex `bsor:"-"`
 }
 
-func NewContractCache(store storage.StreamStorage, expireCount int,
+func NewContractCache(store storage.StreamStorage, fetcherCount, expireCount int,
 	timeout time.Duration) (*cacher.Cache, error) {
 
-	return cacher.NewCache(store, reflect.TypeOf(&Contract{}), contractPath, expireCount, timeout)
+	return cacher.NewCache(store, reflect.TypeOf(&Contract{}), contractPath, fetcherCount,
+		expireCount, timeout)
 }
 
 func AddContract(ctx context.Context, cache *cacher.Cache, c *Contract) (*Contract, error) {

@@ -16,7 +16,7 @@ func Test_FetchTxs(t *testing.T) {
 	ctx := context.Background()
 	store := storage.NewMockStorage()
 
-	cache, err := NewTxCache(store, 10000, 2*time.Second)
+	cache, err := NewTxCache(store, 4, 10000, 2*time.Second)
 	if err != nil {
 		t.Fatalf("Failed to create tx cache : %s", err)
 	}

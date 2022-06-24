@@ -42,6 +42,13 @@ type Cache struct {
 	requests     chan *Request
 	requestsLock sync.Mutex
 
+	fetchers    []*Fetcher
+	fetcherLock sync.Mutex
+	fetcherWait sync.WaitGroup
+
+	newFetchers     chan *Fetcher
+	newFetchersLock sync.Mutex
+
 	items          map[bitcoin.Hash32]*CacheItem
 	itemsLock      sync.Mutex
 	itemsAddLock   sync.Mutex
@@ -51,9 +58,13 @@ type Cache struct {
 	// expiration. This also limits the number of items in memory.
 	expirers   chan *ExpireItem
 	expireLock sync.Mutex
+}
 
-	shuttingDown     bool
-	shuttingDownLock sync.Mutex
+type Fetcher struct {
+	store    storage.StreamStorage
+	path     string
+	value    CacheValue
+	response chan<- interface{}
 }
 
 type CacheItem struct {
@@ -75,8 +86,8 @@ type Request struct {
 	response chan<- interface{}
 }
 
-func NewCache(store storage.StreamStorage, typ reflect.Type, pathPrefix string, expireCount int,
-	timeout time.Duration) (*Cache, error) {
+func NewCache(store storage.StreamStorage, typ reflect.Type, pathPrefix string,
+	fetcherCount, expireCount int, timeout time.Duration) (*Cache, error) {
 
 	if typ.Kind() != reflect.Ptr {
 		return nil, errors.New("Type must be a pointer")
@@ -93,13 +104,15 @@ func NewCache(store storage.StreamStorage, typ reflect.Type, pathPrefix string, 
 	}
 
 	return &Cache{
-		typ:        typ,
-		store:      store,
-		timeout:    timeout,
-		pathPrefix: pathPrefix,
-		requests:   make(chan *Request, 100),
-		items:      make(map[bitcoin.Hash32]*CacheItem),
-		expirers:   make(chan *ExpireItem, expireCount),
+		typ:         typ,
+		store:       store,
+		timeout:     timeout,
+		pathPrefix:  pathPrefix,
+		requests:    make(chan *Request, 100),
+		fetchers:    make([]*Fetcher, fetcherCount),
+		newFetchers: make(chan *Fetcher, fetcherCount),
+		items:       make(map[bitcoin.Hash32]*CacheItem),
+		expirers:    make(chan *ExpireItem, expireCount),
 	}, nil
 }
 
@@ -215,7 +228,7 @@ func (c *Cache) Release(ctx context.Context, id bitcoin.Hash32) {
 	item.Unlock()
 
 	c.expireLock.Lock()
-	if !c.IsShuttingDown() {
+	if c.expirers != nil {
 		c.expirers <- &ExpireItem{
 			item:     item,
 			lastUsed: now,
@@ -253,29 +266,30 @@ func (c *Cache) Run(ctx context.Context, interrupt <-chan interface{}) error {
 	case <-interrupt:
 	}
 
-	c.shuttingDownLock.Lock()
-	c.shuttingDown = true
-	c.shuttingDownLock.Unlock()
+	c.newFetchersLock.Lock()
+	clearFetchers(c.newFetchers, ErrShuttingDown)
+	close(c.newFetchers)
+	c.newFetchers = nil
+	c.newFetchersLock.Unlock()
 
 	c.requestsLock.Lock()
+	clearRequests(c.requests, ErrShuttingDown)
 	close(c.requests)
+	c.requests = nil
 	c.requestsLock.Unlock()
+
 	c.expireLock.Lock()
 	close(c.expirers)
+	c.expirers = nil
 	c.expireLock.Unlock()
+
+	c.fetcherWait.Wait()
 	wait.Wait()
 
 	return threads.CombineErrors(
 		handleRequestsError,
 		expireError,
 	)
-}
-
-func (c *Cache) IsShuttingDown() bool {
-	c.shuttingDownLock.Lock()
-	defer c.shuttingDownLock.Unlock()
-
-	return c.shuttingDown
 }
 
 func (c *Cache) expireItems(ctx context.Context) error {
@@ -362,7 +376,6 @@ func (c *Cache) handleRequests(ctx context.Context) error {
 		}
 	}
 
-	clearRequests(c.requests, ErrShuttingDown)
 	return returnErr
 }
 
@@ -383,38 +396,190 @@ func (c *Cache) handleRequest(ctx context.Context, request *Request) error {
 	c.itemsLock.Unlock()
 
 	// Fetch from storage.
-	value, err := c.fetchItem(ctx, request.id)
-	if err != nil {
-		request.response <- err
-		return errors.Wrap(err, "fetch")
+	fetchResponse := make(chan interface{})
+	if err := c.addFetcher(ctx, request.id, fetchResponse); err != nil {
+		return errors.Wrap(err, "add fetcher")
 	}
 
-	if value == nil {
-		request.response <- nil
-		return nil
-	}
+	c.fetcherWait.Add(1)
+	go func() {
+		c.waitForFetch(ctx, request, fetchResponse)
+		c.fetcherWait.Done()
+	}()
 
-	item = &CacheItem{
-		value:    value,
-		users:    1,
-		lastUsed: time.Now(),
-	}
-
-	c.itemsLock.Lock()
-	c.items[request.id] = item
-	c.itemsLock.Unlock()
-
-	request.response <- item
 	return nil
 }
 
-func clearRequests(requests chan *Request, err error) {
-	for request := range requests {
-		request.response <- err
+func (c *Cache) waitForFetch(ctx context.Context, request *Request, response <-chan interface{}) {
+	select {
+	case fetchResponse := <-response:
+		if fetchResponse == nil {
+			request.response <- nil
+			return
+		}
+
+		item, ok := fetchResponse.(*CacheItem)
+		if !ok {
+			request.response <- fetchResponse.(error)
+		}
+
+		c.itemsLock.Lock()
+		existing, exists := c.items[request.id]
+		if exists {
+			// Already fetched in another thread
+			existing.addUser()
+			c.itemsLock.Unlock()
+
+			request.response <- existing
+			return
+		}
+
+		// Add to items
+		c.items[request.id] = item
+		c.itemsLock.Unlock()
+
+		request.response <- item
+
+	case <-time.After(c.Timeout()):
+		logger.ErrorWithFields(ctx, []logger.Field{
+			logger.Stringer("id", request.id),
+		}, "Fetch timed out")
+		request.response <- ErrTimedOut
 	}
 }
 
-func (c *Cache) fetchItem(ctx context.Context, id bitcoin.Hash32) (CacheValue, error) {
+func clearRequests(requests chan *Request, err error) {
+	for {
+		select {
+		case request := <-requests:
+			request.response <- err
+
+		default:
+			return
+		}
+	}
+}
+
+func newFetcher(store storage.StreamStorage, path string, value CacheValue,
+	response chan<- interface{}) *Fetcher {
+	return &Fetcher{
+		store:    store,
+		path:     path,
+		value:    value,
+		response: response,
+	}
+}
+
+func (c *Cache) addFetcher(ctx context.Context, id bitcoin.Hash32,
+	response chan<- interface{}) error {
+
+	itemValue := reflect.New(c.typ.Elem())
+	itemInterface := itemValue.Interface()
+	fetcher := newFetcher(c.store, c.path(id), itemInterface.(CacheValue), response)
+
+	c.newFetchersLock.Lock()
+	defer c.newFetchersLock.Unlock()
+
+	c.fetcherLock.Lock()
+	for i, f := range c.fetchers {
+		if f == nil {
+			// There is an available fetcher slot so start it now
+			c.fetchers[i] = fetcher
+			c.fetcherLock.Unlock()
+
+			c.fetcherWait.Add(1)
+			go func() {
+				defer c.removeFetcher(ctx, fetcher)
+				fetcher.run(ctx)
+				c.fetcherWait.Done()
+			}()
+
+			return nil
+		}
+	}
+	c.fetcherLock.Unlock()
+
+	if c.newFetchers != nil {
+		c.newFetchers <- fetcher
+		return nil
+	}
+
+	return ErrShuttingDown
+}
+
+func (c *Cache) removeFetcher(ctx context.Context, fetcher *Fetcher) {
+	c.fetcherLock.Lock()
+	defer c.fetcherLock.Unlock()
+
+	for i, f := range c.fetchers {
+		if fetcher == f {
+			nextFetcher := c.nextFetcher()
+			c.fetchers[i] = nextFetcher
+
+			if nextFetcher != nil {
+				c.fetcherWait.Add(1)
+				go func() {
+					defer c.removeFetcher(ctx, nextFetcher)
+					nextFetcher.run(ctx)
+					c.fetcherWait.Done()
+				}()
+			}
+
+			return
+		}
+	}
+
+	panic(fmt.Sprintf("Fetcher removed when not active : %s\n", fetcher.path))
+}
+
+func (c *Cache) nextFetcher() *Fetcher {
+	c.newFetchersLock.Lock()
+	defer c.newFetchersLock.Unlock()
+
+	if c.newFetchers == nil {
+		return nil
+	}
+
+	select {
+	case fetcher := <-c.newFetchers:
+		return fetcher
+
+	default:
+		return nil
+	}
+}
+
+func clearFetchers(newFetchers chan *Fetcher, err error) {
+	for {
+		select {
+		case fetcher := <-newFetchers:
+			fetcher.response <- err
+
+		default:
+			return
+		}
+	}
+}
+
+func (f *Fetcher) run(ctx context.Context) {
+	if err := storage.StreamRead(ctx, f.store, f.path, f.value); err != nil {
+		if errors.Cause(err) == storage.ErrNotFound {
+			f.response <- nil
+			return
+		}
+
+		f.response <- errors.Wrapf(err, "read: %s", f.path)
+		return
+	}
+
+	f.response <- &CacheItem{
+		value:    f.value,
+		users:    1,
+		lastUsed: time.Now(),
+	}
+}
+
+func (c *Cache) fetchValue(ctx context.Context, id bitcoin.Hash32) (CacheValue, error) {
 	itemValue := reflect.New(c.typ.Elem())
 	itemInterface := itemValue.Interface()
 	item := itemInterface.(CacheValue)

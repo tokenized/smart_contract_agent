@@ -49,10 +49,11 @@ type BalanceHolding struct {
 	TxID    *bitcoin.Hash32    `bsor:"1" json:"txID,omitempty"`
 }
 
-func NewBalanceCache(store storage.StreamStorage, expireCount int,
+func NewBalanceCache(store storage.StreamStorage, fetcherCount, expireCount int,
 	timeout time.Duration) (*cacher.Cache, error) {
 
-	return cacher.NewCache(store, reflect.TypeOf(&Balance{}), balancePath, expireCount, timeout)
+	return cacher.NewCache(store, reflect.TypeOf(&Balance{}), balancePath, fetcherCount,
+		expireCount, timeout)
 }
 
 func AddBalance(ctx context.Context, cache *cacher.Cache, b *Balance) (*Balance, error) {

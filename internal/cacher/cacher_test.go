@@ -26,7 +26,7 @@ func Test_NotFound(t *testing.T) {
 	ctx := context.Background()
 	store := storage.NewMockStorage()
 
-	cache, err := NewCache(store, reflect.TypeOf(&TestItem{}), "test_items", 10, time.Second)
+	cache, err := NewCache(store, reflect.TypeOf(&TestItem{}), "test_items", 2, 10, time.Second)
 	if err != nil {
 		t.Fatalf("Failed to create cache : %s", err)
 	}
@@ -61,7 +61,7 @@ func Test_Add(t *testing.T) {
 	ctx := context.Background()
 	store := storage.NewMockStorage()
 
-	cache, err := NewCache(store, reflect.TypeOf(&TestItem{}), "test_items", 10, time.Second)
+	cache, err := NewCache(store, reflect.TypeOf(&TestItem{}), "test_items", 2, 10, time.Second)
 	if err != nil {
 		t.Fatalf("Failed to create cache : %s", err)
 	}
@@ -151,7 +151,7 @@ func Test_Expire(t *testing.T) {
 	ctx := context.Background()
 	store := storage.NewMockStorage()
 
-	cache, err := NewCache(store, reflect.TypeOf(&TestItem{}), "test_items", 10, time.Second)
+	cache, err := NewCache(store, reflect.TypeOf(&TestItem{}), "test_items", 2, 10, time.Second)
 	if err != nil {
 		t.Fatalf("Failed to create cache : %s", err)
 	}

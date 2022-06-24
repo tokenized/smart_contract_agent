@@ -32,11 +32,11 @@ type Instrument struct {
 	sync.Mutex `bsor:"-"`
 }
 
-func NewInstrumentCache(store storage.StreamStorage, expireCount int,
+func NewInstrumentCache(store storage.StreamStorage, fetcherCount, expireCount int,
 	timeout time.Duration) (*cacher.Cache, error) {
 
-	return cacher.NewCache(store, reflect.TypeOf(&Instrument{}), instrumentPath, expireCount,
-		timeout)
+	return cacher.NewCache(store, reflect.TypeOf(&Instrument{}), instrumentPath, fetcherCount,
+		expireCount, timeout)
 }
 
 func AddInstrument(ctx context.Context, cache *cacher.Cache, c *Instrument) (*Instrument, error) {

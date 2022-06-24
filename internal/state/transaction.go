@@ -36,10 +36,11 @@ type Transaction struct {
 	sync.Mutex `bsor:"-"`
 }
 
-func NewTxCache(store storage.StreamStorage, expireCount int,
+func NewTxCache(store storage.StreamStorage, fetcherCount, expireCount int,
 	timeout time.Duration) (*cacher.Cache, error) {
 
-	return cacher.NewCache(store, reflect.TypeOf(&Transaction{}), txPath, expireCount, timeout)
+	return cacher.NewCache(store, reflect.TypeOf(&Transaction{}), txPath, fetcherCount, expireCount,
+		timeout)
 }
 
 func AddExpandedTx(ctx context.Context, cache *cacher.Cache,
