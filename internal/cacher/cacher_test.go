@@ -5,15 +5,17 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/binary"
+	"fmt"
 	"io"
 	"reflect"
 	"sync"
 	"testing"
 	"time"
 
-	"github.com/pkg/errors"
 	"github.com/tokenized/pkg/bitcoin"
 	"github.com/tokenized/pkg/storage"
+
+	"github.com/pkg/errors"
 )
 
 type TestItem struct {
@@ -26,7 +28,7 @@ func Test_NotFound(t *testing.T) {
 	ctx := context.Background()
 	store := storage.NewMockStorage()
 
-	cache, err := NewCache(store, reflect.TypeOf(&TestItem{}), "test_items", 2, 10, time.Second)
+	cache, err := NewCache(store, reflect.TypeOf(&TestItem{}), 2, 10, time.Second, time.Second)
 	if err != nil {
 		t.Fatalf("Failed to create cache : %s", err)
 	}
@@ -40,7 +42,7 @@ func Test_NotFound(t *testing.T) {
 
 	var hash bitcoin.Hash32
 	rand.Read(hash[:])
-	notFound, err := cache.Get(ctx, hash)
+	notFound, err := cache.Get(ctx, GetTestItemPath(hash))
 	if err != nil {
 		t.Fatalf("Failed to get item : %s", err)
 	}
@@ -61,7 +63,7 @@ func Test_Add(t *testing.T) {
 	ctx := context.Background()
 	store := storage.NewMockStorage()
 
-	cache, err := NewCache(store, reflect.TypeOf(&TestItem{}), "test_items", 2, 10, time.Second)
+	cache, err := NewCache(store, reflect.TypeOf(&TestItem{}), 2, 10, time.Second, time.Second)
 	if err != nil {
 		t.Fatalf("Failed to create cache : %s", err)
 	}
@@ -76,7 +78,7 @@ func Test_Add(t *testing.T) {
 	item := &TestItem{
 		Value: "test value",
 	}
-	id := item.ID()
+	path := item.Path()
 
 	addedCacheItem, err := cache.Add(ctx, item)
 	if err != nil {
@@ -96,7 +98,7 @@ func Test_Add(t *testing.T) {
 		t.Errorf("Wrong added item : got %s, want %s", addedItem.Value, item.Value)
 	}
 
-	gotCacheItem, err := cache.Get(ctx, id)
+	gotCacheItem, err := cache.Get(ctx, path)
 	if err != nil {
 		t.Fatalf("Failed to get item : %s", err)
 	}
@@ -114,12 +116,12 @@ func Test_Add(t *testing.T) {
 		t.Errorf("Wrong item found : got %s, want %s", gotItem.Value, item.Value)
 	}
 
-	cache.Release(ctx, id)
+	cache.Release(ctx, path)
 
 	duplicateItem := &TestItem{
 		Value: "test value",
 	}
-	id = duplicateItem.ID()
+	path = duplicateItem.Path()
 
 	addedCacheItem, err = cache.Add(ctx, duplicateItem)
 	if err != nil {
@@ -151,7 +153,7 @@ func Test_Expire(t *testing.T) {
 	ctx := context.Background()
 	store := storage.NewMockStorage()
 
-	cache, err := NewCache(store, reflect.TypeOf(&TestItem{}), "test_items", 2, 10, time.Second)
+	cache, err := NewCache(store, reflect.TypeOf(&TestItem{}), 2, 10, time.Second, time.Second)
 	if err != nil {
 		t.Fatalf("Failed to create cache : %s", err)
 	}
@@ -166,17 +168,17 @@ func Test_Expire(t *testing.T) {
 	item := &TestItem{
 		Value: "test value",
 	}
-	id := item.ID()
+	path := item.Path()
 
 	if _, err := cache.Add(ctx, item); err != nil {
 		t.Fatalf("Failed to add item : %s", err)
 	}
 
-	cache.Release(ctx, id)
+	cache.Release(ctx, path)
 
 	time.Sleep(1100 * time.Millisecond)
 
-	gotCacheItem, err := cache.Get(ctx, id)
+	gotCacheItem, err := cache.Get(ctx, path)
 	if err != nil {
 		t.Fatalf("Failed to get item : %s", err)
 	}
@@ -206,11 +208,15 @@ func Test_Expire(t *testing.T) {
 	}
 }
 
-func (i *TestItem) ID() bitcoin.Hash32 {
+func GetTestItemPath(id bitcoin.Hash32) string {
+	return fmt.Sprintf("items/%s", id)
+}
+
+func (i *TestItem) Path() string {
 	i.lock.Lock()
 	defer i.lock.Unlock()
 
-	return bitcoin.Hash32(sha256.Sum256([]byte(i.Value)))
+	return fmt.Sprintf("items/%s", bitcoin.Hash32(sha256.Sum256([]byte(i.Value))))
 }
 
 func (i *TestItem) Serialize(w io.Writer) error {

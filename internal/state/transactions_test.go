@@ -16,7 +16,7 @@ func Test_FetchTxs(t *testing.T) {
 	ctx := context.Background()
 	store := storage.NewMockStorage()
 
-	cache, err := NewTxCache(store, 4, 10000, 2*time.Second)
+	cache, err := NewTransactionCache(store, 4, 10000, 2*time.Second, 10*time.Second)
 	if err != nil {
 		t.Fatalf("Failed to create tx cache : %s", err)
 	}
@@ -53,7 +53,7 @@ func Test_FetchTxs(t *testing.T) {
 
 		txids = append(txids, *tx.TxHash())
 
-		if _, err := AddTx(ctx, cache, tx, nil); err != nil {
+		if _, err := cache.Add(ctx, tx, nil); err != nil {
 			t.Fatalf("Failed to add tx : %s", err)
 		}
 		cache.Release(ctx, *tx.TxHash())
@@ -64,7 +64,7 @@ func Test_FetchTxs(t *testing.T) {
 		index := rand.Intn(txCount)
 		txid := txids[index]
 
-		tx, err := GetTx(ctx, cache, txid)
+		tx, err := cache.Get(ctx, txid)
 		if err != nil {
 			t.Fatalf("Failed to get tx : %s", err)
 		}

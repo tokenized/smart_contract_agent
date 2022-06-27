@@ -26,6 +26,10 @@ const (
 	txPath    = "txs"
 )
 
+type TransactionCache struct {
+	cacher *cacher.Cache
+}
+
 type Transaction struct {
 	Tx           *wire.MsgTx                 `bsor:"1" json:"tx"`
 	State        wallet.TxState              `bsor:"2" json:"safe,omitempty"`
@@ -36,35 +40,46 @@ type Transaction struct {
 	sync.Mutex `bsor:"-"`
 }
 
-func NewTxCache(store storage.StreamStorage, fetcherCount, expireCount int,
-	timeout time.Duration) (*cacher.Cache, error) {
+func NewTransactionCache(store storage.StreamStorage, fetcherCount, expireCount int,
+	expiration, fetchTimeout time.Duration) (*TransactionCache, error) {
 
-	return cacher.NewCache(store, reflect.TypeOf(&Transaction{}), txPath, fetcherCount, expireCount,
-		timeout)
+	cacher, err := cacher.NewCache(store, reflect.TypeOf(&Transaction{}), fetcherCount, expireCount,
+		expiration, fetchTimeout)
+	if err != nil {
+		return nil, errors.Wrap(err, "cacher")
+	}
+
+	return &TransactionCache{
+		cacher: cacher,
+	}, nil
 }
 
-func AddExpandedTx(ctx context.Context, cache *cacher.Cache,
+func (c *TransactionCache) Run(ctx context.Context, interrupt <-chan interface{}) error {
+	return c.cacher.Run(ctx, interrupt)
+}
+
+func (c *TransactionCache) AddExpandedTx(ctx context.Context,
 	etx *channels.ExpandedTx) (*Transaction, error) {
 
 	for _, atx := range etx.Ancestors {
 		atxid := *atx.Tx.TxHash()
-		if _, err := AddTx(ctx, cache, atx.Tx, atx.MerkleProofs); err != nil {
+		if _, err := c.Add(ctx, atx.Tx, atx.MerkleProofs); err != nil {
 			return nil, errors.Wrapf(err, "ancestor: %s", atxid)
 		}
-		cache.Release(ctx, atxid)
+		c.Release(ctx, atxid)
 	}
 
 	txid := *etx.Tx.TxHash()
-	tx, err := AddTx(ctx, cache, etx.Tx, nil)
+	tx, err := c.Add(ctx, etx.Tx, nil)
 	if err != nil {
 		return nil, errors.Wrapf(err, "add: %s", txid)
 	}
-	cache.Release(ctx, txid)
+	c.Release(ctx, txid)
 
 	return tx, nil
 }
 
-func AddTx(ctx context.Context, cache *cacher.Cache, tx *wire.MsgTx,
+func (c *TransactionCache) Add(ctx context.Context, tx *wire.MsgTx,
 	merkleProofs []*merkle_proof.MerkleProof) (*Transaction, error) {
 
 	txid := *tx.TxHash()
@@ -73,7 +88,7 @@ func AddTx(ctx context.Context, cache *cacher.Cache, tx *wire.MsgTx,
 		MerkleProofs: merkleProofs,
 	}
 
-	item, err := cache.Add(ctx, itx)
+	item, err := c.cacher.Add(ctx, itx)
 	if err != nil {
 		return nil, errors.Wrap(err, "add")
 	}
@@ -83,8 +98,8 @@ func AddTx(ctx context.Context, cache *cacher.Cache, tx *wire.MsgTx,
 		return ftx, nil
 	}
 
-	if err := cache.Save(ctx, ftx); err != nil {
-		cache.Release(ctx, txid)
+	if err := c.cacher.Save(ctx, ftx); err != nil {
+		c.Release(ctx, txid)
 		return nil, errors.Wrap(err, "save")
 	}
 
@@ -132,10 +147,10 @@ func (tx *Transaction) AddMerkleProof(merkleProof *merkle_proof.MerkleProof) boo
 	return true
 }
 
-func GetExpandedTx(ctx context.Context, cache *cacher.Cache,
-	txid bitcoin.Hash32) (*channels.ExpandedTx, error) {
+func (c *TransactionCache) GetTxWithAncestors(ctx context.Context,
+	txid bitcoin.Hash32) (*Transaction, error) {
 
-	item, err := cache.Get(ctx, txid)
+	item, err := c.cacher.Get(ctx, TransactionPath(txid))
 	if err != nil {
 		return nil, errors.Wrap(err, "get tx")
 	}
@@ -144,16 +159,11 @@ func GetExpandedTx(ctx context.Context, cache *cacher.Cache,
 		return nil, nil
 	}
 
-	defer cache.Release(ctx, txid)
+	defer c.Release(ctx, txid)
 
 	tx := item.(*Transaction)
 	tx.Lock()
 	defer tx.Unlock()
-
-	etx := &channels.ExpandedTx{
-		Tx:        tx.Tx,
-		Ancestors: tx.Ancestors,
-	}
 
 	// Fetch ancestors
 	for _, txin := range tx.Tx.TxIn {
@@ -162,12 +172,10 @@ func GetExpandedTx(ctx context.Context, cache *cacher.Cache,
 			continue // already have this ancestor
 		}
 
-		inputItem, err := cache.Get(ctx, txin.PreviousOutPoint.Hash)
+		inputTx, err := c.Get(ctx, txin.PreviousOutPoint.Hash)
 		if err != nil {
 			return nil, errors.Wrapf(err, "get input tx: %s", txin.PreviousOutPoint.Hash)
 		}
-
-		inputTx := inputItem.(*Transaction)
 
 		inputTx.Lock()
 		atx = &channels.AncestorTx{
@@ -176,16 +184,16 @@ func GetExpandedTx(ctx context.Context, cache *cacher.Cache,
 		}
 		inputTx.Unlock()
 
-		etx.Ancestors = append(etx.Ancestors, atx)
+		tx.Ancestors = append(tx.Ancestors, atx)
 
-		cache.Release(ctx, txin.PreviousOutPoint.Hash)
+		c.Release(ctx, txin.PreviousOutPoint.Hash)
 	}
 
 	return nil, nil
 }
 
-func GetTx(ctx context.Context, cache *cacher.Cache, txid bitcoin.Hash32) (*Transaction, error) {
-	item, err := cache.Get(ctx, txid)
+func (c *TransactionCache) Get(ctx context.Context, txid bitcoin.Hash32) (*Transaction, error) {
+	item, err := c.cacher.Get(ctx, TransactionPath(txid))
 	if err != nil {
 		return nil, errors.Wrap(err, "get")
 	}
@@ -197,11 +205,19 @@ func GetTx(ctx context.Context, cache *cacher.Cache, txid bitcoin.Hash32) (*Tran
 	return item.(*Transaction), nil
 }
 
-func (tx *Transaction) ID() bitcoin.Hash32 {
+func (c *TransactionCache) Release(ctx context.Context, txid bitcoin.Hash32) {
+	c.cacher.Release(ctx, TransactionPath(txid))
+}
+
+func TransactionPath(txid bitcoin.Hash32) string {
+	return fmt.Sprintf("%s/%s", txPath, txid)
+}
+
+func (tx *Transaction) Path() string {
 	tx.Lock()
 	defer tx.Unlock()
 
-	return *tx.Tx.TxHash()
+	return TransactionPath(*tx.Tx.TxHash())
 }
 
 func (tx *Transaction) Serialize(w io.Writer) error {

@@ -30,11 +30,27 @@ const (
 	balancePath    = "balances"
 )
 
-type Balance struct {
-	LockingScript bitcoin.Script `bsor:"1" json:"locking_script"`
-	Quantity      uint64         `bsor:"2" json:"quantity"`
+type BalanceCache struct {
+	cacher *cacher.Cache
+}
 
-	Holdings []*BalanceHolding `bsor:"3" json:"holdings,omitempty"`
+type BalanceSet struct {
+	pathID [2]byte
+
+	ContractLockingScript bitcoin.Script `json:"contract_locking_script"`
+	InstrumentCode        InstrumentCode `json:"instrument_code"`
+
+	Balances map[bitcoin.Hash32]*Balance `json:"balances"`
+
+	lock sync.Mutex
+}
+
+type Balance struct {
+	LockingScript bitcoin.Script  `bsor:"1" json:"locking_script"`
+	Quantity      uint64          `bsor:"2" json:"quantity"`
+	TxID          *bitcoin.Hash32 `bsor:"3" json:"txID,omitempty"`
+
+	Holdings []*BalanceHolding `bsor:"4" json:"holdings,omitempty"`
 
 	sync.Mutex `bsor:"-"`
 }
@@ -44,72 +60,151 @@ type BalanceHoldingCode byte
 type BalanceHolding struct {
 	Code BalanceHoldingCode `bsor:"1" json:"code,omitempty"`
 
-	Expires protocol.Timestamp `bsor:"1" json:"expires,omitempty"`
-	Amount  uint64             `bsor:"1" json:"amount,omitempty"`
-	TxID    *bitcoin.Hash32    `bsor:"1" json:"txID,omitempty"`
+	Expires  protocol.Timestamp `bsor:"2" json:"expires,omitempty"`
+	Quantity uint64             `bsor:"3" json:"quantity,omitempty"`
+	TxID     *bitcoin.Hash32    `bsor:"4" json:"txID,omitempty"`
 }
 
 func NewBalanceCache(store storage.StreamStorage, fetcherCount, expireCount int,
-	timeout time.Duration) (*cacher.Cache, error) {
+	expiration, fetchTimeout time.Duration) (*BalanceCache, error) {
 
-	return cacher.NewCache(store, reflect.TypeOf(&Balance{}), balancePath, fetcherCount,
-		expireCount, timeout)
+	cacher, err := cacher.NewCache(store, reflect.TypeOf(&Balance{}), fetcherCount, expireCount,
+		expiration, fetchTimeout)
+	if err != nil {
+		return nil, errors.Wrap(err, "cacher")
+	}
+
+	return &BalanceCache{
+		cacher: cacher,
+	}, nil
 }
 
-func AddBalance(ctx context.Context, cache *cacher.Cache, b *Balance) (*Balance, error) {
-	item, err := cache.Add(ctx, b)
+func (c *BalanceCache) Run(ctx context.Context, interrupt <-chan interface{}) error {
+	return c.cacher.Run(ctx, interrupt)
+}
+
+func (c *BalanceCache) Add(ctx context.Context, contractLockingScript bitcoin.Script,
+	instrumentCode InstrumentCode, balance *Balance) (*Balance, error) {
+
+	hash, pathID := balanceSetPathID(balance.LockingScript)
+	set := &BalanceSet{
+		pathID:                pathID,
+		ContractLockingScript: contractLockingScript,
+		InstrumentCode:        instrumentCode,
+		Balances:              make(map[bitcoin.Hash32]*Balance),
+	}
+	set.Balances[hash] = balance
+
+	item, err := c.cacher.Add(ctx, set)
 	if err != nil {
 		return nil, errors.Wrap(err, "add")
 	}
+	set = item.(*BalanceSet)
 
-	return item.(*Balance), nil
+	set.lock.Lock()
+	result, exists := set.Balances[hash]
+	set.lock.Lock()
+
+	if exists {
+		return result, nil
+	}
+
+	set.Balances[hash] = balance
+	return balance, nil
 }
 
-func GetBalance(ctx context.Context, cache *cacher.Cache, id bitcoin.Hash32) (*Balance, error) {
-	item, err := cache.Get(ctx, id)
+func (c *BalanceCache) Get(ctx context.Context, contractScript bitcoin.Script,
+	instrumentCode bitcoin.Hash20, lockingScript bitcoin.Script) (*Balance, error) {
+
+	hash, path := balanceSetPath(contractScript, instrumentCode, lockingScript)
+	item, err := c.cacher.Get(ctx, path)
 	if err != nil {
 		return nil, errors.Wrap(err, "get")
 	}
 
 	if item == nil {
-		return nil, nil
+		return nil, nil // set doesn't exist
 	}
 
-	return item.(*Balance), nil
-}
+	set := item.(*BalanceSet)
+	set.lock.Lock()
+	result, exists := set.Balances[hash]
+	set.lock.Lock()
 
-func (b *Balance) ID() bitcoin.Hash32 {
-	b.Lock()
-	defer b.Unlock()
-
-	return bitcoin.Hash32(sha256.Sum256(b.LockingScript))
-}
-
-func (b *Balance) Serialize(w io.Writer) error {
-	b.Lock()
-	bs, err := bsor.MarshalBinary(b)
-	if err != nil {
-		b.Unlock()
-		return errors.Wrap(err, "marshal")
+	if !exists {
+		return nil, nil // balance not within set
 	}
-	b.Unlock()
 
+	return result, nil
+}
+
+func (c *BalanceCache) Release(ctx context.Context, contractScript bitcoin.Script,
+	instrumentCode bitcoin.Hash20, lockingScript bitcoin.Script) {
+	_, path := balanceSetPath(contractScript, instrumentCode, lockingScript)
+	c.cacher.Release(ctx, path)
+}
+
+func balanceSetPathID(lockingScript bitcoin.Script) (bitcoin.Hash32, [2]byte) {
+	hash := sha256.Sum256(lockingScript)
+	var firstTwoBytes [2]byte
+	copy(firstTwoBytes[:], hash[:])
+	return bitcoin.Hash32(hash), firstTwoBytes
+}
+
+func balanceSetPath(contractScript bitcoin.Script, instrumentCode bitcoin.Hash20,
+	lockingScript bitcoin.Script) (bitcoin.Hash32, string) {
+	hash, pathID := balanceSetPathID(lockingScript)
+	return hash, fmt.Sprintf("%s/%s/%s/%x", balancePath, CalculateContractID(contractScript),
+		instrumentCode, pathID)
+}
+
+func (set *BalanceSet) Path() string {
+	set.lock.Lock()
+	defer set.lock.Unlock()
+
+	return fmt.Sprintf("%s/%s/%s/%x", balancePath, CalculateContractID(set.ContractLockingScript),
+		set.InstrumentCode, set.pathID)
+}
+
+func (set *BalanceSet) Serialize(w io.Writer) error {
 	if err := binary.Write(w, endian, balanceVersion); err != nil {
 		return errors.Wrap(err, "version")
 	}
 
-	if err := binary.Write(w, endian, uint32(len(bs))); err != nil {
+	set.lock.Lock()
+	defer set.lock.Unlock()
+
+	if err := writeString(w, set.ContractLockingScript); err != nil {
+		return errors.Wrap(err, "contract")
+	}
+
+	if _, err := w.Write(set.InstrumentCode[:]); err != nil {
+		return errors.Wrap(err, "instrument")
+	}
+
+	if err := binary.Write(w, endian, uint32(len(set.Balances))); err != nil {
 		return errors.Wrap(err, "size")
 	}
 
-	if _, err := w.Write(bs); err != nil {
-		return errors.Wrap(err, "write")
+	for _, balance := range set.Balances {
+		b, err := bsor.MarshalBinary(balance)
+		if err != nil {
+			return errors.Wrap(err, "marshal")
+		}
+
+		if err := binary.Write(w, endian, uint32(len(b))); err != nil {
+			return errors.Wrap(err, "size")
+		}
+
+		if _, err := w.Write(b); err != nil {
+			return errors.Wrap(err, "write")
+		}
 	}
 
 	return nil
 }
 
-func (b *Balance) Deserialize(r io.Reader) error {
+func (set *BalanceSet) Deserialize(r io.Reader) error {
 	var version uint8
 	if err := binary.Read(r, endian, &version); err != nil {
 		return errors.Wrap(err, "version")
@@ -119,23 +214,69 @@ func (b *Balance) Deserialize(r io.Reader) error {
 		return fmt.Errorf("Unsupported version : %d", version)
 	}
 
-	var size uint32
-	if err := binary.Read(r, endian, &size); err != nil {
-		return errors.Wrap(err, "size")
+	contractLockingScript, err := readString(r)
+	if err != nil {
+		return errors.Wrap(err, "contract")
+	}
+	set.ContractLockingScript = contractLockingScript
+
+	if _, err := io.ReadFull(r, set.InstrumentCode[:]); err != nil {
+		return errors.Wrap(err, "instrument")
 	}
 
-	bs := make([]byte, size)
-	if _, err := io.ReadFull(r, bs); err != nil {
-		return errors.Wrap(err, "read")
+	var count uint32
+	if err := binary.Read(r, endian, &count); err != nil {
+		return errors.Wrap(err, "count")
 	}
 
-	b.Lock()
-	defer b.Unlock()
-	if _, err := bsor.UnmarshalBinary(bs, b); err != nil {
-		return errors.Wrap(err, "unmarshal")
+	set.Balances = make(map[bitcoin.Hash32]*Balance)
+	for i := uint32(0); i < count; i++ {
+		var size uint32
+		if err := binary.Read(r, endian, &size); err != nil {
+			return errors.Wrap(err, "size")
+		}
+
+		b := make([]byte, size)
+		if _, err := io.ReadFull(r, b); err != nil {
+			return errors.Wrap(err, "read")
+		}
+
+		balance := &Balance{}
+		if _, err := bsor.UnmarshalBinary(b, balance); err != nil {
+			return errors.Wrap(err, "unmarshal")
+		}
+
+		hash := bitcoin.Hash32(sha256.Sum256(balance.LockingScript))
+		set.Balances[hash] = balance
 	}
 
 	return nil
+}
+
+func writeString(w io.Writer, b []byte) error {
+	if err := binary.Write(w, endian, uint32(len(b))); err != nil {
+		return errors.Wrap(err, "size")
+	}
+
+	if _, err := w.Write(b); err != nil {
+		return errors.Wrap(err, "value")
+	}
+
+	return nil
+}
+
+func readString(r io.Reader) ([]byte, error) {
+	var s uint32
+	if err := binary.Read(r, endian, &s); err != nil {
+		return nil, errors.Wrap(err, "size")
+	}
+
+	b := make([]byte, s)
+	if _, err := io.ReadFull(r, b); err != nil {
+		return nil, errors.Wrap(err, "value")
+	}
+
+	return b, nil
 }
 
 func (v BalanceHoldingCode) MarshalText() ([]byte, error) {

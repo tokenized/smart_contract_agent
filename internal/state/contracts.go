@@ -23,23 +23,43 @@ const (
 	contractPath    = "contracts"
 )
 
+type ContractCache struct {
+	cacher *cacher.Cache
+}
+
 type Contract struct {
 	LockingScript bitcoin.Script `bsor:"1" json:"locking_script"`
 	FormationTxID bitcoin.Hash32 `bsor:"2" json:"formation_txid"`
 	KeyHash       bitcoin.Hash32 `bsor:"3" json:"key_hash"`
 
+	Instruments []*Instrument `bsor:"4" json:"instruments"`
+
 	sync.Mutex `bsor:"-"`
 }
 
-func NewContractCache(store storage.StreamStorage, fetcherCount, expireCount int,
-	timeout time.Duration) (*cacher.Cache, error) {
+type ContractID bitcoin.Hash32
+type InstrumentCode bitcoin.Hash20
 
-	return cacher.NewCache(store, reflect.TypeOf(&Contract{}), contractPath, fetcherCount,
-		expireCount, timeout)
+func NewContractCache(store storage.StreamStorage, fetcherCount, expireCount int,
+	expiration, fetchTimeout time.Duration) (*ContractCache, error) {
+
+	cacher, err := cacher.NewCache(store, reflect.TypeOf(&Contract{}), fetcherCount, expireCount,
+		expiration, fetchTimeout)
+	if err != nil {
+		return nil, errors.Wrap(err, "cacher")
+	}
+
+	return &ContractCache{
+		cacher: cacher,
+	}, nil
 }
 
-func AddContract(ctx context.Context, cache *cacher.Cache, c *Contract) (*Contract, error) {
-	item, err := cache.Add(ctx, c)
+func (c *ContractCache) Run(ctx context.Context, interrupt <-chan interface{}) error {
+	return c.cacher.Run(ctx, interrupt)
+}
+
+func (c *ContractCache) Add(ctx context.Context, contract *Contract) (*Contract, error) {
+	item, err := c.cacher.Add(ctx, contract)
 	if err != nil {
 		return nil, errors.Wrap(err, "add")
 	}
@@ -47,8 +67,8 @@ func AddContract(ctx context.Context, cache *cacher.Cache, c *Contract) (*Contra
 	return item.(*Contract), nil
 }
 
-func GetContract(ctx context.Context, cache *cacher.Cache, id bitcoin.Hash32) (*Contract, error) {
-	item, err := cache.Get(ctx, id)
+func (c *ContractCache) Get(ctx context.Context, lockingScript bitcoin.Script) (*Contract, error) {
+	item, err := c.cacher.Get(ctx, ContractPath(lockingScript))
 	if err != nil {
 		return nil, errors.Wrap(err, "get")
 	}
@@ -60,11 +80,23 @@ func GetContract(ctx context.Context, cache *cacher.Cache, id bitcoin.Hash32) (*
 	return item.(*Contract), nil
 }
 
-func (c *Contract) ID() bitcoin.Hash32 {
+func (c *ContractCache) Release(ctx context.Context, lockingScript bitcoin.Script) {
+	c.cacher.Release(ctx, ContractPath(lockingScript))
+}
+
+func CalculateContractID(lockingScript bitcoin.Script) bitcoin.Hash32 {
+	return bitcoin.Hash32(sha256.Sum256(lockingScript))
+}
+
+func ContractPath(lockingScript bitcoin.Script) string {
+	return fmt.Sprintf("%s/%s", contractPath, bitcoin.Hash32(sha256.Sum256(lockingScript)))
+}
+
+func (c *Contract) Path() string {
 	c.Lock()
 	defer c.Unlock()
 
-	return bitcoin.Hash32(sha256.Sum256(c.LockingScript))
+	return ContractPath(c.LockingScript)
 }
 
 func (c *Contract) Serialize(w io.Writer) error {
