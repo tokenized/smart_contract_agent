@@ -7,6 +7,7 @@ import (
 
 	"github.com/tokenized/pkg/bitcoin"
 	"github.com/tokenized/pkg/logger"
+	"github.com/tokenized/pkg/wire"
 	"github.com/tokenized/smart_contract_agent/internal/state"
 	"github.com/tokenized/specification/dist/golang/actions"
 
@@ -21,6 +22,7 @@ type Agent struct {
 	key bitcoin.Key
 
 	contract     *state.Contract
+	contracts    *state.ContractCache
 	balances     *state.BalanceCache
 	transactions *state.TransactionCache
 
@@ -29,12 +31,24 @@ type Agent struct {
 	lock sync.Mutex
 }
 
-func NewAgent(key bitcoin.Key, contract *state.Contract, balances *state.BalanceCache,
-	transactions *state.TransactionCache) (*Agent, error) {
+type TransactionWithOutputs interface {
+	TxID() bitcoin.Hash32
+
+	InputCount() int
+	Input(index int) *wire.TxIn
+	InputLockingScript(index int) (bitcoin.Script, error)
+
+	OutputCount() int
+	Output(index int) *wire.TxOut
+}
+
+func NewAgent(key bitcoin.Key, contract *state.Contract, contracts *state.ContractCache,
+	balances *state.BalanceCache, transactions *state.TransactionCache) (*Agent, error) {
 
 	result := &Agent{
 		key:          key,
 		contract:     contract,
+		contracts:    contracts,
 		balances:     balances,
 		transactions: transactions,
 	}
@@ -93,15 +107,16 @@ func (a *Agent) ActionIsSupported(action actions.Action) bool {
 	}
 }
 
-func (a *Agent) Process(ctx context.Context, transaction *state.Transaction,
+func (a *Agent) Process(ctx context.Context, transaction TransactionWithOutputs,
 	actions []actions.Action) error {
 	logger.InfoWithFields(ctx, []logger.Field{
-		logger.Stringer("txid", transaction.Tx.TxHash()),
+		logger.Stringer("txid", transaction.TxID()),
 	}, "Processing transaction")
 
 	lockingScript := a.LockingScript()
 
-	for index := range transaction.Tx.TxIn {
+	inputCount := transaction.InputCount()
+	for index := 0; index < inputCount; index++ {
 		inputLockingScript, err := transaction.InputLockingScript(index)
 		if err != nil {
 			return errors.Wrapf(err, "input locking script %d", index)
@@ -116,8 +131,10 @@ func (a *Agent) Process(ctx context.Context, transaction *state.Transaction,
 		}
 	}
 
-	for index, txout := range transaction.Tx.TxOut {
-		if txout.LockingScript.Equal(lockingScript) {
+	outputCount := transaction.OutputCount()
+	for index := 0; index < outputCount; index++ {
+		output := transaction.Output(index)
+		if output.LockingScript.Equal(lockingScript) {
 			for _, action := range actions {
 				if err := a.processRequestAction(ctx, transaction, index, action); err != nil {
 					return errors.Wrap(err, "process response")
@@ -129,7 +146,7 @@ func (a *Agent) Process(ctx context.Context, transaction *state.Transaction,
 	return nil
 }
 
-func (a *Agent) processResponseAction(ctx context.Context, transaction *state.Transaction,
+func (a *Agent) processResponseAction(ctx context.Context, transaction TransactionWithOutputs,
 	index int, action actions.Action) error {
 
 	switch act := action.(type) {
@@ -152,7 +169,7 @@ func (a *Agent) processResponseAction(ctx context.Context, transaction *state.Tr
 		return a.processBallotCounted(ctx, transaction, index, act)
 
 	case *actions.Result:
-		return a.processResult(ctx, transaction, index, act)
+		return a.processGovernanceResult(ctx, transaction, index, act)
 
 	case *actions.Freeze:
 		return a.processFreeze(ctx, transaction, index, act)
@@ -176,8 +193,8 @@ func (a *Agent) processResponseAction(ctx context.Context, transaction *state.Tr
 	return nil
 }
 
-func (a *Agent) processRequestAction(ctx context.Context, transaction *state.Transaction, index int,
-	action actions.Action) error {
+func (a *Agent) processRequestAction(ctx context.Context, transaction TransactionWithOutputs,
+	index int, action actions.Action) error {
 
 	switch act := action.(type) {
 	case *actions.ContractOffer:
@@ -188,6 +205,8 @@ func (a *Agent) processRequestAction(ctx context.Context, transaction *state.Tra
 	case *actions.InstrumentDefinition:
 	case *actions.InstrumentModification:
 	case *actions.Transfer:
+		return a.processTransfer(ctx, transaction, index, act)
+
 	case *actions.Proposal:
 	case *actions.BallotCast:
 	case *actions.Order:

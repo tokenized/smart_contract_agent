@@ -4,11 +4,10 @@ import (
 	"context"
 
 	"github.com/tokenized/pkg/logger"
-	"github.com/tokenized/smart_contract_agent/internal/state"
 	"github.com/tokenized/specification/dist/golang/actions"
 )
 
-func (a *Agent) processIncomingMessage(ctx context.Context, transaction *state.Transaction,
+func (a *Agent) processIncomingMessage(ctx context.Context, transaction TransactionWithOutputs,
 	index int, message *actions.Message) error {
 
 	logger.Info(ctx, "Processing incoming message")
@@ -16,7 +15,7 @@ func (a *Agent) processIncomingMessage(ctx context.Context, transaction *state.T
 	return nil
 }
 
-func (a *Agent) processIncomingRejection(ctx context.Context, transaction *state.Transaction,
+func (a *Agent) processIncomingRejection(ctx context.Context, transaction TransactionWithOutputs,
 	index int, rejection *actions.Rejection) error {
 
 	logger.Info(ctx, "Processing incoming rejection")
@@ -24,7 +23,7 @@ func (a *Agent) processIncomingRejection(ctx context.Context, transaction *state
 	return nil
 }
 
-func (a *Agent) processOutgoingRejection(ctx context.Context, transaction *state.Transaction,
+func (a *Agent) processOutgoingRejection(ctx context.Context, transaction TransactionWithOutputs,
 	index int, rejection *actions.Rejection) error {
 
 	logger.Info(ctx, "Processing outgoing rejection")

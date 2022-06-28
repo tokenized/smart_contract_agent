@@ -4,11 +4,10 @@ import (
 	"context"
 
 	"github.com/tokenized/pkg/logger"
-	"github.com/tokenized/smart_contract_agent/internal/state"
 	"github.com/tokenized/specification/dist/golang/actions"
 )
 
-func (a *Agent) processVote(ctx context.Context, transaction *state.Transaction,
+func (a *Agent) processVote(ctx context.Context, transaction TransactionWithOutputs,
 	index int, vote *actions.Vote) error {
 
 	if index != 0 {
@@ -21,7 +20,7 @@ func (a *Agent) processVote(ctx context.Context, transaction *state.Transaction,
 	return nil
 }
 
-func (a *Agent) processBallotCounted(ctx context.Context, transaction *state.Transaction,
+func (a *Agent) processBallotCounted(ctx context.Context, transaction TransactionWithOutputs,
 	index int, ballotCounted *actions.BallotCounted) error {
 
 	if index != 0 {
@@ -34,7 +33,7 @@ func (a *Agent) processBallotCounted(ctx context.Context, transaction *state.Tra
 	return nil
 }
 
-func (a *Agent) processResult(ctx context.Context, transaction *state.Transaction,
+func (a *Agent) processGovernanceResult(ctx context.Context, transaction TransactionWithOutputs,
 	index int, result *actions.Result) error {
 
 	if index != 0 {

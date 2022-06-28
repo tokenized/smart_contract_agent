@@ -4,11 +4,10 @@ import (
 	"context"
 
 	"github.com/tokenized/pkg/logger"
-	"github.com/tokenized/smart_contract_agent/internal/state"
 	"github.com/tokenized/specification/dist/golang/actions"
 )
 
-func (a *Agent) processFreeze(ctx context.Context, transaction *state.Transaction,
+func (a *Agent) processFreeze(ctx context.Context, transaction TransactionWithOutputs,
 	index int, freeze *actions.Freeze) error {
 
 	if index != 0 {
@@ -21,7 +20,7 @@ func (a *Agent) processFreeze(ctx context.Context, transaction *state.Transactio
 	return nil
 }
 
-func (a *Agent) processThaw(ctx context.Context, transaction *state.Transaction,
+func (a *Agent) processThaw(ctx context.Context, transaction TransactionWithOutputs,
 	index int, thaw *actions.Thaw) error {
 
 	if index != 0 {
@@ -34,7 +33,7 @@ func (a *Agent) processThaw(ctx context.Context, transaction *state.Transaction,
 	return nil
 }
 
-func (a *Agent) processConfiscation(ctx context.Context, transaction *state.Transaction,
+func (a *Agent) processConfiscation(ctx context.Context, transaction TransactionWithOutputs,
 	index int, confiscation *actions.Confiscation) error {
 
 	if index != 0 {
@@ -47,7 +46,7 @@ func (a *Agent) processConfiscation(ctx context.Context, transaction *state.Tran
 	return nil
 }
 
-func (a *Agent) processReconciliation(ctx context.Context, transaction *state.Transaction,
+func (a *Agent) processReconciliation(ctx context.Context, transaction TransactionWithOutputs,
 	index int, reconciliation *actions.Reconciliation) error {
 
 	if index != 0 {

@@ -3,20 +3,9 @@ package firm
 import (
 	"context"
 
-	"github.com/tokenized/pkg/bitcoin"
 	"github.com/tokenized/pkg/logger"
-	"github.com/tokenized/pkg/wire"
 	spynode "github.com/tokenized/spynode/pkg/client"
 )
-
-type TransactionWithOutputs interface {
-	InputCount() int
-	Input(index int) *wire.TxIn
-	InputLockingScript(index int) (bitcoin.Script, error)
-
-	OutputCount() int
-	Output(index int) *wire.TxOut
-}
 
 func (f *Firm) HandleTx(ctx context.Context, spyNodeTx *spynode.Tx) {
 	txid := *spyNodeTx.Tx.TxHash()

@@ -102,7 +102,7 @@ func (f *Firm) GetAgent(ctx context.Context, lockingScript bitcoin.Script) (*age
 		return nil, nil
 	}
 
-	agent, err := agents.NewAgent(key, contract, f.balances, f.transactions)
+	agent, err := agents.NewAgent(key, contract, f.contracts, f.balances, f.transactions)
 	if err != nil {
 		return nil, errors.Wrap(err, "new agent")
 	}

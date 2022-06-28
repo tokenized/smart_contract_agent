@@ -8,6 +8,7 @@ import (
 	"github.com/tokenized/pkg/bitcoin"
 	"github.com/tokenized/pkg/logger"
 	"github.com/tokenized/pkg/merkle_proof"
+	"github.com/tokenized/pkg/wire"
 	"github.com/tokenized/smart_contract_agent/internal/state"
 	"github.com/tokenized/specification/dist/golang/actions"
 	"github.com/tokenized/specification/dist/golang/protocol"
@@ -15,6 +16,17 @@ import (
 
 	"github.com/pkg/errors"
 )
+
+type TransactionWithOutputs interface {
+	TxID() bitcoin.Hash32
+
+	InputCount() int
+	Input(index int) *wire.TxIn
+	InputLockingScript(index int) (bitcoin.Script, error)
+
+	OutputCount() int
+	Output(index int) *wire.TxOut
+}
 
 func (f *Firm) addTx(ctx context.Context, txid bitcoin.Hash32,
 	spyNodeTx *spynode.Tx) (*state.Transaction, error) {
@@ -89,7 +101,7 @@ func (f *Firm) updateTransaction(ctx context.Context, transaction *state.Transac
 	return nil
 }
 
-func (f *Firm) processTransaction(ctx context.Context, transaction *state.Transaction) error {
+func (f *Firm) processTransaction(ctx context.Context, transaction TransactionWithOutputs) error {
 	agentActionsList, err := f.compileTx(ctx, transaction)
 	if err != nil {
 		return errors.Wrap(err, "compile tx")

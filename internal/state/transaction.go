@@ -231,6 +231,10 @@ func TransactionPath(txid bitcoin.Hash32) string {
 	return fmt.Sprintf("%s/%s", txPath, txid)
 }
 
+func (tx *Transaction) TxID() bitcoin.Hash32 {
+	return *tx.Tx.TxHash()
+}
+
 func (tx *Transaction) Path() string {
 	tx.Lock()
 	defer tx.Unlock()
@@ -337,7 +341,7 @@ func (tx Transaction) Output(index int) *wire.TxOut {
 	return tx.Tx.TxOut[index]
 }
 
-func (tx *Transaction) ParseActions(isTest bool) []actions.Action {
+func (tx Transaction) ParseActions(isTest bool) []actions.Action {
 	var result []actions.Action
 	for _, txout := range tx.Tx.TxOut {
 		action, err := protocol.Deserialize(txout.LockingScript, isTest)

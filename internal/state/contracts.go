@@ -29,12 +29,14 @@ type ContractCache struct {
 }
 
 type Contract struct {
-	KeyHash       bitcoin.Hash32             `bsor:"1" json:"key_hash"`
-	LockingScript bitcoin.Script             `bsor:"2" json:"locking_script"`
-	Formation     *actions.ContractFormation `bsor:"3" json:"formation"`
-	FormationTxID bitcoin.Hash32             `bsor:"4" json:"formation_txid"`
+	KeyHash                      bitcoin.Hash32                    `bsor:"1" json:"key_hash"`
+	LockingScript                bitcoin.Script                    `bsor:"2" json:"locking_script"`
+	Formation                    *actions.ContractFormation        `bsor:"3" json:"formation"`
+	FormationTxID                *bitcoin.Hash32                   `bsor:"4" json:"formation_txid"`
+	BodyOfAgreementFormation     *actions.BodyOfAgreementFormation `bsor:"5" json:"body_of_agreement_formation"`
+	BodyOfAgreementFormationTxID *bitcoin.Hash32                   `bsor:"6" json:"body_of_agreement_formation_txid"`
 
-	Instruments []*Instrument `bsor:"5" json:"instruments"`
+	Instruments []*Instrument `bsor:"7" json:"instruments"`
 
 	sync.Mutex `bsor:"-"`
 }
@@ -45,7 +47,6 @@ type ContractLookup struct {
 }
 
 type ContractID bitcoin.Hash32
-type InstrumentCode bitcoin.Hash20
 
 func NewContractCache(store storage.StreamStorage, fetcherCount, expireCount int,
 	expiration, fetchTimeout time.Duration) (*ContractCache, error) {
@@ -133,7 +134,7 @@ func CalculateContractID(lockingScript bitcoin.Script) ContractID {
 }
 
 func ContractPath(lockingScript bitcoin.Script) string {
-	return fmt.Sprintf("%s/%s", contractPath, bitcoin.Hash32(sha256.Sum256(lockingScript)))
+	return fmt.Sprintf("%s/%s", contractPath, CalculateContractID(lockingScript))
 }
 
 func (c *Contract) Path() string {
