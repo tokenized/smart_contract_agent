@@ -108,7 +108,9 @@ func (c *Cache) Save(ctx context.Context, value CacheValue) error {
 }
 
 // Add adds an item if it isn't in the cache or storage yet. If it is already in the cache or
-// storage then it returns the existing item and ignores the item parameter.
+// storage then it returns the existing item and ignores the item parameter. This must be done this
+// way so that there is a lock across checking if the item already exists and adding the item.
+// Otherwise there can be conflicts in adding the item from multiple threads.
 func (c *Cache) Add(ctx context.Context, value CacheValue) (CacheValue, error) {
 	path := value.Path()
 
@@ -141,6 +143,48 @@ func (c *Cache) Add(ctx context.Context, value CacheValue) (CacheValue, error) {
 	}
 
 	return value, nil
+}
+
+func (c *Cache) AddMulti(ctx context.Context, values []CacheValue) ([]CacheValue, error) {
+	paths := make([]string, len(values))
+	for i, value := range values {
+		paths[i] = value.Path()
+	}
+
+	// TODO This might be slow to add items since it requires a hit to storage to ensure it isn't
+	// already there. But that might be unavoidable. --ce
+	c.itemsAddLock.Lock()
+	defer c.itemsAddLock.Unlock()
+
+	gotItems, err := c.GetMulti(ctx, paths)
+	if err != nil {
+		return nil, errors.Wrap(err, "get")
+	}
+
+	result := make([]CacheValue, len(values))
+	for i, gotItem := range gotItems {
+		if gotItem != nil {
+			result[i] = gotItem // already had item
+			continue
+		}
+
+		newItem := &CacheItem{
+			value:    values[i],
+			users:    1,
+			lastUsed: time.Now(),
+		}
+		result[i] = values[i]
+
+		c.itemsLock.Lock()
+		c.items[paths[i]] = newItem
+		c.itemsLock.Unlock()
+
+		if err := c.Save(ctx, values[i]); err != nil {
+			return nil, errors.Wrap(err, "save")
+		}
+	}
+
+	return result, nil
 }
 
 // Get gets an item from the cache and if it isn't in the cache it attempts to read it from storage.
@@ -180,6 +224,69 @@ func (c *Cache) Get(ctx context.Context, path string) (CacheValue, error) {
 	case <-time.After(timeout):
 		return nil, errors.Wrapf(ErrTimedOut, "%s", timeout)
 	}
+}
+
+func (c *Cache) GetMulti(ctx context.Context, paths []string) ([]CacheValue, error) {
+	result := make([]CacheValue, len(paths))
+
+	c.itemsLock.Lock()
+	foundAll := true
+	for i, path := range paths {
+		item, exists := c.items[path]
+		if exists {
+			item.addUser()
+			result[i] = item.value
+		} else {
+			foundAll = false
+		}
+	}
+	c.itemsLock.Unlock()
+
+	if foundAll {
+		return result, nil
+	}
+
+	// Create all requests
+	responses := make([]<-chan interface{}, len(result))
+	for i, value := range result {
+		if value != nil {
+			continue // already have this value
+		}
+		response, err := c.createRequest(ctx, paths[i])
+		if err != nil {
+			return nil, errors.Wrap(err, "request")
+		}
+		responses[i] = response
+	}
+
+	// Wait for the item to be retrieved.
+	timeout := c.FetchTimeout()
+	for i, response := range responses {
+		if response == nil {
+			continue // already have this value
+		}
+
+		select {
+		case r := <-response:
+			if r == nil {
+				result[i] = nil
+				continue
+			}
+
+			if item, ok := r.(*CacheItem); ok {
+				item.addUser()
+				result[i] = item.value
+				continue
+			}
+
+			return nil, r.(error)
+
+		case <-time.After(timeout):
+			return nil, errors.Wrapf(ErrTimedOut, "%s", timeout)
+		}
+	}
+
+	return result, nil
 }
 
 // Release notifies the cache that the item is no longer being used and can be expired. When there

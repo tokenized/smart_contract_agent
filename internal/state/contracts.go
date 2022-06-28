@@ -1,6 +1,7 @@
 package state
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/binary"
@@ -135,6 +136,16 @@ func CalculateContractID(lockingScript bitcoin.Script) ContractID {
 
 func ContractPath(lockingScript bitcoin.Script) string {
 	return fmt.Sprintf("%s/%s", contractPath, CalculateContractID(lockingScript))
+}
+
+func (c *Contract) GetInstrument(instrumentCode InstrumentCode) *Instrument {
+	for _, instrument := range c.Instruments {
+		if bytes.Equal(instrument.InstrumentCode[:], instrumentCode[:]) {
+			return instrument
+		}
+	}
+
+	return nil
 }
 
 func (c *Contract) Path() string {
