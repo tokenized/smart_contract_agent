@@ -113,10 +113,10 @@ func (c *BalanceCache) Add(ctx context.Context, contractLockingScript bitcoin.Sc
 	return balance, nil
 }
 
-func (c *BalanceCache) Get(ctx context.Context, contractScript bitcoin.Script,
-	instrumentCode bitcoin.Hash20, lockingScript bitcoin.Script) (*Balance, error) {
+func (c *BalanceCache) Get(ctx context.Context, contractLockingScript bitcoin.Script,
+	instrumentCode InstrumentCode, lockingScript bitcoin.Script) (*Balance, error) {
 
-	hash, path := balanceSetPath(contractScript, instrumentCode, lockingScript)
+	hash, path := balanceSetPath(contractLockingScript, instrumentCode, lockingScript)
 	item, err := c.cacher.Get(ctx, path)
 	if err != nil {
 		return nil, errors.Wrap(err, "get")
@@ -138,9 +138,25 @@ func (c *BalanceCache) Get(ctx context.Context, contractScript bitcoin.Script,
 	return result, nil
 }
 
-func (c *BalanceCache) Release(ctx context.Context, contractScript bitcoin.Script,
-	instrumentCode bitcoin.Hash20, lockingScript bitcoin.Script) {
-	_, path := balanceSetPath(contractScript, instrumentCode, lockingScript)
+func (c *BalanceCache) Save(ctx context.Context, contractLockingScript bitcoin.Script,
+	instrumentCode InstrumentCode, balance *Balance) error {
+
+	_, path := balanceSetPath(contractLockingScript, instrumentCode, balance.LockingScript)
+	item, err := c.cacher.Get(ctx, path)
+	if err != nil {
+		return errors.Wrap(err, "get")
+	}
+	if item == nil {
+		return fmt.Errorf("Not found to save: %s", path)
+	}
+	defer c.cacher.Release(ctx, path)
+
+	return c.cacher.Save(ctx, item)
+}
+
+func (c *BalanceCache) Release(ctx context.Context, contractLockingScript bitcoin.Script,
+	instrumentCode InstrumentCode, lockingScript bitcoin.Script) {
+	_, path := balanceSetPath(contractLockingScript, instrumentCode, lockingScript)
 	c.cacher.Release(ctx, path)
 }
 
@@ -151,10 +167,10 @@ func balanceSetPathID(lockingScript bitcoin.Script) (bitcoin.Hash32, [2]byte) {
 	return bitcoin.Hash32(hash), firstTwoBytes
 }
 
-func balanceSetPath(contractScript bitcoin.Script, instrumentCode bitcoin.Hash20,
+func balanceSetPath(contractLockingScript bitcoin.Script, instrumentCode InstrumentCode,
 	lockingScript bitcoin.Script) (bitcoin.Hash32, string) {
 	hash, pathID := balanceSetPathID(lockingScript)
-	return hash, fmt.Sprintf("%s/%s/%s/%x", balancePath, CalculateContractID(contractScript),
+	return hash, fmt.Sprintf("%s/%s/%s/%x", balancePath, CalculateContractID(contractLockingScript),
 		instrumentCode, pathID)
 }
 

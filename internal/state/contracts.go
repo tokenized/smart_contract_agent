@@ -14,6 +14,7 @@ import (
 	"github.com/tokenized/pkg/bsor"
 	"github.com/tokenized/pkg/storage"
 	"github.com/tokenized/smart_contract_agent/internal/cacher"
+	"github.com/tokenized/specification/dist/golang/actions"
 
 	"github.com/pkg/errors"
 )
@@ -28,13 +29,19 @@ type ContractCache struct {
 }
 
 type Contract struct {
-	LockingScript bitcoin.Script `bsor:"1" json:"locking_script"`
-	FormationTxID bitcoin.Hash32 `bsor:"2" json:"formation_txid"`
-	KeyHash       bitcoin.Hash32 `bsor:"3" json:"key_hash"`
+	KeyHash       bitcoin.Hash32             `bsor:"1" json:"key_hash"`
+	LockingScript bitcoin.Script             `bsor:"2" json:"locking_script"`
+	Formation     *actions.ContractFormation `bsor:"3" json:"formation"`
+	FormationTxID bitcoin.Hash32             `bsor:"4" json:"formation_txid"`
 
-	Instruments []*Instrument `bsor:"4" json:"instruments"`
+	Instruments []*Instrument `bsor:"5" json:"instruments"`
 
 	sync.Mutex `bsor:"-"`
+}
+
+type ContractLookup struct {
+	KeyHash       bitcoin.Hash32 `json:"key_hash"`
+	LockingScript bitcoin.Script `json:"locking_script"`
 }
 
 type ContractID bitcoin.Hash32
@@ -52,6 +59,39 @@ func NewContractCache(store storage.StreamStorage, fetcherCount, expireCount int
 	return &ContractCache{
 		cacher: cacher,
 	}, nil
+}
+
+func (c *ContractCache) List(ctx context.Context,
+	store storage.StreamStorage) ([]*ContractLookup, error) {
+
+	paths, err := store.List(ctx, contractPath)
+	if err != nil {
+		return nil, errors.Wrap(err, "list")
+	}
+
+	var result []*ContractLookup
+	for _, path := range paths {
+		item, err := c.cacher.Get(ctx, path)
+		if err != nil {
+			return nil, errors.Wrap(err, "get")
+		}
+
+		if item == nil {
+			return nil, fmt.Errorf("Not found: %s", path)
+		}
+
+		contract := item.(*Contract)
+		contract.Lock()
+		result = append(result, &ContractLookup{
+			KeyHash:       contract.KeyHash,
+			LockingScript: contract.LockingScript,
+		})
+		contract.Unlock()
+
+		c.cacher.Release(ctx, path)
+	}
+
+	return result, nil
 }
 
 func (c *ContractCache) Run(ctx context.Context, interrupt <-chan interface{}) error {
@@ -80,12 +120,16 @@ func (c *ContractCache) Get(ctx context.Context, lockingScript bitcoin.Script) (
 	return item.(*Contract), nil
 }
 
+func (c *ContractCache) Save(ctx context.Context, contract *Contract) error {
+	return c.cacher.Save(ctx, contract)
+}
+
 func (c *ContractCache) Release(ctx context.Context, lockingScript bitcoin.Script) {
 	c.cacher.Release(ctx, ContractPath(lockingScript))
 }
 
-func CalculateContractID(lockingScript bitcoin.Script) bitcoin.Hash32 {
-	return bitcoin.Hash32(sha256.Sum256(lockingScript))
+func CalculateContractID(lockingScript bitcoin.Script) ContractID {
+	return ContractID(sha256.Sum256(lockingScript))
 }
 
 func ContractPath(lockingScript bitcoin.Script) string {

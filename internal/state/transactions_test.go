@@ -53,7 +53,7 @@ func Test_FetchTxs(t *testing.T) {
 
 		txids = append(txids, *tx.TxHash())
 
-		if _, err := cache.Add(ctx, tx, nil); err != nil {
+		if _, err := cache.AddRaw(ctx, tx, nil); err != nil {
 			t.Fatalf("Failed to add tx : %s", err)
 		}
 		cache.Release(ctx, *tx.TxHash())

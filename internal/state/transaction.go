@@ -17,6 +17,8 @@ import (
 	"github.com/tokenized/pkg/storage"
 	"github.com/tokenized/pkg/wire"
 	"github.com/tokenized/smart_contract_agent/internal/cacher"
+	"github.com/tokenized/specification/dist/golang/actions"
+	"github.com/tokenized/specification/dist/golang/protocol"
 
 	"github.com/pkg/errors"
 )
@@ -34,6 +36,9 @@ type Transaction struct {
 	Tx           *wire.MsgTx                 `bsor:"1" json:"tx"`
 	State        wallet.TxState              `bsor:"2" json:"safe,omitempty"`
 	MerkleProofs []*merkle_proof.MerkleProof `bsor:"3" json:"merkle_proofs,omitempty"`
+	Outputs      []*wire.TxOut               `bsor:"4" json:"outputs,omitempty"` // outputs being spent by inputs in Tx
+
+	IsProcessed bool `bsor:"5" json:"is_processed"`
 
 	Ancestors channels.AncestorTxs `bsor:"-" json:"ancestors,omitempty"`
 
@@ -58,19 +63,28 @@ func (c *TransactionCache) Run(ctx context.Context, interrupt <-chan interface{}
 	return c.cacher.Run(ctx, interrupt)
 }
 
+func (c *TransactionCache) Add(ctx context.Context, tx *Transaction) (*Transaction, error) {
+	item, err := c.cacher.Add(ctx, tx)
+	if err != nil {
+		return nil, errors.Wrap(err, "add")
+	}
+
+	return item.(*Transaction), nil
+}
+
 func (c *TransactionCache) AddExpandedTx(ctx context.Context,
 	etx *channels.ExpandedTx) (*Transaction, error) {
 
 	for _, atx := range etx.Ancestors {
 		atxid := *atx.Tx.TxHash()
-		if _, err := c.Add(ctx, atx.Tx, atx.MerkleProofs); err != nil {
+		if _, err := c.AddRaw(ctx, atx.Tx, atx.MerkleProofs); err != nil {
 			return nil, errors.Wrapf(err, "ancestor: %s", atxid)
 		}
 		c.Release(ctx, atxid)
 	}
 
 	txid := *etx.Tx.TxHash()
-	tx, err := c.Add(ctx, etx.Tx, nil)
+	tx, err := c.AddRaw(ctx, etx.Tx, nil)
 	if err != nil {
 		return nil, errors.Wrapf(err, "add: %s", txid)
 	}
@@ -79,7 +93,7 @@ func (c *TransactionCache) AddExpandedTx(ctx context.Context,
 	return tx, nil
 }
 
-func (c *TransactionCache) Add(ctx context.Context, tx *wire.MsgTx,
+func (c *TransactionCache) AddRaw(ctx context.Context, tx *wire.MsgTx,
 	merkleProofs []*merkle_proof.MerkleProof) (*Transaction, error) {
 
 	txid := *tx.TxHash()
@@ -205,6 +219,10 @@ func (c *TransactionCache) Get(ctx context.Context, txid bitcoin.Hash32) (*Trans
 	return item.(*Transaction), nil
 }
 
+func (c *TransactionCache) Save(ctx context.Context, transaction *Transaction) error {
+	return c.cacher.Save(ctx, transaction)
+}
+
 func (c *TransactionCache) Release(ctx context.Context, txid bitcoin.Hash32) {
 	c.cacher.Release(ctx, TransactionPath(txid))
 }
@@ -271,4 +289,64 @@ func (tx *Transaction) Deserialize(r io.Reader) error {
 	}
 
 	return nil
+}
+
+func (tx Transaction) InputCount() int {
+	return len(tx.Tx.TxIn)
+}
+
+func (tx Transaction) Input(index int) *wire.TxIn {
+	return tx.Tx.TxIn[index]
+}
+
+func (tx Transaction) InputLockingScript(index int) (bitcoin.Script, error) {
+	if index >= len(tx.Tx.TxIn) {
+		return nil, errors.New("Index out of range")
+	}
+
+	if index < len(tx.Outputs) {
+		return tx.Outputs[index].LockingScript, nil
+	}
+
+	txin := tx.Tx.TxIn[index]
+
+	parentTx := tx.Ancestors.GetTx(txin.PreviousOutPoint.Hash)
+	if parentTx == nil {
+		return nil, errors.Wrap(channels.MissingInput,
+			"parent:"+txin.PreviousOutPoint.Hash.String())
+	}
+
+	ptx := parentTx.GetTx()
+	if ptx == nil {
+		return nil, errors.Wrap(channels.MissingInput,
+			"parent tx:"+txin.PreviousOutPoint.Hash.String())
+	}
+
+	if txin.PreviousOutPoint.Index >= uint32(len(ptx.TxOut)) {
+		return nil, errors.Wrap(channels.MissingInput, txin.PreviousOutPoint.String())
+	}
+
+	return ptx.TxOut[txin.PreviousOutPoint.Index].LockingScript, nil
+}
+
+func (tx Transaction) OutputCount() int {
+	return len(tx.Tx.TxOut)
+}
+
+func (tx Transaction) Output(index int) *wire.TxOut {
+	return tx.Tx.TxOut[index]
+}
+
+func (tx *Transaction) ParseActions(isTest bool) []actions.Action {
+	var result []actions.Action
+	for _, txout := range tx.Tx.TxOut {
+		action, err := protocol.Deserialize(txout.LockingScript, isTest)
+		if err != nil {
+			continue
+		}
+
+		result = append(result, action)
+	}
+
+	return result
 }
