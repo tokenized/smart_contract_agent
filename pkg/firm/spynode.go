@@ -50,8 +50,9 @@ func (f *Firm) HandleTxUpdate(ctx context.Context, txUpdate *spynode.TxUpdate) {
 				logger.Error(ctx, "Failed to save tx : %s", err)
 				return
 			}
+		} else {
+			transaction.Unlock()
 		}
-		transaction.Unlock()
 	}
 
 	if err := f.updateTransaction(ctx, transaction); err != nil {
@@ -73,24 +74,14 @@ func (f *Firm) HandleMessage(ctx context.Context, payload spynode.MessagePayload
 	case *spynode.AcceptRegister:
 		logger.Info(ctx, "Spynode registration accepted")
 
-		if err := f.spyNodeClient.Ready(ctx, msg.MessageCount); err != nil {
+		nextMessageID := f.NextSpyNodeMessageID()
+		if err := f.spyNodeClient.Ready(ctx, nextMessageID); err != nil {
 			logger.Error(ctx, "Failed to notify spynode ready : %s", err)
 		}
 
-		// if s.nextSpyNodeMessageID == 0 || s.nextSpyNodeMessageID > msg.MessageCount {
-		// 	logger.WarnWithFields(ctx, []logger.Field{
-		// 		logger.Uint64("next_message_id", s.nextSpyNodeMessageID),
-		// 		logger.Uint64("message_count", msg.MessageCount),
-		// 	}, "Resetting next message id")
-		// 	s.nextSpyNodeMessageID = 1 // first message is 1
-		// }
-
-		// if err := f.spyNodeClient.Ready(ctx, s.nextSpyNodeMessageID); err != nil {
-		// 	logger.Error(ctx, "Failed to notify spynode ready : %s", err)
-		// }
-
 		logger.InfoWithFields(ctx, []logger.Field{
-			logger.Uint64("next_message_id", msg.MessageCount+1),
+			logger.Uint64("next_message", nextMessageID),
+			logger.Uint64("message_count", msg.MessageCount),
 		}, "Spynode client ready")
 	}
 }

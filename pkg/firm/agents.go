@@ -38,6 +38,7 @@ func (f *Firm) addAgentAction(ctx context.Context, agentActionsList *AgentAction
 		return nil
 	}
 
+	print("found agent ", agentLockingScript.String(), "\n")
 	*agentActionsList = append(*agentActionsList, &AgentActions{
 		agent:   agent,
 		actions: []actions.Action{action},

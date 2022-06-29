@@ -207,3 +207,21 @@ func (c *Contract) Deserialize(r io.Reader) error {
 
 	return nil
 }
+
+func (id ContractID) String() string {
+	return bitcoin.Hash32(id).String()
+}
+
+func (id ContractID) MarshalText() ([]byte, error) {
+	return []byte(id.String()), nil
+}
+
+func (id *ContractID) UnmarshalText(text []byte) error {
+	h, err := bitcoin.NewHash32FromStr(string(text))
+	if err != nil {
+		return err
+	}
+
+	*id = ContractID(*h)
+	return nil
+}

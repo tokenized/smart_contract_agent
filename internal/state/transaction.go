@@ -137,9 +137,6 @@ func (tx *Transaction) AddMerkleProof(merkleProof *merkle_proof.MerkleProof) boo
 		return false
 	}
 
-	tx.Lock()
-	defer tx.Unlock()
-
 	for _, mp := range tx.MerkleProofs {
 		bh := mp.GetBlockHash()
 		if bh == nil {

@@ -77,6 +77,7 @@ func (f *Firm) updateTransaction(ctx context.Context, transaction *state.Transac
 	transaction.Lock()
 	if !transaction.IsProcessed && transaction.State&wallet.TxStateSafe != 0 {
 		if err := f.processTransaction(ctx, transaction); err != nil {
+			transaction.Unlock()
 			return errors.Wrap(err, "process")
 		}
 

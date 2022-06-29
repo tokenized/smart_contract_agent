@@ -21,3 +21,21 @@ type Instrument struct {
 
 	sync.Mutex `bsor:"-"`
 }
+
+func (id InstrumentCode) String() string {
+	return bitcoin.Hash20(id).String()
+}
+
+func (id InstrumentCode) MarshalText() ([]byte, error) {
+	return []byte(id.String()), nil
+}
+
+func (id *InstrumentCode) UnmarshalText(text []byte) error {
+	h, err := bitcoin.NewHash20FromStr(string(text))
+	if err != nil {
+		return err
+	}
+
+	*id = InstrumentCode(*h)
+	return nil
+}

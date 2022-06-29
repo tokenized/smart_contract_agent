@@ -12,6 +12,7 @@ import (
 	"github.com/tokenized/pkg/bitcoin"
 	"github.com/tokenized/pkg/logger"
 	"github.com/tokenized/pkg/storage"
+	"github.com/tokenized/pkg/threads"
 	"github.com/tokenized/smart_contract_agent/internal/state"
 	"github.com/tokenized/smart_contract_agent/pkg/firm"
 	spyNodeClient "github.com/tokenized/spynode/pkg/client"
@@ -29,8 +30,8 @@ type Config struct {
 	IsTest bool `default:"true" envconfig:"IS_TEST" json:"is_test"`
 
 	CacheFetcherCount int             `default:"10" envconfig:"CACHE_FETCHER_COUNT" json:"cache_fetcher_count"`
-	CacheExpireCount  int             `default:"1000" envconfig:"CACHE_EXPIRE_COUNT" json:"cache_expire_count"`
-	CacheExpiration   config.Duration `default:"20s" envconfig:"CACHE_EXPIRATION" json:"cache_expiration"`
+	CacheExpireCount  int             `default:"10000" envconfig:"CACHE_EXPIRE_COUNT" json:"cache_expire_count"`
+	CacheExpiration   config.Duration `default:"3s" envconfig:"CACHE_EXPIRATION" json:"cache_expiration"`
 	CacheFetchTimeout config.Duration `default:"1m" envconfig:"CACHE_FETCH_TIMEOUT" json:"cache_fetch_timeout"`
 
 	Wallet  wallet.Config        `json:"wallet"`
@@ -102,13 +103,33 @@ func main() {
 	spyNodeClient.RegisterHandler(firm)
 
 	var wait sync.WaitGroup
+	var stopper threads.StopCombiner
 
 	spynodeErrors := make(chan error, 10)
 	spyNodeClient.SetListenerErrorChannel(&spynodeErrors)
 
+	contractsThread := threads.NewThread("Contracts", contracts.Run)
+	contractsThread.SetWait(&wait)
+	contractsComplete := contractsThread.GetCompleteChannel()
+	stopper.Add(contractsThread)
+
+	balancesThread := threads.NewThread("Balances", balances.Run)
+	balancesThread.SetWait(&wait)
+	balancesComplete := balancesThread.GetCompleteChannel()
+	stopper.Add(balancesThread)
+
+	transactionsThread := threads.NewThread("Transactions", transactions.Run)
+	transactionsThread.SetWait(&wait)
+	transactionsComplete := transactionsThread.GetCompleteChannel()
+	stopper.Add(transactionsThread)
+
 	if err := spyNodeClient.Connect(ctx); err != nil {
 		logger.Fatal(ctx, "main : Failed to connect to spynode : %s", err)
 	}
+
+	contractsThread.Start(ctx)
+	balancesThread.Start(ctx)
+	transactionsThread.Start(ctx)
 
 	// Shutdown
 	//
@@ -122,13 +143,30 @@ func main() {
 	// Blocking main and waiting for shutdown.
 	select {
 	case err := <-spynodeErrors:
-		logger.Error(ctx, "Spynode failed : %s", err)
+		logger.Error(ctx, "main : Spynode failed : %s", err)
+
+	case <-contractsComplete:
+		logger.Error(ctx, "main : Contracts thread completed : %s", contractsThread.Error())
+
+	case <-balancesComplete:
+		logger.Error(ctx, "main : Balances thread completed : %s", balancesThread.Error())
+
+	case <-transactionsComplete:
+		logger.Error(ctx, "main : Transactions thread completed : %s", transactionsThread.Error())
 
 	case <-osSignals:
 		logger.Info(ctx, "main : Start shutdown...")
 	}
 
 	spyNodeClient.Close(ctx) // This waits for spynode to finish
+	print("spynode finished\n")
+	stopper.Stop(ctx)
 
 	wait.Wait()
+
+	print("saving firm\n")
+	if err := firm.Save(ctx, store); err != nil {
+		logger.Error(ctx, "main : Failed to save firm : %s", err)
+	}
+	print("complete\n")
 }
