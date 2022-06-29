@@ -113,111 +113,80 @@ func (a *Agent) Process(ctx context.Context, transaction TransactionWithOutputs,
 		logger.Stringer("txid", transaction.TxID()),
 	}, "Processing transaction")
 
-	lockingScript := a.LockingScript()
-
-	inputCount := transaction.InputCount()
-	for index := 0; index < inputCount; index++ {
-		inputLockingScript, err := transaction.InputLockingScript(index)
-		if err != nil {
-			return errors.Wrapf(err, "input locking script %d", index)
-		}
-
-		if inputLockingScript.Equal(lockingScript) {
-			for _, action := range actions {
-				if err := a.processResponseAction(ctx, transaction, index, action); err != nil {
-					return errors.Wrap(err, "process response")
-				}
-			}
-		}
-	}
-
-	outputCount := transaction.OutputCount()
-	for index := 0; index < outputCount; index++ {
-		output := transaction.Output(index)
-		if output.LockingScript.Equal(lockingScript) {
-			for _, action := range actions {
-				if err := a.processRequestAction(ctx, transaction, index, action); err != nil {
-					return errors.Wrap(err, "process response")
-				}
-			}
+	for _, action := range actions {
+		if err := a.processAction(ctx, transaction, action); err != nil {
+			return errors.Wrap(err, "process action")
 		}
 	}
 
 	return nil
 }
 
-func (a *Agent) processResponseAction(ctx context.Context, transaction TransactionWithOutputs,
-	index int, action actions.Action) error {
-
-	switch act := action.(type) {
-	case *actions.ContractFormation:
-		return a.processContractFormation(ctx, transaction, index, act)
-
-	case *actions.BodyOfAgreementFormation:
-		return a.processBodyOfAgreementFormation(ctx, transaction, index, act)
-
-	case *actions.InstrumentCreation:
-		return a.processInstrumentCreation(ctx, transaction, index, act)
-
-	case *actions.Settlement:
-		return a.processSettlement(ctx, transaction, index, act)
-
-	case *actions.Vote:
-		return a.processVote(ctx, transaction, index, act)
-
-	case *actions.BallotCounted:
-		return a.processBallotCounted(ctx, transaction, index, act)
-
-	case *actions.Result:
-		return a.processGovernanceResult(ctx, transaction, index, act)
-
-	case *actions.Freeze:
-		return a.processFreeze(ctx, transaction, index, act)
-
-	case *actions.Thaw:
-		return a.processThaw(ctx, transaction, index, act)
-
-	case *actions.Confiscation:
-		return a.processConfiscation(ctx, transaction, index, act)
-
-	case *actions.Reconciliation:
-		return a.processReconciliation(ctx, transaction, index, act)
-
-	case *actions.Rejection:
-		return a.processOutgoingRejection(ctx, transaction, index, act)
-
-	default:
-		return fmt.Errorf("Action not supported: %s", action.Code())
-	}
-
-	return nil
-}
-
-func (a *Agent) processRequestAction(ctx context.Context, transaction TransactionWithOutputs,
-	index int, action actions.Action) error {
+func (a *Agent) processAction(ctx context.Context, transaction TransactionWithOutputs,
+	action actions.Action) error {
 
 	switch act := action.(type) {
 	case *actions.ContractOffer:
 	case *actions.ContractAmendment:
+
+	case *actions.ContractFormation:
+		return a.processContractFormation(ctx, transaction, act)
+
 	case *actions.ContractAddressChange:
+
 	case *actions.BodyOfAgreementOffer:
 	case *actions.BodyOfAgreementAmendment:
+
+	case *actions.BodyOfAgreementFormation:
+		return a.processBodyOfAgreementFormation(ctx, transaction, act)
+
 	case *actions.InstrumentDefinition:
 	case *actions.InstrumentModification:
+
+	case *actions.InstrumentCreation:
+		return a.processInstrumentCreation(ctx, transaction, act)
+
 	case *actions.Transfer:
-		return a.processTransfer(ctx, transaction, index, act)
+		return a.processTransfer(ctx, transaction, act)
+
+	case *actions.Settlement:
+		return a.processSettlement(ctx, transaction, act)
 
 	case *actions.Proposal:
+
+	case *actions.Vote:
+		return a.processVote(ctx, transaction, act)
+
 	case *actions.BallotCast:
+
+	case *actions.BallotCounted:
+		return a.processBallotCounted(ctx, transaction, act)
+
+	case *actions.Result:
+		return a.processGovernanceResult(ctx, transaction, act)
+
 	case *actions.Order:
+
+	case *actions.Freeze:
+		return a.processFreeze(ctx, transaction, act)
+
+	case *actions.Thaw:
+		return a.processThaw(ctx, transaction, act)
+
+	case *actions.Confiscation:
+		return a.processConfiscation(ctx, transaction, act)
+
+	case *actions.Reconciliation:
+		return a.processReconciliation(ctx, transaction, act)
+
 	case *actions.Message:
-		return a.processIncomingMessage(ctx, transaction, index, act)
+		return a.processMessage(ctx, transaction, act)
 
 	case *actions.Rejection:
-		return a.processIncomingRejection(ctx, transaction, index, act)
+		return a.processRejection(ctx, transaction, act)
 
 	default:
-		return fmt.Errorf("Action %s not supported", action.Code())
+		return fmt.Errorf("Action not supported: %s", action.Code())
 	}
 
 	return nil

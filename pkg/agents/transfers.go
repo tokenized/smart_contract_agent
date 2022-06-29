@@ -12,7 +12,27 @@ import (
 )
 
 func (a *Agent) processTransfer(ctx context.Context, transaction TransactionWithOutputs,
-	index int, transfer *actions.Transfer) error {
+	transfer *actions.Transfer) error {
+
+	// Verify appropriate output belongs to this contract.
+	found := false
+	agentLockingScript := a.LockingScript()
+	for _, instrument := range transfer.Instruments {
+		if int(instrument.ContractIndex) >= transaction.OutputCount() {
+			logger.Error(ctx, "Invalid transfer contract index: %d >= %d", instrument.ContractIndex,
+				transaction.OutputCount())
+			return nil
+		}
+
+		contractOutput := transaction.Output(int(instrument.ContractIndex))
+		if agentLockingScript.Equal(contractOutput.LockingScript) {
+			found = true
+		}
+	}
+
+	if !found {
+		return nil // Not for this contract
+	}
 
 	logger.Info(ctx, "Processing transfer")
 
@@ -20,23 +40,27 @@ func (a *Agent) processTransfer(ctx context.Context, transaction TransactionWith
 }
 
 func (a *Agent) processSettlement(ctx context.Context, transaction TransactionWithOutputs,
-	index int, settlement *actions.Settlement) error {
+	settlement *actions.Settlement) error {
 	txid := transaction.TxID()
 
 	logger.Info(ctx, "Processing settlement")
 
-	contractLockingScript := a.LockingScript()
+	agentLockingScript := a.LockingScript()
 
 	// Update one instrument at a time.
 	for _, instrument := range settlement.Instruments {
-		contractLS, err := transaction.InputLockingScript(int(instrument.ContractIndex))
-		if err != nil {
-			logger.Error(ctx, "Invalid settlement contract index: %d: %s", instrument.ContractIndex,
-				err)
+		if int(instrument.ContractIndex) >= transaction.InputCount() {
+			logger.Error(ctx, "Invalid settlement contract index: %d >= %d",
+				instrument.ContractIndex, transaction.InputCount())
 			return nil
 		}
 
-		if !contractLS.Equal(contractLockingScript) {
+		contractLockingScript, err := transaction.InputLockingScript(int(instrument.ContractIndex))
+		if err != nil {
+			return errors.Wrap(err, "input locking script")
+		}
+
+		if !contractLockingScript.Equal(agentLockingScript) {
 			continue
 		}
 
@@ -70,12 +94,12 @@ func (a *Agent) processSettlement(ctx context.Context, transaction TransactionWi
 		}
 
 		// Add the balances to the cache.
-		addedBalances, err := a.balances.AddMulti(ctx, contractLockingScript, instrumentCode,
+		addedBalances, err := a.balances.AddMulti(ctx, agentLockingScript, instrumentCode,
 			balances)
 		if err != nil {
 			return errors.Wrap(err, "get balances")
 		}
-		defer a.balances.ReleaseMulti(ctx, contractLockingScript, instrumentCode, addedBalances)
+		defer a.balances.ReleaseMulti(ctx, agentLockingScript, instrumentCode, addedBalances)
 
 		// Update any balances that weren't new and therefore weren't updated by the "add".
 		for i, balance := range balances {
@@ -99,7 +123,7 @@ func (a *Agent) processSettlement(ctx context.Context, transaction TransactionWi
 				addedBalances[i].TxID = &txid
 				addedBalances[i].Unlock()
 
-				if err := a.balances.Save(ctx, contractLockingScript, instrumentCode,
+				if err := a.balances.Save(ctx, agentLockingScript, instrumentCode,
 					addedBalances[i]); err != nil {
 					return errors.Wrap(err, "save balance")
 				}

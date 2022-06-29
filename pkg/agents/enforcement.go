@@ -3,16 +3,23 @@ package agents
 import (
 	"context"
 
+	"github.com/pkg/errors"
 	"github.com/tokenized/pkg/logger"
 	"github.com/tokenized/specification/dist/golang/actions"
 )
 
 func (a *Agent) processFreeze(ctx context.Context, transaction TransactionWithOutputs,
-	index int, freeze *actions.Freeze) error {
+	freeze *actions.Freeze) error {
 
-	if index != 0 {
-		logger.Warn(ctx, "Freeze not from input zero: %d", index)
-		return nil
+	// First input must be the agent's locking script
+	inputLockingScript, err := transaction.InputLockingScript(0)
+	if err != nil {
+		return errors.Wrapf(err, "input locking script %d", 0)
+	}
+
+	agentLockingScript := a.LockingScript()
+	if !agentLockingScript.Equal(inputLockingScript) {
+		return nil // Not for this agent's contract
 	}
 
 	logger.Info(ctx, "Processing freeze")
@@ -21,11 +28,17 @@ func (a *Agent) processFreeze(ctx context.Context, transaction TransactionWithOu
 }
 
 func (a *Agent) processThaw(ctx context.Context, transaction TransactionWithOutputs,
-	index int, thaw *actions.Thaw) error {
+	thaw *actions.Thaw) error {
 
-	if index != 0 {
-		logger.Warn(ctx, "Thaw not from input zero: %d", index)
-		return nil
+	// First input must be the agent's locking script
+	inputLockingScript, err := transaction.InputLockingScript(0)
+	if err != nil {
+		return errors.Wrapf(err, "input locking script %d", 0)
+	}
+
+	agentLockingScript := a.LockingScript()
+	if !agentLockingScript.Equal(inputLockingScript) {
+		return nil // Not for this agent's contract
 	}
 
 	logger.Info(ctx, "Processing thaw")
@@ -34,11 +47,17 @@ func (a *Agent) processThaw(ctx context.Context, transaction TransactionWithOutp
 }
 
 func (a *Agent) processConfiscation(ctx context.Context, transaction TransactionWithOutputs,
-	index int, confiscation *actions.Confiscation) error {
+	confiscation *actions.Confiscation) error {
 
-	if index != 0 {
-		logger.Warn(ctx, "Confiscation not from input zero: %d", index)
-		return nil
+	// First input must be the agent's locking script
+	inputLockingScript, err := transaction.InputLockingScript(0)
+	if err != nil {
+		return errors.Wrapf(err, "input locking script %d", 0)
+	}
+
+	agentLockingScript := a.LockingScript()
+	if !agentLockingScript.Equal(inputLockingScript) {
+		return nil // Not for this agent's contract
 	}
 
 	logger.Info(ctx, "Processing confiscation")
@@ -47,11 +66,17 @@ func (a *Agent) processConfiscation(ctx context.Context, transaction Transaction
 }
 
 func (a *Agent) processReconciliation(ctx context.Context, transaction TransactionWithOutputs,
-	index int, reconciliation *actions.Reconciliation) error {
+	reconciliation *actions.Reconciliation) error {
 
-	if index != 0 {
-		logger.Warn(ctx, "Reconciliation not from input zero: %d", index)
-		return nil
+	// First input must be the agent's locking script
+	inputLockingScript, err := transaction.InputLockingScript(0)
+	if err != nil {
+		return errors.Wrapf(err, "input locking script %d", 0)
+	}
+
+	agentLockingScript := a.LockingScript()
+	if !agentLockingScript.Equal(inputLockingScript) {
+		return nil // Not for this agent's contract
 	}
 
 	logger.Info(ctx, "Processing reconciliation")

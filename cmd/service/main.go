@@ -123,13 +123,28 @@ func main() {
 	transactionsComplete := transactionsThread.GetCompleteChannel()
 	stopper.Add(transactionsThread)
 
-	if err := spyNodeClient.Connect(ctx); err != nil {
-		logger.Fatal(ctx, "main : Failed to connect to spynode : %s", err)
-	}
-
 	contractsThread.Start(ctx)
 	balancesThread.Start(ctx)
 	transactionsThread.Start(ctx)
+
+	if err := firm.Load(ctx, store); err != nil {
+		logger.Fatal(ctx, "main : Failed to load firm : %s", err)
+	}
+
+	hash, err := bitcoin.NewHash32FromStr("d67a2342a431f11e3c7af9b87e46976302b6fd8faea067f9a6494ea8ef33b994")
+	if err != nil {
+		logger.Fatal(ctx, "main : Failed to parse hash : %s", err)
+	}
+
+	agent, err := firm.AddAgent(ctx, *hash)
+	if err != nil {
+		logger.Fatal(ctx, "main : Failed to add agent : %s", err)
+	}
+	firm.ReleaseAgent(ctx, agent)
+
+	if err := spyNodeClient.Connect(ctx); err != nil {
+		logger.Fatal(ctx, "main : Failed to connect to spynode : %s", err)
+	}
 
 	// Shutdown
 	//
@@ -159,14 +174,11 @@ func main() {
 	}
 
 	spyNodeClient.Close(ctx) // This waits for spynode to finish
-	print("spynode finished\n")
 	stopper.Stop(ctx)
 
 	wait.Wait()
 
-	print("saving firm\n")
 	if err := firm.Save(ctx, store); err != nil {
 		logger.Error(ctx, "main : Failed to save firm : %s", err)
 	}
-	print("complete\n")
 }

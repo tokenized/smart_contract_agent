@@ -73,7 +73,7 @@ func (f *Firm) addTx(ctx context.Context, txid bitcoin.Hash32,
 	return addedTx, nil
 }
 
-func (f *Firm) updateTransaction(ctx context.Context, transaction *state.Transaction) error {
+func (f *Firm) UpdateTransaction(ctx context.Context, transaction *state.Transaction) error {
 	transaction.Lock()
 	if !transaction.IsProcessed && transaction.State&wallet.TxStateSafe != 0 {
 		if err := f.processTransaction(ctx, transaction); err != nil {
@@ -154,20 +154,6 @@ func (f *Firm) compileAction(ctx context.Context, agentActionsList *AgentActions
 	ctx = logger.ContextWithLogFields(ctx, logger.String("action", action.Code()))
 
 	switch act := action.(type) {
-	case *actions.ContractFormation, *actions.BodyOfAgreementFormation, *actions.InstrumentCreation,
-		*actions.Vote, *actions.BallotCounted, *actions.Result, *actions.Freeze, *actions.Thaw,
-		*actions.Confiscation, *actions.Reconciliation:
-
-		// Response actions where first input is the contract.
-		lockingScript, err := tx.InputLockingScript(0)
-		if err != nil {
-			return errors.Wrap(err, "input locking script")
-		}
-
-		if err := f.addAgentAction(ctx, agentActionsList, lockingScript, action); err != nil {
-			return errors.Wrap(err, "add agent action")
-		}
-
 	case *actions.ContractOffer, *actions.ContractAmendment, *actions.ContractAddressChange,
 		*actions.BodyOfAgreementOffer, *actions.BodyOfAgreementAmendment,
 		*actions.InstrumentDefinition, *actions.InstrumentModification, *actions.Proposal,
@@ -180,14 +166,72 @@ func (f *Firm) compileAction(ctx context.Context, agentActionsList *AgentActions
 			return errors.Wrap(err, "add agent action")
 		}
 
+	case *actions.ContractFormation, *actions.BodyOfAgreementFormation, *actions.InstrumentCreation,
+		*actions.Vote, *actions.BallotCounted, *actions.Result, *actions.Freeze, *actions.Thaw,
+		*actions.Confiscation, *actions.Reconciliation:
+
+		// Response actions where first input is the contract.
+		lockingScript, err := tx.InputLockingScript(0)
+		if err != nil {
+			return errors.Wrap(err, "input locking script")
+		}
+
+		if ra, err := bitcoin.RawAddressFromLockingScript(lockingScript); err == nil {
+			logger.InfoWithFields(ctx, []logger.Field{
+				logger.Stringer("address", bitcoin.NewAddressFromRawAddress(ra, bitcoin.MainNet)),
+				logger.Stringer("locking_script", lockingScript),
+			}, "Contract response found")
+		}
+
+		if err := f.addAgentAction(ctx, agentActionsList, lockingScript, action); err != nil {
+			return errors.Wrap(err, "add agent action")
+		}
+
 	case *actions.Transfer:
 		for _, instrument := range act.Instruments {
-			if int(instrument.ContractIndex) >= tx.InputCount() {
+			if int(instrument.ContractIndex) >= tx.OutputCount() {
 				return fmt.Errorf("Transfer contract index out of range : %d >= %d",
+					instrument.ContractIndex, tx.OutputCount())
+			}
+
+			lockingScript := tx.Output(int(instrument.ContractIndex)).LockingScript
+			if err := f.addAgentAction(ctx, agentActionsList, lockingScript, action); err != nil {
+				return errors.Wrap(err, "add agent action")
+			}
+		}
+
+	case *actions.Settlement:
+		for _, instrument := range act.Instruments {
+			if int(instrument.ContractIndex) >= tx.InputCount() {
+				return fmt.Errorf("Settlement contract index out of range : %d >= %d",
 					instrument.ContractIndex, tx.InputCount())
 			}
 
 			lockingScript, err := tx.InputLockingScript(int(instrument.ContractIndex))
+			if err != nil {
+				return errors.Wrap(err, "input locking script")
+			}
+
+			if ra, err := bitcoin.RawAddressFromLockingScript(lockingScript); err == nil {
+				logger.InfoWithFields(ctx, []logger.Field{
+					logger.Stringer("address", bitcoin.NewAddressFromRawAddress(ra, bitcoin.MainNet)),
+					logger.Stringer("locking_script", lockingScript),
+				}, "Settlement found")
+			}
+
+			if err := f.addAgentAction(ctx, agentActionsList, lockingScript, action); err != nil {
+				return errors.Wrap(err, "add agent action")
+			}
+		}
+
+	case *actions.Message:
+		for _, senderIndex := range act.SenderIndexes {
+			if int(senderIndex) >= tx.InputCount() {
+				return fmt.Errorf("Message sender index out of range : %d >= %d", senderIndex,
+					tx.InputCount())
+			}
+
+			lockingScript, err := tx.InputLockingScript(int(senderIndex))
 			if err != nil {
 				return errors.Wrap(err, "input locking script")
 			}
@@ -197,22 +241,42 @@ func (f *Firm) compileAction(ctx context.Context, agentActionsList *AgentActions
 			}
 		}
 
-	case *actions.Settlement:
-		for _, instrument := range act.Instruments {
-			if int(instrument.ContractIndex) >= tx.OutputCount() {
-				return fmt.Errorf("Settlement contract index out of range : %d >= %d",
-					instrument.ContractIndex, tx.OutputCount())
+		for _, receiverIndex := range act.ReceiverIndexes {
+			if int(receiverIndex) >= tx.OutputCount() {
+				return fmt.Errorf("Message receiver index out of range : %d >= %d", receiverIndex,
+					tx.OutputCount())
 			}
 
-			lockingScript := tx.Output(int(instrument.ContractIndex)).LockingScript
+			lockingScript := tx.Output(int(receiverIndex)).LockingScript
+			if err := f.addAgentAction(ctx, agentActionsList, lockingScript, action); err != nil {
+				return errors.Wrap(err, "add agent action")
+			}
+		}
+
+	case *actions.Rejection:
+		inputCount := tx.InputCount()
+		for i := 0; i < inputCount; i++ {
+			lockingScript, err := tx.InputLockingScript(i)
+			if err != nil {
+				return errors.Wrap(err, "input locking script")
+			}
 
 			if err := f.addAgentAction(ctx, agentActionsList, lockingScript, action); err != nil {
 				return errors.Wrap(err, "add agent action")
 			}
 		}
 
-	// case *actions.Message:
-	// case *actions.Rejection:
+		for _, addressIndex := range act.AddressIndexes {
+			if int(addressIndex) >= tx.OutputCount() {
+				return fmt.Errorf("Reject address index out of range : %d >= %d", addressIndex,
+					tx.OutputCount())
+			}
+
+			lockingScript := tx.Output(int(addressIndex)).LockingScript
+			if err := f.addAgentAction(ctx, agentActionsList, lockingScript, action); err != nil {
+				return errors.Wrap(err, "add agent action")
+			}
+		}
 
 	default:
 		return fmt.Errorf("Action not supported: %s", action.Code())

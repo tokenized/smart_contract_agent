@@ -3,18 +3,24 @@ package agents
 import (
 	"context"
 
-	"github.com/pkg/errors"
 	"github.com/tokenized/pkg/logger"
 	"github.com/tokenized/specification/dist/golang/actions"
+
+	"github.com/pkg/errors"
 )
 
 func (a *Agent) processBodyOfAgreementFormation(ctx context.Context,
-	transaction TransactionWithOutputs, index int,
-	formation *actions.BodyOfAgreementFormation) error {
+	transaction TransactionWithOutputs, formation *actions.BodyOfAgreementFormation) error {
 
-	if index != 0 {
-		logger.Warn(ctx, "Body Of Agreement formation not from input zero: %d", index)
-		return nil
+	// First input must be the agent's locking script
+	inputLockingScript, err := transaction.InputLockingScript(0)
+	if err != nil {
+		return errors.Wrapf(err, "input locking script %d", 0)
+	}
+
+	agentLockingScript := a.LockingScript()
+	if !agentLockingScript.Equal(inputLockingScript) {
+		return nil // Not for this agent's contract
 	}
 
 	logger.Info(ctx, "Processing body of agreement formation")

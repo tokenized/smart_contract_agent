@@ -7,22 +7,28 @@ import (
 	"github.com/tokenized/pkg/logger"
 	"github.com/tokenized/smart_contract_agent/internal/state"
 	"github.com/tokenized/specification/dist/golang/actions"
-	"github.com/tokenized/specification/dist/golang/instruments"
+	"github.com/tokenized/specification/dist/golang/protocol"
 
 	"github.com/pkg/errors"
 )
 
 func (a *Agent) processInstrumentCreation(ctx context.Context, transaction TransactionWithOutputs,
-	index int, creation *actions.InstrumentCreation) error {
+	creation *actions.InstrumentCreation) error {
 
-	if index != 0 {
-		logger.Warn(ctx, "Instrument creation not from input zero: %d", index)
-		return nil
+	// First input must be the agent's locking script
+	inputLockingScript, err := transaction.InputLockingScript(0)
+	if err != nil {
+		return errors.Wrapf(err, "input locking script %d", 0)
+	}
+
+	agentLockingScript := a.LockingScript()
+	if !agentLockingScript.Equal(inputLockingScript) {
+		return nil // Not for this agent's contract
 	}
 
 	logger.Info(ctx, "Processing instrument creation")
 
-	instrument, err := instruments.Deserialize([]byte(creation.InstrumentType),
+	instrument, err := protocol.DeserializeInstrument([]byte(creation.InstrumentType),
 		creation.InstrumentPayload)
 	if err != nil {
 		logger.Warn(ctx, "Instrument payload invalid: %s", err)

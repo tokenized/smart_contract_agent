@@ -10,11 +10,17 @@ import (
 )
 
 func (a *Agent) processContractFormation(ctx context.Context, transaction TransactionWithOutputs,
-	index int, formation *actions.ContractFormation) error {
+	formation *actions.ContractFormation) error {
 
-	if index != 0 {
-		logger.Warn(ctx, "Contract formation not from input zero: %d", index)
-		return nil
+	// First input must be the agent's locking script
+	inputLockingScript, err := transaction.InputLockingScript(0)
+	if err != nil {
+		return errors.Wrapf(err, "input locking script %d", 0)
+	}
+
+	agentLockingScript := a.LockingScript()
+	if !agentLockingScript.Equal(inputLockingScript) {
+		return nil // Not for this agent's contract
 	}
 
 	logger.Info(ctx, "Processing contract formation")

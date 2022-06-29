@@ -67,6 +67,13 @@ func (f *Firm) NextSpyNodeMessageID() uint64 {
 	return f.nextSpyNodeMessageID
 }
 
+func (f *Firm) UpdateNextSpyNodeMessageID(id uint64) {
+	f.lock.Lock()
+	defer f.lock.Unlock()
+
+	f.nextSpyNodeMessageID = id + 1
+}
+
 func (f *Firm) Load(ctx context.Context, store storage.StreamStorage) error {
 	lookups, err := f.contracts.List(ctx, store)
 	if err != nil {
@@ -128,6 +135,7 @@ func (f *Firm) AddAgent(ctx context.Context,
 	if err != nil {
 		return nil, errors.Wrap(err, "locking script")
 	}
+	contractID := state.CalculateContractID(lockingScript)
 
 	ra, err := key.RawAddress()
 	if err != nil {
@@ -144,11 +152,22 @@ func (f *Firm) AddAgent(ctx context.Context,
 		return nil, errors.Wrap(err, "add contract")
 	}
 
-	if addedContract != contract {
+	if addedContract == contract {
+		f.lock.Lock()
+		f.lookup[contractID] = deriviationHash
+		f.lock.Unlock()
+
 		logger.InfoWithFields(ctx, []logger.Field{
+			logger.Stringer("contract_id", contractID),
 			logger.Stringer("address", bitcoin.NewAddressFromRawAddress(ra, bitcoin.MainNet)),
 			logger.Stringer("locking_script", lockingScript),
 		}, "Added new contract")
+	} else {
+		logger.InfoWithFields(ctx, []logger.Field{
+			logger.Stringer("contract_id", contractID),
+			logger.Stringer("address", bitcoin.NewAddressFromRawAddress(ra, bitcoin.MainNet)),
+			logger.Stringer("locking_script", lockingScript),
+		}, "Already have contract")
 	}
 
 	agent, err := agents.NewAgent(key, addedContract, f.contracts, f.balances, f.transactions)
@@ -160,15 +179,16 @@ func (f *Firm) AddAgent(ctx context.Context,
 }
 
 func (f *Firm) GetAgent(ctx context.Context, lockingScript bitcoin.Script) (*agents.Agent, error) {
-	f.lock.Lock()
 	contractID := state.CalculateContractID(lockingScript)
+
+	f.lock.Lock()
 	deriviationHash, exists := f.lookup[contractID]
-	if !exists {
-		f.lock.Unlock()
-		return nil, nil
-	}
 	baseKey := f.baseKey
 	f.lock.Unlock()
+
+	if !exists {
+		return nil, nil
+	}
 
 	key, err := baseKey.AddHash(deriviationHash)
 	if err != nil {

@@ -3,6 +3,7 @@ package firm
 import (
 	"context"
 
+	"github.com/tokenized/channels/wallet"
 	"github.com/tokenized/pkg/logger"
 	spynode "github.com/tokenized/spynode/pkg/client"
 )
@@ -11,6 +12,8 @@ func (f *Firm) HandleTx(ctx context.Context, spyNodeTx *spynode.Tx) {
 	txid := *spyNodeTx.Tx.TxHash()
 	ctx = logger.ContextWithLogFields(ctx, logger.Stringer("txid", txid))
 
+	f.UpdateNextSpyNodeMessageID(spyNodeTx.ID)
+
 	transaction, err := f.addTx(ctx, txid, spyNodeTx)
 	if err != nil {
 		logger.Error(ctx, "Failed to add tx : %s", err)
@@ -18,7 +21,7 @@ func (f *Firm) HandleTx(ctx context.Context, spyNodeTx *spynode.Tx) {
 	}
 	defer f.transactions.Release(ctx, txid)
 
-	if err := f.updateTransaction(ctx, transaction); err != nil {
+	if err := f.UpdateTransaction(ctx, transaction); err != nil {
 		logger.Error(ctx, "Failed to update tx : %s", err)
 		return
 	}
@@ -41,21 +44,45 @@ func (f *Firm) HandleTxUpdate(ctx context.Context, txUpdate *spynode.TxUpdate) {
 	}
 	defer f.transactions.Release(ctx, txUpdate.TxID)
 
-	if txUpdate.State.MerkleProof != nil {
-		mp := txUpdate.State.MerkleProof.ConvertToMerkleProof(txUpdate.TxID)
-		transaction.Lock()
-		if transaction.AddMerkleProof(mp) {
-			transaction.Unlock()
-			if err := f.transactions.Save(ctx, transaction); err != nil {
-				logger.Error(ctx, "Failed to save tx : %s", err)
-				return
+	modified := false
+	transaction.Lock()
+	if txUpdate.State.Safe {
+		if transaction.State&wallet.TxStateSafe == 0 {
+			transaction.State = wallet.TxStateSafe
+			modified = true
+		}
+	} else {
+		if txUpdate.State.UnSafe {
+			if transaction.State&wallet.TxStateUnsafe == 0 {
+				transaction.State |= wallet.TxStateUnsafe
+				modified = true
 			}
-		} else {
-			transaction.Unlock()
+		}
+		if txUpdate.State.Cancelled {
+			if transaction.State&wallet.TxStateCancelled == 0 {
+				transaction.State |= wallet.TxStateCancelled
+				modified = true
+			}
 		}
 	}
 
-	if err := f.updateTransaction(ctx, transaction); err != nil {
+	if txUpdate.State.MerkleProof != nil {
+		mp := txUpdate.State.MerkleProof.ConvertToMerkleProof(txUpdate.TxID)
+		if transaction.AddMerkleProof(mp) {
+			modified = true
+		}
+	}
+
+	transaction.Unlock()
+
+	if modified {
+		if err := f.transactions.Save(ctx, transaction); err != nil {
+			logger.Error(ctx, "Failed to save tx : %s", err)
+			return
+		}
+	}
+
+	if err := f.UpdateTransaction(ctx, transaction); err != nil {
 		logger.Error(ctx, "Failed to update tx : %s", err)
 		return
 	}
