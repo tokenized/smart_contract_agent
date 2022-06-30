@@ -28,8 +28,8 @@ func (a *Agent) processInstrumentCreation(ctx context.Context, transaction Trans
 
 	logger.Info(ctx, "Processing instrument creation")
 
-	instrument, err := protocol.DeserializeInstrument([]byte(creation.InstrumentType),
-		creation.InstrumentPayload)
+	instrument, err := protocol.DeserializeInstrumentPayload(creation.InstrumentPayloadVersion,
+		[]byte(creation.InstrumentType), creation.InstrumentPayload)
 	if err != nil {
 		logger.Warn(ctx, "Instrument payload invalid: %s", err)
 		return nil

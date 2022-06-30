@@ -18,7 +18,7 @@ import (
 	"github.com/tokenized/pkg/threads"
 	"github.com/tokenized/smart_contract_agent/internal/state"
 	"github.com/tokenized/smart_contract_agent/internal/whatsonchain"
-	"github.com/tokenized/smart_contract_agent/pkg/firm"
+	"github.com/tokenized/smart_contract_agent/pkg/conductor"
 )
 
 var (
@@ -98,7 +98,8 @@ func main() {
 		logger.Fatal(ctx, "main : Failed to create transaction cache : %s", err)
 	}
 
-	firm := firm.NewFirm(cfg.BaseKey, cfg.IsTest, nil, contracts, balances, transactions)
+	conductor := conductor.NewConductor(cfg.BaseKey, cfg.IsTest, nil, contracts, balances,
+		transactions)
 
 	var wait sync.WaitGroup
 	var stopper threads.StopCombiner
@@ -119,7 +120,7 @@ func main() {
 	stopper.Add(transactionsThread)
 
 	loadThread := threads.NewThread("Load", func(ctx context.Context, interrupt <-chan interface{}) error {
-		return load(ctx, interrupt, firm, transactions, cfg.BaseKey, cfg.ContractKey, woc)
+		return load(ctx, interrupt, conductor, transactions, cfg.BaseKey, cfg.ContractKey, woc)
 	})
 	loadThread.SetWait(&wait)
 	loadComplete := loadThread.GetCompleteChannel()
@@ -128,8 +129,8 @@ func main() {
 	balancesThread.Start(ctx)
 	transactionsThread.Start(ctx)
 
-	if err := firm.Load(ctx, store); err != nil {
-		logger.Fatal(ctx, "main : Failed to load firm : %s", err)
+	if err := conductor.Load(ctx, store); err != nil {
+		logger.Fatal(ctx, "main : Failed to load conductor : %s", err)
 	}
 
 	loadThread.Start(ctx)
@@ -170,8 +171,8 @@ func main() {
 	stopper.Stop(ctx)
 	wait.Wait()
 
-	if err := firm.Save(ctx, store); err != nil {
-		logger.Error(ctx, "main : Failed to save firm : %s", err)
+	if err := conductor.Save(ctx, store); err != nil {
+		logger.Error(ctx, "main : Failed to save conductor : %s", err)
 	}
 }
 
@@ -231,8 +232,8 @@ func getInputs(ctx context.Context, transactions *state.TransactionCache,
 	return nil
 }
 
-func loadTx(ctx context.Context, firm *firm.Firm, transactions *state.TransactionCache,
-	woc *whatsonchain.Service, txid bitcoin.Hash32) error {
+func loadTx(ctx context.Context, conductor *conductor.Conductor,
+	transactions *state.TransactionCache, woc *whatsonchain.Service, txid bitcoin.Hash32) error {
 	ctx = logger.ContextWithLogFields(ctx, logger.Stringer("txid", txid))
 
 	transaction, err := getTx(ctx, transactions, woc, txid)
@@ -245,14 +246,14 @@ func loadTx(ctx context.Context, firm *firm.Firm, transactions *state.Transactio
 		return errors.Wrapf(err, "get inputs: %s", txid)
 	}
 
-	if err := firm.UpdateTransaction(ctx, transaction); err != nil {
+	if err := conductor.UpdateTransaction(ctx, transaction); err != nil {
 		return errors.Wrapf(err, "update transaction")
 	}
 
 	return nil
 }
 
-func load(ctx context.Context, interrupt <-chan interface{}, firm *firm.Firm,
+func load(ctx context.Context, interrupt <-chan interface{}, conductor *conductor.Conductor,
 	transactions *state.TransactionCache, baseKey, contractKey bitcoin.Key,
 	woc *whatsonchain.Service) error {
 
@@ -266,11 +267,11 @@ func load(ctx context.Context, interrupt <-chan interface{}, firm *firm.Firm,
 		return errors.Wrap(err, "locking script")
 	}
 
-	agent, err := firm.AddAgent(ctx, hash)
+	agent, err := conductor.AddAgent(ctx, hash)
 	if err != nil {
 		return errors.Wrap(err, "add agent")
 	}
-	defer firm.ReleaseAgent(ctx, agent)
+	defer conductor.ReleaseAgent(ctx, agent)
 
 	history, err := woc.GetLockingScriptHistory(ctx, lockingScript)
 	if err != nil {
@@ -290,7 +291,7 @@ func load(ctx context.Context, interrupt <-chan interface{}, firm *firm.Firm,
 		}
 
 		txid := history[index].TxID
-		if err := loadTx(ctx, firm, transactions, woc, history[index].TxID); err != nil {
+		if err := loadTx(ctx, conductor, transactions, woc, history[index].TxID); err != nil {
 			return errors.Wrapf(err, "load transaction: %s", txid)
 		}
 

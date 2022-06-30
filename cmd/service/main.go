@@ -14,7 +14,7 @@ import (
 	"github.com/tokenized/pkg/storage"
 	"github.com/tokenized/pkg/threads"
 	"github.com/tokenized/smart_contract_agent/internal/state"
-	"github.com/tokenized/smart_contract_agent/pkg/firm"
+	"github.com/tokenized/smart_contract_agent/pkg/conductor"
 	spyNodeClient "github.com/tokenized/spynode/pkg/client"
 )
 
@@ -99,8 +99,9 @@ func main() {
 		logger.Fatal(ctx, "main : Failed to create transaction cache : %s", err)
 	}
 
-	firm := firm.NewFirm(cfg.BaseKey, cfg.IsTest, spyNodeClient, contracts, balances, transactions)
-	spyNodeClient.RegisterHandler(firm)
+	conductor := conductor.NewConductor(cfg.BaseKey, cfg.IsTest, spyNodeClient, contracts, balances,
+		transactions)
+	spyNodeClient.RegisterHandler(conductor)
 
 	var wait sync.WaitGroup
 	var stopper threads.StopCombiner
@@ -127,8 +128,8 @@ func main() {
 	balancesThread.Start(ctx)
 	transactionsThread.Start(ctx)
 
-	if err := firm.Load(ctx, store); err != nil {
-		logger.Fatal(ctx, "main : Failed to load firm : %s", err)
+	if err := conductor.Load(ctx, store); err != nil {
+		logger.Fatal(ctx, "main : Failed to load conductor : %s", err)
 	}
 
 	hash, err := bitcoin.NewHash32FromStr("d67a2342a431f11e3c7af9b87e46976302b6fd8faea067f9a6494ea8ef33b994")
@@ -136,11 +137,11 @@ func main() {
 		logger.Fatal(ctx, "main : Failed to parse hash : %s", err)
 	}
 
-	agent, err := firm.AddAgent(ctx, *hash)
+	agent, err := conductor.AddAgent(ctx, *hash)
 	if err != nil {
 		logger.Fatal(ctx, "main : Failed to add agent : %s", err)
 	}
-	firm.ReleaseAgent(ctx, agent)
+	conductor.ReleaseAgent(ctx, agent)
 
 	if err := spyNodeClient.Connect(ctx); err != nil {
 		logger.Fatal(ctx, "main : Failed to connect to spynode : %s", err)
@@ -178,7 +179,7 @@ func main() {
 
 	wait.Wait()
 
-	if err := firm.Save(ctx, store); err != nil {
-		logger.Error(ctx, "main : Failed to save firm : %s", err)
+	if err := conductor.Save(ctx, store); err != nil {
+		logger.Error(ctx, "main : Failed to save conductor : %s", err)
 	}
 }

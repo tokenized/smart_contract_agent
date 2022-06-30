@@ -1,4 +1,4 @@
-package firm
+package conductor
 
 import (
 	"context"
@@ -28,7 +28,7 @@ type TransactionWithOutputs interface {
 	Output(index int) *wire.TxOut
 }
 
-func (f *Firm) addTx(ctx context.Context, txid bitcoin.Hash32,
+func (c *Conductor) addTx(ctx context.Context, txid bitcoin.Hash32,
 	spyNodeTx *spynode.Tx) (*state.Transaction, error) {
 
 	transaction := &state.Transaction{
@@ -52,7 +52,7 @@ func (f *Firm) addTx(ctx context.Context, txid bitcoin.Hash32,
 		transaction.MerkleProofs = []*merkle_proof.MerkleProof{mp}
 	}
 
-	addedTx, err := f.transactions.Add(ctx, transaction)
+	addedTx, err := c.transactions.Add(ctx, transaction)
 	if err != nil {
 		return nil, errors.Wrap(err, "add tx")
 	}
@@ -63,7 +63,7 @@ func (f *Firm) addTx(ctx context.Context, txid bitcoin.Hash32,
 		addedTx.Lock()
 		if addedTx.AddMerkleProof(mp) {
 			addedTx.Unlock()
-			if err := f.transactions.Save(ctx, addedTx); err != nil {
+			if err := c.transactions.Save(ctx, addedTx); err != nil {
 				return nil, errors.Wrap(err, "save tx")
 			}
 		}
@@ -73,10 +73,10 @@ func (f *Firm) addTx(ctx context.Context, txid bitcoin.Hash32,
 	return addedTx, nil
 }
 
-func (f *Firm) UpdateTransaction(ctx context.Context, transaction *state.Transaction) error {
+func (c *Conductor) UpdateTransaction(ctx context.Context, transaction *state.Transaction) error {
 	transaction.Lock()
 	if !transaction.IsProcessed && transaction.State&wallet.TxStateSafe != 0 {
-		if err := f.processTransaction(ctx, transaction); err != nil {
+		if err := c.processTransaction(ctx, transaction); err != nil {
 			transaction.Unlock()
 			return errors.Wrap(err, "process")
 		}
@@ -84,7 +84,7 @@ func (f *Firm) UpdateTransaction(ctx context.Context, transaction *state.Transac
 		transaction.IsProcessed = true
 		transaction.Unlock()
 
-		if err := f.transactions.Save(ctx, transaction); err != nil {
+		if err := c.transactions.Save(ctx, transaction); err != nil {
 			return errors.Wrap(err, "save tx")
 		}
 
@@ -102,8 +102,8 @@ func (f *Firm) UpdateTransaction(ctx context.Context, transaction *state.Transac
 	return nil
 }
 
-func (f *Firm) processTransaction(ctx context.Context, transaction TransactionWithOutputs) error {
-	agentActionsList, err := f.compileTx(ctx, transaction)
+func (c *Conductor) processTransaction(ctx context.Context, transaction TransactionWithOutputs) error {
+	agentActionsList, err := c.compileTx(ctx, transaction)
 	if err != nil {
 		return errors.Wrap(err, "compile tx")
 	}
@@ -112,7 +112,7 @@ func (f *Firm) processTransaction(ctx context.Context, transaction TransactionWi
 		logger.Warn(ctx, "Transaction not relevant")
 		return nil
 	}
-	defer f.releaseAgentActions(ctx, agentActionsList)
+	defer c.releaseAgentActions(ctx, agentActionsList)
 
 	for _, agentActions := range agentActionsList {
 		if err := agentActions.agent.Process(ctx, transaction, agentActions.actions); err != nil {
@@ -131,8 +131,8 @@ func (f *Firm) processTransaction(ctx context.Context, transaction TransactionWi
 	return nil
 }
 
-func (f *Firm) compileTx(ctx context.Context, tx TransactionWithOutputs) (AgentActionsList, error) {
-	isTest := f.IsTest()
+func (c *Conductor) compileTx(ctx context.Context, tx TransactionWithOutputs) (AgentActionsList, error) {
+	isTest := c.IsTest()
 	var agentActionsList AgentActionsList
 	outputCount := tx.OutputCount()
 	for index := 0; index < outputCount; index++ {
@@ -143,13 +143,13 @@ func (f *Firm) compileTx(ctx context.Context, tx TransactionWithOutputs) (AgentA
 			continue
 		}
 
-		f.compileAction(ctx, &agentActionsList, tx, action)
+		c.compileAction(ctx, &agentActionsList, tx, action)
 	}
 
 	return agentActionsList, nil
 }
 
-func (f *Firm) compileAction(ctx context.Context, agentActionsList *AgentActionsList,
+func (c *Conductor) compileAction(ctx context.Context, agentActionsList *AgentActionsList,
 	tx TransactionWithOutputs, action actions.Action) error {
 	ctx = logger.ContextWithLogFields(ctx, logger.String("action", action.Code()))
 
@@ -162,7 +162,7 @@ func (f *Firm) compileAction(ctx context.Context, agentActionsList *AgentActions
 		// Request action where first output is the contract.
 		lockingScript := tx.Output(0).LockingScript
 
-		if err := f.addAgentAction(ctx, agentActionsList, lockingScript, action); err != nil {
+		if err := c.addAgentAction(ctx, agentActionsList, lockingScript, action); err != nil {
 			return errors.Wrap(err, "add agent action")
 		}
 
@@ -183,7 +183,7 @@ func (f *Firm) compileAction(ctx context.Context, agentActionsList *AgentActions
 			}, "Contract response found")
 		}
 
-		if err := f.addAgentAction(ctx, agentActionsList, lockingScript, action); err != nil {
+		if err := c.addAgentAction(ctx, agentActionsList, lockingScript, action); err != nil {
 			return errors.Wrap(err, "add agent action")
 		}
 
@@ -195,7 +195,7 @@ func (f *Firm) compileAction(ctx context.Context, agentActionsList *AgentActions
 			}
 
 			lockingScript := tx.Output(int(instrument.ContractIndex)).LockingScript
-			if err := f.addAgentAction(ctx, agentActionsList, lockingScript, action); err != nil {
+			if err := c.addAgentAction(ctx, agentActionsList, lockingScript, action); err != nil {
 				return errors.Wrap(err, "add agent action")
 			}
 		}
@@ -219,7 +219,7 @@ func (f *Firm) compileAction(ctx context.Context, agentActionsList *AgentActions
 				}, "Settlement found")
 			}
 
-			if err := f.addAgentAction(ctx, agentActionsList, lockingScript, action); err != nil {
+			if err := c.addAgentAction(ctx, agentActionsList, lockingScript, action); err != nil {
 				return errors.Wrap(err, "add agent action")
 			}
 		}
@@ -236,7 +236,7 @@ func (f *Firm) compileAction(ctx context.Context, agentActionsList *AgentActions
 				return errors.Wrap(err, "input locking script")
 			}
 
-			if err := f.addAgentAction(ctx, agentActionsList, lockingScript, action); err != nil {
+			if err := c.addAgentAction(ctx, agentActionsList, lockingScript, action); err != nil {
 				return errors.Wrap(err, "add agent action")
 			}
 		}
@@ -248,7 +248,7 @@ func (f *Firm) compileAction(ctx context.Context, agentActionsList *AgentActions
 			}
 
 			lockingScript := tx.Output(int(receiverIndex)).LockingScript
-			if err := f.addAgentAction(ctx, agentActionsList, lockingScript, action); err != nil {
+			if err := c.addAgentAction(ctx, agentActionsList, lockingScript, action); err != nil {
 				return errors.Wrap(err, "add agent action")
 			}
 		}
@@ -261,7 +261,7 @@ func (f *Firm) compileAction(ctx context.Context, agentActionsList *AgentActions
 				return errors.Wrap(err, "input locking script")
 			}
 
-			if err := f.addAgentAction(ctx, agentActionsList, lockingScript, action); err != nil {
+			if err := c.addAgentAction(ctx, agentActionsList, lockingScript, action); err != nil {
 				return errors.Wrap(err, "add agent action")
 			}
 		}
@@ -273,7 +273,7 @@ func (f *Firm) compileAction(ctx context.Context, agentActionsList *AgentActions
 			}
 
 			lockingScript := tx.Output(int(addressIndex)).LockingScript
-			if err := f.addAgentAction(ctx, agentActionsList, lockingScript, action); err != nil {
+			if err := c.addAgentAction(ctx, agentActionsList, lockingScript, action); err != nil {
 				return errors.Wrap(err, "add agent action")
 			}
 		}

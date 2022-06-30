@@ -1,4 +1,4 @@
-package firm
+package conductor
 
 import (
 	"context"
@@ -18,7 +18,7 @@ type AgentActions struct {
 
 type AgentActionsList []*AgentActions
 
-func (f *Firm) addAgentAction(ctx context.Context, agentActionsList *AgentActionsList,
+func (c *Conductor) addAgentAction(ctx context.Context, agentActionsList *AgentActionsList,
 	agentLockingScript bitcoin.Script, action actions.Action) error {
 
 	for _, agentActions := range *agentActionsList {
@@ -28,7 +28,7 @@ func (f *Firm) addAgentAction(ctx context.Context, agentActionsList *AgentAction
 		}
 	}
 
-	agent, err := f.GetAgent(ctx, agentLockingScript)
+	agent, err := c.GetAgent(ctx, agentLockingScript)
 	if err != nil {
 		return errors.Wrap(err, "get agent")
 	}
@@ -45,8 +45,8 @@ func (f *Firm) addAgentAction(ctx context.Context, agentActionsList *AgentAction
 	return nil
 }
 
-func (f *Firm) releaseAgentActions(ctx context.Context, agentActionsList AgentActionsList) {
+func (c *Conductor) releaseAgentActions(ctx context.Context, agentActionsList AgentActionsList) {
 	for _, agentAction := range agentActionsList {
-		f.ReleaseAgent(ctx, agentAction.agent)
+		c.ReleaseAgent(ctx, agentAction.agent)
 	}
 }
