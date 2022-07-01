@@ -42,14 +42,16 @@ type Transaction struct {
 
 	Ancestors channels.AncestorTxs `bsor:"-" json:"ancestors,omitempty"`
 
+	isModified bool
 	sync.Mutex `bsor:"-"`
 }
 
-func NewTransactionCache(store storage.StreamStorage, fetcherCount, expireCount int,
-	expiration, fetchTimeout time.Duration) (*TransactionCache, error) {
+func NewTransactionCache(store storage.StreamStorage, requestThreadCount int,
+	requestTimeout time.Duration, expireCount int,
+	expiration time.Duration) (*TransactionCache, error) {
 
-	cacher, err := cacher.NewCache(store, reflect.TypeOf(&Transaction{}), fetcherCount, expireCount,
-		expiration, fetchTimeout)
+	cacher, err := cacher.NewCache(store, reflect.TypeOf(&Transaction{}), requestThreadCount,
+		requestTimeout, expireCount, expiration)
 	if err != nil {
 		return nil, errors.Wrap(err, "cacher")
 	}
@@ -61,6 +63,10 @@ func NewTransactionCache(store storage.StreamStorage, fetcherCount, expireCount 
 
 func (c *TransactionCache) Run(ctx context.Context, interrupt <-chan interface{}) error {
 	return c.cacher.Run(ctx, interrupt)
+}
+
+func (c *TransactionCache) Save(ctx context.Context, tx *Transaction) {
+	c.cacher.Save(ctx, tx)
 }
 
 func (c *TransactionCache) Add(ctx context.Context, tx *Transaction) (*Transaction, error) {
@@ -96,7 +102,6 @@ func (c *TransactionCache) AddExpandedTx(ctx context.Context,
 func (c *TransactionCache) AddRaw(ctx context.Context, tx *wire.MsgTx,
 	merkleProofs []*merkle_proof.MerkleProof) (*Transaction, error) {
 
-	txid := *tx.TxHash()
 	itx := &Transaction{
 		Tx:           tx,
 		MerkleProofs: merkleProofs,
@@ -108,15 +113,7 @@ func (c *TransactionCache) AddRaw(ctx context.Context, tx *wire.MsgTx,
 	}
 
 	ftx := item.(*Transaction)
-	if !ftx.AddMerkleProofs(merkleProofs) {
-		return ftx, nil
-	}
-
-	if err := c.cacher.Save(ctx, ftx); err != nil {
-		c.Release(ctx, txid)
-		return nil, errors.Wrap(err, "save")
-	}
-
+	ftx.AddMerkleProofs(merkleProofs)
 	return ftx, nil
 }
 
@@ -155,6 +152,7 @@ func (tx *Transaction) AddMerkleProof(merkleProof *merkle_proof.MerkleProof) boo
 	}
 
 	tx.MerkleProofs = append(tx.MerkleProofs, &mp)
+	tx.MarkModified()
 	return true
 }
 
@@ -216,10 +214,6 @@ func (c *TransactionCache) Get(ctx context.Context, txid bitcoin.Hash32) (*Trans
 	return item.(*Transaction), nil
 }
 
-func (c *TransactionCache) Save(ctx context.Context, transaction *Transaction) error {
-	return c.cacher.Save(ctx, transaction)
-}
-
 func (c *TransactionCache) Release(ctx context.Context, txid bitcoin.Hash32) {
 	c.cacher.Release(ctx, TransactionPath(txid))
 }
@@ -233,20 +227,27 @@ func (tx *Transaction) TxID() bitcoin.Hash32 {
 }
 
 func (tx *Transaction) Path() string {
-	tx.Lock()
-	defer tx.Unlock()
-
 	return TransactionPath(*tx.Tx.TxHash())
 }
 
+func (tx *Transaction) MarkModified() {
+	tx.isModified = true
+}
+
+func (tx *Transaction) ClearModified() {
+	tx.isModified = false
+}
+
+func (tx *Transaction) IsModified() bool {
+	return tx.isModified
+}
+
 func (tx *Transaction) Serialize(w io.Writer) error {
-	tx.Lock()
 	b, err := bsor.MarshalBinary(tx)
 	if err != nil {
 		tx.Unlock()
 		return errors.Wrap(err, "marshal")
 	}
-	tx.Unlock()
 
 	if err := binary.Write(w, endian, txVersion); err != nil {
 		return errors.Wrap(err, "version")

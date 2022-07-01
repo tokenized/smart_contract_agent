@@ -16,7 +16,7 @@ func Test_FetchTxs(t *testing.T) {
 	ctx := context.Background()
 	store := storage.NewMockStorage()
 
-	cache, err := NewTransactionCache(store, 4, 10000, 2*time.Second, 10*time.Second)
+	cache, err := NewTransactionCache(store, 4, 2*time.Second, 10000, 10*time.Second)
 	if err != nil {
 		t.Fatalf("Failed to create tx cache : %s", err)
 	}
@@ -29,6 +29,7 @@ func Test_FetchTxs(t *testing.T) {
 	}()
 
 	txCount := 1000
+	t.Logf("Creating %d transactions", txCount)
 	var txids []bitcoin.Hash32
 	for i := 0; i < txCount; i++ {
 		tx := wire.NewMsgTx(1)
@@ -60,6 +61,7 @@ func Test_FetchTxs(t *testing.T) {
 	}
 
 	retrieveCount := 10000
+	t.Logf("Retrieving %d transactions", retrieveCount)
 	for i := 0; i < retrieveCount; i++ {
 		index := rand.Intn(txCount)
 		txid := txids[index]
@@ -81,6 +83,8 @@ func Test_FetchTxs(t *testing.T) {
 
 		cache.Release(ctx, txid)
 	}
+
+	t.Logf("Finished retrieving")
 
 	close(interrupt)
 	select {

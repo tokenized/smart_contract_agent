@@ -89,11 +89,10 @@ func (a *Agent) processInstrumentCreation(ctx context.Context, transaction Trans
 		logger.String("instrument_id", instrumentID),
 	}, "Updated instrument creation")
 
+	a.contract.MarkModified()
 	a.contract.Unlock()
 
-	if err := a.contracts.Save(ctx, a.contract); err != nil {
-		return errors.Wrap(err, "save contract")
-	}
+	a.contracts.Save(ctx, a.contract)
 
 	return nil
 }

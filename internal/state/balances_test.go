@@ -27,7 +27,7 @@ func Test_Balances(t *testing.T) {
 	var instrumentCode InstrumentCode
 	rand.Read(instrumentCode[:])
 
-	cache, err := NewBalanceCache(store, 4, 10000, 2*time.Second, 10*time.Second)
+	cache, err := NewBalanceCache(store, 4, 2*time.Second, 10000, 10*time.Second)
 	if err != nil {
 		t.Fatalf("Failed to create balance cache : %s", err)
 	}
@@ -39,7 +39,7 @@ func Test_Balances(t *testing.T) {
 		close(cacheComplete)
 	}()
 
-	for j := 0; j < 1000; j++ {
+	for j := 0; j < 1; j++ {
 		var txid bitcoin.Hash32
 		rand.Read(txid[:])
 		var balances []*Balance
@@ -92,7 +92,7 @@ func Test_Balances(t *testing.T) {
 				t.Errorf("%d Wrong got balance quantity : got %d, want %d", j, gotBalance.Quantity,
 					balances[i].Quantity)
 			}
-			cache.Release(ctx, contractLockingScript, instrumentCode, gotBalance.LockingScript)
+			cache.Release(ctx, contractLockingScript, instrumentCode, gotBalance)
 		}
 
 		var mixedBalances []*Balance
@@ -151,15 +151,14 @@ func Test_Balances(t *testing.T) {
 		}
 
 		mixedAddedBalances[0].Quantity = uint64(rand.Intn(5000))
+		mixedAddedBalances[0].MarkModified()
 		savedLockingScript := mixedAddedBalances[0].LockingScript
 		savedQuantity := mixedAddedBalances[0].Quantity
-		if err := cache.Save(ctx, contractLockingScript, instrumentCode, mixedAddedBalances[0]); err != nil {
-			t.Fatalf("%d Failed to save balance : %s", j, err)
-		}
 
 		cache.ReleaseMulti(ctx, contractLockingScript, instrumentCode, mixedAddedBalances)
 
-		gotBalance2, err := cache.Get(ctx, contractLockingScript, instrumentCode, savedLockingScript)
+		gotBalance2, err := cache.Get(ctx, contractLockingScript, instrumentCode,
+			savedLockingScript)
 		if err != nil {
 			t.Fatalf("%d Failed to get balance 2  : %s", j, err)
 		}
@@ -175,7 +174,7 @@ func Test_Balances(t *testing.T) {
 			t.Errorf("%d Wrong got balance 2 quantity : got %d, want %d", j, gotBalance2.Quantity,
 				savedQuantity)
 		}
-		cache.Release(ctx, contractLockingScript, instrumentCode, gotBalance2.LockingScript)
+		cache.Release(ctx, contractLockingScript, instrumentCode, gotBalance2)
 	}
 
 	close(interrupt)

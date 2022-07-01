@@ -23,32 +23,76 @@ func (c *Cache) createRequest(ctx context.Context, path string) (<-chan interfac
 		response: response,
 	}
 
-	c.requestsLock.Lock()
-	if c.requests == nil {
-		c.requestsLock.Unlock()
-		return nil, ErrShuttingDown
-	}
 	c.requests <- request
-	c.requestsLock.Unlock()
-
 	return response, nil
 }
 
-func (c *Cache) handleRequests(ctx context.Context, threadIndex int) error {
-	for request := range c.requests {
-		if err := c.handleRequest(ctx, threadIndex, request); err != nil {
+func (c *Cache) runHandleRequests(ctx context.Context, interrupt <-chan interface{},
+	threadIndex int) error {
+
+	for {
+		select {
+		case request, ok := <-c.requests:
+			if !ok {
+				return nil
+			}
+
+			if err := c.handleRequest(ctx, threadIndex, request); err != nil {
+				return err
+			}
+
+		case <-interrupt:
+			return nil
+		}
+	}
+}
+
+// finishHandlingRequests handles any requests until the items in use count goes to zero.
+func (c *Cache) finishHandlingRequests(ctx context.Context) error {
+	select {
+	case request := <-c.requests:
+		if err := c.handleRequest(ctx, -1, request); err != nil {
 			return err
+		}
+
+	default:
+		c.itemsUseCountLock.Lock()
+		itemsUseCount := c.itemsUseCount
+		c.itemsUseCountLock.Unlock()
+
+		if itemsUseCount == 0 {
+			return nil
 		}
 	}
 
-	return nil
+	for {
+		select {
+		case request, ok := <-c.requests:
+			if !ok {
+				return nil
+			}
+
+			if err := c.handleRequest(ctx, -1, request); err != nil {
+				return err
+			}
+
+		case <-time.After(100 * time.Millisecond):
+			c.itemsUseCountLock.Lock()
+			itemsUseCount := c.itemsUseCount
+			c.itemsUseCountLock.Unlock()
+
+			if itemsUseCount == 0 {
+				return nil
+			}
+		}
+	}
 }
 
 func (c *Cache) handleRequest(ctx context.Context, threadIndex int, request *Request) error {
 	c.itemsLock.Lock()
 	item, exists := c.items[request.path]
 	if exists {
-		item.addUser()
+		c.addUser(item)
 		c.itemsLock.Unlock()
 		request.response <- item
 		return nil
@@ -69,7 +113,7 @@ func (c *Cache) handleRequest(ctx context.Context, threadIndex int, request *Req
 	item, exists = c.items[request.path]
 	if exists {
 		// Already fetched in another thread
-		item.addUser()
+		c.addUser(item)
 		c.itemsLock.Unlock()
 
 		request.response <- item
@@ -77,10 +121,9 @@ func (c *Cache) handleRequest(ctx context.Context, threadIndex int, request *Req
 	}
 
 	item = &CacheItem{
-		value:    value,
-		users:    1,
-		lastUsed: time.Now(),
+		value: value,
 	}
+	c.addUser(item)
 
 	// Add to items
 	c.items[request.path] = item
@@ -104,16 +147,4 @@ func (c *Cache) fetchValue(ctx context.Context, path string) (CacheValue, error)
 	}
 
 	return item, nil
-}
-
-func flushRequests(requests chan *Request, err error) {
-	for {
-		select {
-		case request := <-requests:
-			request.response <- err
-
-		default:
-			return
-		}
-	}
 }

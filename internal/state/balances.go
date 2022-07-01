@@ -43,7 +43,8 @@ type balanceSet struct {
 
 	Balances map[bitcoin.Hash32]*Balance `json:"balances"`
 
-	lock sync.Mutex
+	isModified bool
+	sync.Mutex
 }
 
 type balanceSets []*balanceSet
@@ -56,6 +57,7 @@ type Balance struct {
 
 	Holdings []*BalanceHolding `bsor:"5" json:"holdings,omitempty"`
 
+	isModified bool
 	sync.Mutex `bsor:"-"`
 }
 
@@ -69,11 +71,12 @@ type BalanceHolding struct {
 	TxID     *bitcoin.Hash32    `bsor:"4" json:"txID,omitempty"`
 }
 
-func NewBalanceCache(store storage.StreamStorage, fetcherCount, expireCount int,
-	expiration, fetchTimeout time.Duration) (*BalanceCache, error) {
+func NewBalanceCache(store storage.StreamStorage, requestThreadCount int,
+	requestTimeout time.Duration, expireCount int,
+	expiration time.Duration) (*BalanceCache, error) {
 
-	cacher, err := cacher.NewCache(store, reflect.TypeOf(&balanceSet{}), fetcherCount, expireCount,
-		expiration, fetchTimeout)
+	cacher, err := cacher.NewCache(store, reflect.TypeOf(&balanceSet{}), requestThreadCount,
+		requestTimeout, expireCount, expiration)
 	if err != nil {
 		return nil, errors.Wrap(err, "cacher")
 	}
@@ -105,15 +108,18 @@ func (c *BalanceCache) Add(ctx context.Context, contractLockingScript bitcoin.Sc
 	}
 	set = item.(*balanceSet)
 
-	set.lock.Lock()
+	set.Lock()
 	result, exists := set.Balances[hash]
-	set.lock.Unlock()
 
 	if exists {
+		set.Unlock()
 		return result, nil
 	}
 
 	set.Balances[hash] = balance
+	set.MarkModified()
+	set.Unlock()
+
 	return balance, nil
 }
 
@@ -135,12 +141,13 @@ func (c *BalanceCache) AddMulti(ctx context.Context, contractLockingScript bitco
 		return nil, errors.Wrap(err, "add")
 	}
 
-	modified := make([]bool, len(sets))
+	// Convert from items to sets
 	sets = make(balanceSets, len(items))
 	for i, item := range items {
 		sets[i] = item.(*balanceSet)
 	}
 
+	// Build resulting balances from sets.
 	result := make([]*Balance, len(balances))
 	for i, balance := range balances {
 		set := sets.getSet(contractLockingScript, instrumentCode, balance.LockingScript)
@@ -150,24 +157,16 @@ func (c *BalanceCache) AddMulti(ctx context.Context, contractLockingScript bitco
 		}
 		hash, _ := balanceSetPath(contractLockingScript, instrumentCode, balance.LockingScript)
 
-		set.lock.Lock()
+		set.Lock()
 		gotBalance, exists := set.Balances[hash]
 		if exists {
 			result[i] = gotBalance
 		} else {
 			result[i] = balance
 			set.Balances[hash] = balance
-			modified[i] = true
+			set.isModified = true
 		}
-		set.lock.Unlock()
-	}
-
-	for i, set := range sets {
-		if modified[i] { // a balance was added to and existing set.
-			if err := c.cacher.Save(ctx, set); err != nil {
-				return nil, errors.Wrap(err, "save set")
-			}
-		}
+		set.Unlock()
 	}
 
 	return result, nil
@@ -188,11 +187,12 @@ func (c *BalanceCache) Get(ctx context.Context, contractLockingScript bitcoin.Sc
 	}
 
 	set := item.(*balanceSet)
-	set.lock.Lock()
+	set.Lock()
 	balance, exists := set.Balances[hash]
-	set.lock.Unlock()
+	set.Unlock()
 
 	if !exists {
+		c.cacher.Release(ctx, path)
 		return nil, nil // balance not within set
 	}
 
@@ -203,14 +203,16 @@ func (c *BalanceCache) GetMulti(ctx context.Context, contractLockingScript bitco
 	instrumentCode InstrumentCode, lockingScripts []bitcoin.Script) ([]*Balance, error) {
 
 	hashes := make([]bitcoin.Hash32, len(lockingScripts))
-	var paths []string
+	paths := make([]string, len(lockingScripts))
+	var getPaths []string
 	for i, lockingScript := range lockingScripts {
 		hash, path := balanceSetPath(contractLockingScript, instrumentCode, lockingScript)
 		hashes[i] = hash
-		paths = appendStringIfDoesntExist(paths, path)
+		paths[i] = path
+		getPaths = appendStringIfDoesntExist(getPaths, path)
 	}
 
-	items, err := c.cacher.GetMulti(ctx, paths)
+	items, err := c.cacher.GetMulti(ctx, getPaths)
 	if err != nil {
 		return nil, errors.Wrap(err, "get multi")
 	}
@@ -228,14 +230,16 @@ func (c *BalanceCache) GetMulti(ctx context.Context, contractLockingScript bitco
 	for i, lockingScript := range lockingScripts {
 		set := sets.getSet(contractLockingScript, instrumentCode, lockingScript)
 		if set == nil {
+			c.cacher.Release(ctx, paths[i])
 			continue
 		}
 
-		set.lock.Lock()
+		set.Lock()
 		balance, exists := set.Balances[hashes[i]]
-		set.lock.Unlock()
+		set.Unlock()
 
 		if !exists {
+			c.cacher.Release(ctx, paths[i])
 			continue // balance not within set
 		}
 
@@ -255,34 +259,96 @@ func appendStringIfDoesntExist(list []string, value string) []string {
 	return append(list, value) // add value
 }
 
-func (c *BalanceCache) Save(ctx context.Context, contractLockingScript bitcoin.Script,
+func (c *BalanceCache) Release(ctx context.Context, contractLockingScript bitcoin.Script,
 	instrumentCode InstrumentCode, balance *Balance) error {
 
+	balance.Lock()
 	_, path := balanceSetPath(contractLockingScript, instrumentCode, balance.LockingScript)
-	item, err := c.cacher.Get(ctx, path)
-	if err != nil {
-		return errors.Wrap(err, "get")
-	}
-	if item == nil {
-		return fmt.Errorf("Not found to save: %s", path)
-	}
-	defer c.cacher.Release(ctx, path)
+	isModified := balance.isModified
+	balance.Unlock()
 
-	return c.cacher.Save(ctx, item)
-}
+	// Set set as modified
+	if isModified {
+		item, err := c.cacher.Get(ctx, path)
+		if err != nil {
+			return errors.Wrap(err, "get")
+		}
 
-func (c *BalanceCache) Release(ctx context.Context, contractLockingScript bitcoin.Script,
-	instrumentCode InstrumentCode, lockingScript bitcoin.Script) {
-	_, path := balanceSetPath(contractLockingScript, instrumentCode, lockingScript)
-	c.cacher.Release(ctx, path)
+		if item == nil {
+			return errors.New("Balance Set Missing")
+		}
+
+		set := item.(*balanceSet)
+		set.Lock()
+		set.isModified = true
+		set.Unlock()
+
+		c.cacher.Release(ctx, path) // release for get above
+	}
+
+	c.cacher.Release(ctx, path) // release for original request
+	return nil
 }
 
 func (c *BalanceCache) ReleaseMulti(ctx context.Context, contractLockingScript bitcoin.Script,
-	instrumentCode InstrumentCode, balances []*Balance) {
-	for _, balance := range balances {
+	instrumentCode InstrumentCode, balances []*Balance) error {
+
+	var modifiedPaths, allPaths []string
+	isModified := make([]bool, len(balances))
+	for i, balance := range balances {
+		balance.Lock()
 		_, path := balanceSetPath(contractLockingScript, instrumentCode, balance.LockingScript)
+		isModified[i] = balance.isModified
+		balance.Unlock()
+
+		allPaths = appendStringIfDoesntExist(allPaths, path)
+		if isModified[i] {
+			modifiedPaths = appendStringIfDoesntExist(modifiedPaths, path)
+		}
+	}
+
+	modifiedItems, err := c.cacher.GetMulti(ctx, modifiedPaths)
+	if err != nil {
+		return errors.Wrap(err, "get multi")
+	}
+
+	sets := make(balanceSets, len(modifiedItems))
+	for i, item := range modifiedItems {
+		if item == nil {
+			continue // a requested set must not exist
+		}
+
+		sets[i] = item.(*balanceSet)
+	}
+
+	for i, balance := range balances {
+		if !isModified[i] {
+			continue
+		}
+
+		balance.Lock()
+		lockingScript := balance.LockingScript
+		balance.Unlock()
+
+		set := sets.getSet(contractLockingScript, instrumentCode, lockingScript)
+		if set == nil {
+			return errors.New("Balance Set Missing")
+		}
+
+		set.MarkModified()
+	}
+
+	// Release from GetMulti above.
+	for _, path := range modifiedPaths {
 		c.cacher.Release(ctx, path)
 	}
+
+	// Release for balances specified in this function call.
+	for _, path := range allPaths {
+		c.cacher.Release(ctx, path)
+	}
+
+	return nil
 }
 
 func balanceSetPathID(lockingScript bitcoin.Script) (bitcoin.Hash32, [2]byte) {
@@ -303,28 +369,36 @@ func balanceSetPath(contractLockingScript bitcoin.Script, instrumentCode Instrum
 		instrumentCode, pathID)
 }
 
+func (b *Balance) MarkModified() {
+	b.isModified = true
+}
+
+func (b *Balance) IsModified() bool {
+	return b.isModified
+}
+
 func (sets *balanceSets) add(contractLockingScript bitcoin.Script, instrumentCode InstrumentCode,
 	balance *Balance) {
 
 	hash, pathID := balanceSetPathID(balance.LockingScript)
 
 	for _, set := range *sets {
-		set.lock.Lock()
+		set.Lock()
 		if !set.ContractLockingScript.Equal(contractLockingScript) {
-			set.lock.Unlock()
+			set.Unlock()
 			continue
 		}
 		if !bytes.Equal(set.InstrumentCode[:], instrumentCode[:]) {
-			set.lock.Unlock()
+			set.Unlock()
 			continue
 		}
 		if !bytes.Equal(set.PathID[:], pathID[:]) {
-			set.lock.Unlock()
+			set.Unlock()
 			continue
 		}
 
 		set.Balances[hash] = balance
-		set.lock.Unlock()
+		set.Unlock()
 		return
 	}
 
@@ -335,9 +409,9 @@ func (sets *balanceSets) add(contractLockingScript bitcoin.Script, instrumentCod
 		Balances:              make(map[bitcoin.Hash32]*Balance),
 	}
 
-	set.lock.Lock()
+	set.Lock()
 	set.Balances[hash] = balance
-	set.lock.Unlock()
+	set.Unlock()
 	*sets = append(*sets, set)
 }
 
@@ -346,21 +420,21 @@ func (sets *balanceSets) getSet(contractLockingScript bitcoin.Script, instrument
 
 	_, pathID := balanceSetPathID(lockingScript)
 	for _, set := range *sets {
-		set.lock.Lock()
+		set.Lock()
 		if !set.ContractLockingScript.Equal(contractLockingScript) {
-			set.lock.Unlock()
+			set.Unlock()
 			continue
 		}
 		if !bytes.Equal(set.InstrumentCode[:], instrumentCode[:]) {
-			set.lock.Unlock()
+			set.Unlock()
 			continue
 		}
 		if !bytes.Equal(set.PathID[:], pathID[:]) {
-			set.lock.Unlock()
+			set.Unlock()
 			continue
 		}
 
-		set.lock.Unlock()
+		set.Unlock()
 		return set
 	}
 
@@ -368,20 +442,26 @@ func (sets *balanceSets) getSet(contractLockingScript bitcoin.Script, instrument
 }
 
 func (set *balanceSet) Path() string {
-	set.lock.Lock()
-	defer set.lock.Unlock()
-
 	return fmt.Sprintf("%s/%s/%s/%x", balancePath, CalculateContractID(set.ContractLockingScript),
 		set.InstrumentCode, set.PathID)
+}
+
+func (set *balanceSet) MarkModified() {
+	set.isModified = true
+}
+
+func (set *balanceSet) ClearModified() {
+	set.isModified = false
+}
+
+func (set *balanceSet) IsModified() bool {
+	return set.isModified
 }
 
 func (set *balanceSet) Serialize(w io.Writer) error {
 	if err := binary.Write(w, endian, balanceVersion); err != nil {
 		return errors.Wrap(err, "version")
 	}
-
-	set.lock.Lock()
-	defer set.lock.Unlock()
 
 	if _, err := w.Write(set.PathID[:]); err != nil {
 		return errors.Wrap(err, "path_id")

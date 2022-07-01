@@ -21,14 +21,15 @@ import (
 type TestItem struct {
 	Value string
 
-	lock sync.Mutex
+	isModified bool
+	sync.Mutex
 }
 
 func Test_NotFound(t *testing.T) {
 	ctx := context.Background()
 	store := storage.NewMockStorage()
 
-	cache, err := NewCache(store, reflect.TypeOf(&TestItem{}), 2, 10, time.Second, time.Second)
+	cache, err := NewCache(store, reflect.TypeOf(&TestItem{}), 2, time.Second, 10, time.Second)
 	if err != nil {
 		t.Fatalf("Failed to create cache : %s", err)
 	}
@@ -53,7 +54,7 @@ func Test_NotFound(t *testing.T) {
 
 	close(interrupt)
 	select {
-	case <-time.After(2 * time.Second):
+	case <-time.After(time.Second):
 		t.Errorf("Cache shutdown timed out")
 	case <-cacheComplete:
 	}
@@ -63,7 +64,7 @@ func Test_Add(t *testing.T) {
 	ctx := context.Background()
 	store := storage.NewMockStorage()
 
-	cache, err := NewCache(store, reflect.TypeOf(&TestItem{}), 2, 10, time.Second, time.Second)
+	cache, err := NewCache(store, reflect.TypeOf(&TestItem{}), 2, time.Second, 10, time.Second)
 	if err != nil {
 		t.Fatalf("Failed to create cache : %s", err)
 	}
@@ -97,6 +98,8 @@ func Test_Add(t *testing.T) {
 	if addedItem != item {
 		t.Errorf("Wrong added item : got %s, want %s", addedItem.Value, item.Value)
 	}
+
+	cache.Release(ctx, path)
 
 	gotCacheItem, err := cache.Get(ctx, path)
 	if err != nil {
@@ -141,9 +144,11 @@ func Test_Add(t *testing.T) {
 		t.Errorf("Wrong added item : got %s, want %s", addedItem.Value, item.Value)
 	}
 
+	cache.Release(ctx, path)
+
 	close(interrupt)
 	select {
-	case <-time.After(2 * time.Second):
+	case <-time.After(time.Second):
 		t.Errorf("Cache shutdown timed out")
 	case <-cacheComplete:
 	}
@@ -153,7 +158,8 @@ func Test_Expire(t *testing.T) {
 	ctx := context.Background()
 	store := storage.NewMockStorage()
 
-	cache, err := NewCache(store, reflect.TypeOf(&TestItem{}), 2, 10, time.Second, time.Second)
+	cache, err := NewCache(store, reflect.TypeOf(&TestItem{}), 2, time.Second, 10,
+		100*time.Millisecond)
 	if err != nil {
 		t.Fatalf("Failed to create cache : %s", err)
 	}
@@ -176,8 +182,6 @@ func Test_Expire(t *testing.T) {
 
 	cache.Release(ctx, path)
 
-	time.Sleep(1100 * time.Millisecond)
-
 	gotCacheItem, err := cache.Get(ctx, path)
 	if err != nil {
 		t.Fatalf("Failed to get item : %s", err)
@@ -192,17 +196,47 @@ func Test_Expire(t *testing.T) {
 		t.Fatalf("Got item not a TestItem")
 	}
 
-	if gotItem == item {
-		t.Errorf("Got item should not match because it was expired and should have been rebuilt from storage")
+	if gotItem != item {
+		// item was not expired and should be returned from memory
+		t.Errorf("Got item should match")
 	}
 
 	if gotItem.Value != item.Value {
 		t.Errorf("Wrong item value : got %s, want %s", gotItem.Value, item.Value)
 	}
 
+	cache.Release(ctx, path)
+
+	time.Sleep(110 * time.Millisecond)
+
+	gotCacheItem, err = cache.Get(ctx, path)
+	if err != nil {
+		t.Fatalf("Failed to get item : %s", err)
+	}
+
+	if gotCacheItem == nil {
+		t.Fatalf("Item not found")
+	}
+
+	gotItem, ok = gotCacheItem.(*TestItem)
+	if !ok {
+		t.Fatalf("Got item not a TestItem")
+	}
+
+	if gotItem == item {
+		// item was expired and should have been rebuilt from storage
+		t.Errorf("Got item should not match")
+	}
+
+	if gotItem.Value != item.Value {
+		t.Errorf("Wrong item value : got %s, want %s", gotItem.Value, item.Value)
+	}
+
+	cache.Release(ctx, path)
+
 	close(interrupt)
 	select {
-	case <-time.After(2 * time.Second):
+	case <-time.After(time.Second):
 		t.Errorf("Cache shutdown timed out")
 	case <-cacheComplete:
 	}
@@ -213,16 +247,18 @@ func GetTestItemPath(id bitcoin.Hash32) string {
 }
 
 func (i *TestItem) Path() string {
-	i.lock.Lock()
-	defer i.lock.Unlock()
-
 	return fmt.Sprintf("items/%s", bitcoin.Hash32(sha256.Sum256([]byte(i.Value))))
 }
 
-func (i *TestItem) Serialize(w io.Writer) error {
-	i.lock.Lock()
-	defer i.lock.Unlock()
+func (i *TestItem) IsModified() bool {
+	return i.isModified
+}
 
+func (i *TestItem) ClearModified() {
+	i.isModified = false
+}
+
+func (i *TestItem) Serialize(w io.Writer) error {
 	if err := binary.Write(w, binary.LittleEndian, uint32(len(i.Value))); err != nil {
 		return errors.Wrap(err, "size")
 	}
@@ -235,9 +271,6 @@ func (i *TestItem) Serialize(w io.Writer) error {
 }
 
 func (i *TestItem) Deserialize(r io.Reader) error {
-	i.lock.Lock()
-	defer i.lock.Unlock()
-
 	var size uint32
 	if err := binary.Read(r, binary.LittleEndian, &size); err != nil {
 		return errors.Wrap(err, "size")

@@ -33,9 +33,9 @@ type Config struct {
 	IsTest bool `default:"true" envconfig:"IS_TEST" json:"is_test"`
 
 	CacheRequestThreadCount int             `default:"4" envconfig:"CACHE_REQUEST_THREAD_COUNT" json:"cache_request_thread_count"`
+	CacheRequestTimeout     config.Duration `default:"1m" envconfig:"CACHE_REQUEST_TIMEOUT" json:"cache_request_timeout"`
 	CacheExpireCount        int             `default:"10000" envconfig:"CACHE_EXPIRE_COUNT" json:"cache_expire_count"`
 	CacheExpiration         config.Duration `default:"3s" envconfig:"CACHE_EXPIRATION" json:"cache_expiration"`
-	CacheRequestTimeout     config.Duration `default:"1m" envconfig:"CACHE_REQUEST_TIMEOUT" json:"cache_request_timeout"`
 
 	Wallet  wallet.Config      `json:"wallet"`
 	Storage storage.Config     `json:"storage"`
@@ -81,19 +81,19 @@ func main() {
 	}
 
 	contracts, err := state.NewContractCache(store, cfg.CacheRequestThreadCount,
-		cfg.CacheExpireCount, cfg.CacheExpiration.Duration, cfg.CacheRequestTimeout.Duration)
+		cfg.CacheRequestTimeout.Duration, cfg.CacheExpireCount, cfg.CacheExpiration.Duration)
 	if err != nil {
 		logger.Fatal(ctx, "main : Failed to create contracts cache : %s", err)
 	}
 
-	balances, err := state.NewBalanceCache(store, cfg.CacheRequestThreadCount, cfg.CacheExpireCount,
-		cfg.CacheExpiration.Duration, cfg.CacheRequestTimeout.Duration)
+	balances, err := state.NewBalanceCache(store, cfg.CacheRequestThreadCount,
+		cfg.CacheRequestTimeout.Duration, cfg.CacheExpireCount, cfg.CacheExpiration.Duration)
 	if err != nil {
 		logger.Fatal(ctx, "main : Failed to create balance cache : %s", err)
 	}
 
 	transactions, err := state.NewTransactionCache(store, cfg.CacheRequestThreadCount,
-		cfg.CacheExpireCount, cfg.CacheExpiration.Duration, cfg.CacheRequestTimeout.Duration)
+		cfg.CacheRequestTimeout.Duration, cfg.CacheExpireCount, cfg.CacheExpiration.Duration)
 	if err != nil {
 		logger.Fatal(ctx, "main : Failed to create transaction cache : %s", err)
 	}
@@ -167,7 +167,7 @@ func main() {
 	}
 
 	loadThread.Stop(ctx)
-	time.Sleep(time.Second)
+	time.Sleep(time.Second) // wait for loader to finish before stopping cachers
 	stopper.Stop(ctx)
 	wait.Wait()
 
@@ -201,7 +201,6 @@ func getTx(ctx context.Context, transactions *state.TransactionCache, woc *whats
 func getInputs(ctx context.Context, transactions *state.TransactionCache,
 	woc *whatsonchain.Service, transaction *state.Transaction) error {
 
-	modified := false
 	transaction.Lock()
 	for index, txin := range transaction.Tx.TxIn {
 		if _, err := transaction.InputLockingScript(index); err == nil {
@@ -222,12 +221,6 @@ func getInputs(ctx context.Context, transactions *state.TransactionCache,
 		transactions.Release(ctx, txin.PreviousOutPoint.Hash)
 	}
 	transaction.Unlock()
-
-	if modified {
-		if err := transactions.Save(ctx, transaction); err != nil {
-			return errors.Wrap(err, "save tx")
-		}
-	}
 
 	return nil
 }

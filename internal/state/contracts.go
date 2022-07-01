@@ -39,6 +39,7 @@ type Contract struct {
 
 	Instruments []*Instrument `bsor:"7" json:"instruments"`
 
+	isModified bool
 	sync.Mutex `bsor:"-"`
 }
 
@@ -49,11 +50,12 @@ type ContractLookup struct {
 
 type ContractID bitcoin.Hash32
 
-func NewContractCache(store storage.StreamStorage, fetcherCount, expireCount int,
-	expiration, fetchTimeout time.Duration) (*ContractCache, error) {
+func NewContractCache(store storage.StreamStorage, requestThreadCount int,
+	requestTimeout time.Duration, expireCount int,
+	expiration time.Duration) (*ContractCache, error) {
 
-	cacher, err := cacher.NewCache(store, reflect.TypeOf(&Contract{}), fetcherCount, expireCount,
-		expiration, fetchTimeout)
+	cacher, err := cacher.NewCache(store, reflect.TypeOf(&Contract{}), requestThreadCount,
+		requestTimeout, expireCount, expiration)
 	if err != nil {
 		return nil, errors.Wrap(err, "cacher")
 	}
@@ -100,6 +102,10 @@ func (c *ContractCache) Run(ctx context.Context, interrupt <-chan interface{}) e
 	return c.cacher.Run(ctx, interrupt)
 }
 
+func (c *ContractCache) Save(ctx context.Context, contract *Contract) {
+	c.cacher.Save(ctx, contract)
+}
+
 func (c *ContractCache) Add(ctx context.Context, contract *Contract) (*Contract, error) {
 	item, err := c.cacher.Add(ctx, contract)
 	if err != nil {
@@ -120,10 +126,6 @@ func (c *ContractCache) Get(ctx context.Context, lockingScript bitcoin.Script) (
 	}
 
 	return item.(*Contract), nil
-}
-
-func (c *ContractCache) Save(ctx context.Context, contract *Contract) error {
-	return c.cacher.Save(ctx, contract)
 }
 
 func (c *ContractCache) Release(ctx context.Context, lockingScript bitcoin.Script) {
@@ -149,20 +151,27 @@ func (c *Contract) GetInstrument(instrumentCode InstrumentCode) *Instrument {
 }
 
 func (c *Contract) Path() string {
-	c.Lock()
-	defer c.Unlock()
-
 	return ContractPath(c.LockingScript)
 }
 
+func (c *Contract) MarkModified() {
+	c.isModified = true
+}
+
+func (c *Contract) ClearModified() {
+	c.isModified = false
+}
+
+func (c *Contract) IsModified() bool {
+	return c.isModified
+}
+
 func (c *Contract) Serialize(w io.Writer) error {
-	c.Lock()
 	b, err := bsor.MarshalBinary(c)
 	if err != nil {
 		c.Unlock()
 		return errors.Wrap(err, "marshal")
 	}
-	c.Unlock()
 
 	if err := binary.Write(w, endian, contractVersion); err != nil {
 		return errors.Wrap(err, "version")

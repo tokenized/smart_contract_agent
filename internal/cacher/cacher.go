@@ -23,47 +23,61 @@ var (
 // CacheValue represents the item being cached. It must be a pointer type that implements these
 // functions.
 type CacheValue interface {
+	// Object has been modified since last write to storage.
+	IsModified() bool
+	ClearModified()
+
+	// Storage path and serialization.
 	Path() string
 	Serialize(w io.Writer) error
 	Deserialize(r io.Reader) error
+
+	// All functions will be called by cache while the object is locked.
+	Lock()
+	Unlock()
 }
 
+// Cache is a locked caching system that retrieves values from storage and keeps them in memory for
+// a certain amount of time after they are no longer used in case they are used again.
+// The users of cache must be stopped before stopping the cache so that the cache can complete any
+// active requests. This is needed to prevent partial value updates.
 type Cache struct {
 	typ reflect.Type
 
 	store storage.StreamStorage
 
-	expiration     time.Duration
-	expirationLock sync.Mutex
-
 	requestThreadCount int
 	requestTimeout     time.Duration
 	requestTimeoutLock sync.Mutex
+	requests           chan *Request
 
-	requests     chan *Request
-	requestsLock sync.Mutex
+	saving chan *CacheItem
+
+	expireThreadCount int
+	expiration        time.Duration
+	expirers          chan *ExpireItem
 
 	items        map[string]*CacheItem
 	itemsLock    sync.Mutex
 	itemsAddLock sync.Mutex
 
-	// TODO Add function to check if expires is full and being waited on, then don't wait for
-	// expiration. This also limits the number of items in memory.
-	expirers   chan *ExpireItem
-	expireLock sync.Mutex
+	itemsUseCount     int
+	itemsUseCountLock sync.Mutex
 }
 
 type CacheItem struct {
 	value CacheValue
 
+	isNew    bool
 	users    uint
 	lastUsed time.Time
 	sync.Mutex
 }
 
-func NewCache(store storage.StreamStorage, typ reflect.Type, requestThreadCount, expireCount int,
-	expiration, requestTimeout time.Duration) (*Cache, error) {
+func NewCache(store storage.StreamStorage, typ reflect.Type, requestThreadCount int,
+	requestTimeout time.Duration, expireCount int, expiration time.Duration) (*Cache, error) {
 
+	// Verify item value type is valid for a cache item.
 	if typ.Kind() != reflect.Ptr {
 		return nil, errors.New("Type must be a pointer")
 	}
@@ -81,12 +95,14 @@ func NewCache(store storage.StreamStorage, typ reflect.Type, requestThreadCount,
 	return &Cache{
 		typ:                typ,
 		store:              store,
-		expiration:         expiration,
 		requestThreadCount: requestThreadCount,
 		requestTimeout:     requestTimeout,
 		requests:           make(chan *Request, 100),
-		items:              make(map[string]*CacheItem),
+		saving:             make(chan *CacheItem, 100),
+		expireThreadCount:  4,
+		expiration:         expiration,
 		expirers:           make(chan *ExpireItem, expireCount),
+		items:              make(map[string]*CacheItem),
 	}, nil
 }
 
@@ -95,15 +111,6 @@ func (c *Cache) RequestTimeout() time.Duration {
 	defer c.requestTimeoutLock.Unlock()
 
 	return c.requestTimeout
-}
-
-func (c *Cache) Save(ctx context.Context, value CacheValue) error {
-	path := value.Path()
-	if err := storage.StreamWrite(ctx, c.store, path, value); err != nil {
-		return errors.Wrapf(err, "write %s", path)
-	}
-
-	return nil
 }
 
 // Add adds an item if it isn't in the cache or storage yet. If it is already in the cache or
@@ -128,18 +135,14 @@ func (c *Cache) Add(ctx context.Context, value CacheValue) (CacheValue, error) {
 	}
 
 	newItem := &CacheItem{
-		value:    value,
-		users:    1,
-		lastUsed: time.Now(),
+		isNew: true,
+		value: value,
 	}
+	c.addUser(newItem)
 
 	c.itemsLock.Lock()
 	c.items[path] = newItem
 	c.itemsLock.Unlock()
-
-	if err := c.Save(ctx, value); err != nil {
-		return nil, errors.Wrap(err, "save")
-	}
 
 	return value, nil
 }
@@ -168,19 +171,15 @@ func (c *Cache) AddMulti(ctx context.Context, values []CacheValue) ([]CacheValue
 		}
 
 		newItem := &CacheItem{
-			value:    values[i],
-			users:    1,
-			lastUsed: time.Now(),
+			isNew: true,
+			value: values[i],
 		}
+		c.addUser(newItem)
 		result[i] = values[i]
 
 		c.itemsLock.Lock()
 		c.items[paths[i]] = newItem
 		c.itemsLock.Unlock()
-
-		if err := c.Save(ctx, values[i]); err != nil {
-			return nil, errors.Wrap(err, "save")
-		}
 	}
 
 	return result, nil
@@ -205,7 +204,6 @@ func (c *Cache) Get(ctx context.Context, path string) (CacheValue, error) {
 		}
 
 		if item, ok := r.(*CacheItem); ok {
-			item.addUser()
 			return item.value, nil
 		}
 
@@ -242,7 +240,6 @@ func (c *Cache) GetMulti(ctx context.Context, paths []string) ([]CacheValue, err
 			}
 
 			if item, ok := r.(*CacheItem); ok {
-				item.addUser()
 				result[i] = item.value
 				continue
 			}
@@ -260,6 +257,32 @@ func (c *Cache) GetMulti(ctx context.Context, paths []string) ([]CacheValue, err
 	return result, nil
 }
 
+// Save adds an item to the saving thread to be saved to storage if it is modified or new. This
+// automatically happens on release of the item, but this function can be called to ensure the
+// object is written even if it is held onto for a long time.
+func (c *Cache) Save(ctx context.Context, value CacheValue) {
+	value.Lock()
+	path := value.Path()
+	isModified := value.IsModified()
+	value.Unlock()
+
+	c.itemsLock.Lock()
+	item, exists := c.items[path]
+	if !exists {
+		c.itemsLock.Unlock()
+		panic(fmt.Sprintf("Item saved when not in cache: %s\n", path))
+	}
+	item.Lock()
+	isNew := item.isNew
+	item.Unlock()
+	c.itemsLock.Unlock()
+
+	if isNew || isModified {
+		c.addUserNoLock(item) // add user until save completes
+		c.saving <- item
+	}
+}
+
 // Release notifies the cache that the item is no longer being used and can be expired. When there
 // are no users remaining then the item will be set to expire
 func (c *Cache) Release(ctx context.Context, path string) {
@@ -272,45 +295,83 @@ func (c *Cache) Release(ctx context.Context, path string) {
 	item.Lock()
 	c.itemsLock.Unlock()
 
+	c.releaseItem(ctx, item, path)
+	item.Unlock()
+}
+
+func (c *Cache) releaseItem(ctx context.Context, item *CacheItem, path string) {
+	item.value.Lock()
+	isModified := item.value.IsModified()
+	item.value.Unlock()
+
+	if item.isNew || isModified {
+		c.addUserNoLock(item) // add user until save completes
+		c.saving <- item
+	}
+
 	if item.users == 0 {
-		item.Unlock()
 		panic(fmt.Sprintf("Item released with no users: %s\n", path))
 	}
 
 	item.users--
 	if item.users > 0 {
-		item.Unlock()
 		return
 	}
+
+	c.itemsUseCountLock.Lock()
+	c.itemsUseCount--
+	c.itemsUseCountLock.Unlock()
 
 	// Add to expirers
 	now := time.Now()
 	item.lastUsed = now
-	item.Unlock()
 
-	c.expireLock.Lock()
-	if c.expirers != nil {
-		c.expirers <- &ExpireItem{
-			item:     item,
-			lastUsed: now,
-		}
+	c.expirers <- &ExpireItem{
+		item:     item,
+		lastUsed: now,
 	}
-	c.expireLock.Unlock()
+}
+
+func (c *Cache) addUserNoLock(item *CacheItem) {
+	if item.users == 0 {
+		c.itemsUseCountLock.Lock()
+		c.itemsUseCount++
+		c.itemsUseCountLock.Unlock()
+	}
+
+	item.users++
+}
+
+func (c *Cache) addUser(item *CacheItem) {
+	item.Lock()
+	defer item.Unlock()
+
+	if item.users == 0 {
+		c.itemsUseCountLock.Lock()
+		c.itemsUseCount++
+		c.itemsUseCountLock.Unlock()
+	}
+
+	item.users++
 }
 
 // Run runs threads that fetch items from storage and expire items.
 func (c *Cache) Run(ctx context.Context, interrupt <-chan interface{}) error {
-	errors := make([]error, c.requestThreadCount+1)
-	selects := make([]reflect.SelectCase, c.requestThreadCount+2)
+	errs := make([]error, c.requestThreadCount+c.expireThreadCount+1)
+	selects := make([]reflect.SelectCase, c.requestThreadCount+c.expireThreadCount+2)
 	selectIndex := 0
 	var wait sync.WaitGroup
 
-	for ; selectIndex < c.requestThreadCount; selectIndex++ {
+	requestsInterrupts := make([]chan interface{}, c.requestThreadCount)
+	for i := 0; i < c.requestThreadCount; i++ {
 		requestsComplete := make(chan interface{})
-		requestIndex := selectIndex
+		requestsInterrupt := make(chan interface{})
+		requestsInterrupts[i] = requestsInterrupt
+		requestSelectIndex := selectIndex
+		requestIndex := i
 		wait.Add(1)
 		go func() {
-			errors[requestIndex] = c.handleRequests(ctx, requestIndex)
+			errs[requestSelectIndex] = c.runHandleRequests(ctx, requestsInterrupt, requestIndex)
 			close(requestsComplete)
 			wait.Done()
 		}()
@@ -319,22 +380,45 @@ func (c *Cache) Run(ctx context.Context, interrupt <-chan interface{}) error {
 			Dir:  reflect.SelectRecv,
 			Chan: reflect.ValueOf(requestsComplete),
 		}
+		selectIndex++
 	}
 
-	expireComplete := make(chan interface{})
-	expireIndex := selectIndex
+	saveComplete := make(chan interface{})
+	saveInterrupt := make(chan interface{})
+	saveIndex := selectIndex
 	wait.Add(1)
 	go func() {
-		errors[expireIndex] = c.expireItems(ctx)
-		close(expireComplete)
+		errs[saveIndex] = c.runSaveItems(ctx, saveInterrupt)
+		close(saveComplete)
 		wait.Done()
 	}()
 
 	selects[selectIndex] = reflect.SelectCase{
 		Dir:  reflect.SelectRecv,
-		Chan: reflect.ValueOf(expireComplete),
+		Chan: reflect.ValueOf(saveComplete),
 	}
 	selectIndex++
+
+	expireInterrupts := make([]chan interface{}, c.expireThreadCount)
+	for i := 0; i < c.expireThreadCount; i++ {
+		expireComplete := make(chan interface{})
+		expireInterrupt := make(chan interface{})
+		expireInterrupts[i] = expireInterrupt
+		expireSelectIndex := selectIndex
+		expireIndex := i
+		wait.Add(1)
+		go func() {
+			errs[expireSelectIndex] = c.runExpireItems(ctx, expireInterrupt, expireIndex)
+			close(expireComplete)
+			wait.Done()
+		}()
+
+		selects[selectIndex] = reflect.SelectCase{
+			Dir:  reflect.SelectRecv,
+			Chan: reflect.ValueOf(expireComplete),
+		}
+		selectIndex++
+	}
 
 	interruptIndex := selectIndex
 	selects[selectIndex] = reflect.SelectCase{
@@ -343,38 +427,61 @@ func (c *Cache) Run(ctx context.Context, interrupt <-chan interface{}) error {
 	}
 
 	index, _, _ := reflect.Select(selects)
-	if index == expireIndex {
-		logger.Error(ctx, "Cache Expire Completed : %s", errors[index])
+	if index < saveIndex {
+		logger.Error(ctx, "Cache Handle Requests %d Completed : %s", index, errs[index])
+	} else if index == saveIndex {
+		logger.Error(ctx, "Cache Save %d Completed : %s", index, errs[index])
 	} else if index < interruptIndex {
-		logger.Error(ctx, "Cache Handle Requests %d Completed : %s", index, errors[index])
+		logger.Error(ctx, "Cache Expire %d Completed : %s", index, errs[index])
 	}
 
 	logger.Verbose(ctx, "Shutting down cache")
 
-	// stop new requests from being added
-	c.requestsLock.Lock()
-	requests := c.requests
-	c.requests = nil
-	c.requestsLock.Unlock()
+	// Stop runHandleRequests threads
+	for _, requestsInterrupt := range requestsInterrupts {
+		close(requestsInterrupt)
+	}
+	var finishHandlingRequestsErr error
+	wait.Add(1)
+	go func() {
+		finishHandlingRequestsErr = c.finishHandlingRequests(ctx)
+		close(c.requests)
+		wait.Done()
+	}()
 
-	// flush any existing requests
-	flushRequests(requests, ErrShuttingDown)
-	close(requests)
+	// Stop runSaveItems thread
+	close(saveInterrupt)
+	var finishSavingErr error
+	wait.Add(1)
+	go func() {
+		finishSavingErr = c.finishSaving(ctx)
+		close(c.saving)
+		wait.Done()
+	}()
 
-	c.expireLock.Lock()
-	close(c.expirers)
-	c.expirers = nil
-	c.expireLock.Unlock()
+	// Stop runExpireItems thread
+	for _, expireInterrupt := range expireInterrupts {
+		close(expireInterrupt)
+	}
+	wait.Add(1)
+	var finishExpiringErr error
+	go func() {
+		finishExpiringErr = c.finishExpiring(ctx)
+		close(c.expirers)
+		wait.Done()
+	}()
 
 	wait.Wait()
 
-	return threads.CombineErrors(errors...)
-}
+	if finishHandlingRequestsErr != nil {
+		errs = append(errs, finishHandlingRequestsErr)
+	}
+	if finishSavingErr != nil {
+		errs = append(errs, finishSavingErr)
+	}
+	if finishExpiringErr != nil {
+		errs = append(errs, finishExpiringErr)
+	}
 
-func (w *CacheItem) addUser() {
-	w.Lock()
-	defer w.Unlock()
-
-	w.users++
-	w.lastUsed = time.Now()
+	return threads.CombineErrors(errs...)
 }

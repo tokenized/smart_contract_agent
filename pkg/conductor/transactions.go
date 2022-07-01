@@ -61,12 +61,7 @@ func (c *Conductor) addTx(ctx context.Context, txid bitcoin.Hash32,
 		mp := spyNodeTx.State.MerkleProof.ConvertToMerkleProof(txid)
 		// Transaction already existed, so try to add the merkle proof to it.
 		addedTx.Lock()
-		if addedTx.AddMerkleProof(mp) {
-			addedTx.Unlock()
-			if err := c.transactions.Save(ctx, addedTx); err != nil {
-				return nil, errors.Wrap(err, "save tx")
-			}
-		}
+		addedTx.AddMerkleProof(mp)
 		addedTx.Unlock()
 	}
 
@@ -82,12 +77,8 @@ func (c *Conductor) UpdateTransaction(ctx context.Context, transaction *state.Tr
 		}
 
 		transaction.IsProcessed = true
+		transaction.MarkModified()
 		transaction.Unlock()
-
-		if err := c.transactions.Save(ctx, transaction); err != nil {
-			return errors.Wrap(err, "save tx")
-		}
-
 		return nil
 	}
 
@@ -97,8 +88,8 @@ func (c *Conductor) UpdateTransaction(ctx context.Context, transaction *state.Tr
 
 		// TODO Perform actions to resolve unsafe or double spent tx. --ce
 	}
-	transaction.Unlock()
 
+	transaction.Unlock()
 	return nil
 }
 

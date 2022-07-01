@@ -140,12 +140,8 @@ func (a *Agent) processSettlement(ctx context.Context, transaction TransactionWi
 				addedBalances[i].Quantity = balance.Quantity
 				addedBalances[i].Timestamp = settlement.Timestamp
 				addedBalances[i].TxID = &txid
+				addedBalances[i].MarkModified()
 				addedBalances[i].Unlock()
-
-				if err := a.balances.Save(ctx, agentLockingScript, instrumentCode,
-					addedBalances[i]); err != nil {
-					return errors.Wrap(err, "save balance")
-				}
 			}
 		}
 	}

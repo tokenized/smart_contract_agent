@@ -44,24 +44,24 @@ func (c *Conductor) HandleTxUpdate(ctx context.Context, txUpdate *spynode.TxUpda
 	}
 	defer c.transactions.Release(ctx, txUpdate.TxID)
 
-	modified := false
 	transaction.Lock()
+
 	if txUpdate.State.Safe {
 		if transaction.State&wallet.TxStateSafe == 0 {
 			transaction.State = wallet.TxStateSafe
-			modified = true
+			transaction.MarkModified()
 		}
 	} else {
 		if txUpdate.State.UnSafe {
 			if transaction.State&wallet.TxStateUnsafe == 0 {
 				transaction.State |= wallet.TxStateUnsafe
-				modified = true
+				transaction.MarkModified()
 			}
 		}
 		if txUpdate.State.Cancelled {
 			if transaction.State&wallet.TxStateCancelled == 0 {
 				transaction.State |= wallet.TxStateCancelled
-				modified = true
+				transaction.MarkModified()
 			}
 		}
 	}
@@ -69,18 +69,11 @@ func (c *Conductor) HandleTxUpdate(ctx context.Context, txUpdate *spynode.TxUpda
 	if txUpdate.State.MerkleProof != nil {
 		mp := txUpdate.State.MerkleProof.ConvertToMerkleProof(txUpdate.TxID)
 		if transaction.AddMerkleProof(mp) {
-			modified = true
+			transaction.MarkModified()
 		}
 	}
 
 	transaction.Unlock()
-
-	if modified {
-		if err := c.transactions.Save(ctx, transaction); err != nil {
-			logger.Error(ctx, "Failed to save tx : %s", err)
-			return
-		}
-	}
 
 	if err := c.UpdateTransaction(ctx, transaction); err != nil {
 		logger.Error(ctx, "Failed to update tx : %s", err)

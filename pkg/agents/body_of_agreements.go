@@ -39,6 +39,7 @@ func (a *Agent) processBodyOfAgreementFormation(ctx context.Context,
 	a.contract.BodyOfAgreementFormation = formation
 	txid := transaction.TxID()
 	a.contract.BodyOfAgreementFormationTxID = &txid
+	a.contract.MarkModified()
 
 	logger.InfoWithFields(ctx, []logger.Field{
 		logger.Timestamp("timestamp", int64(formation.Timestamp)),
@@ -46,9 +47,7 @@ func (a *Agent) processBodyOfAgreementFormation(ctx context.Context,
 
 	a.contract.Unlock()
 
-	if err := a.contracts.Save(ctx, a.contract); err != nil {
-		return errors.Wrap(err, "save contract")
-	}
+	a.contracts.Save(ctx, a.contract)
 
 	return nil
 }
