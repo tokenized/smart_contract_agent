@@ -53,7 +53,7 @@ func Test_NotFound(t *testing.T) {
 
 	close(interrupt)
 	select {
-	case <-time.After(time.Second):
+	case <-time.After(2 * time.Second):
 		t.Errorf("Cache shutdown timed out")
 	case <-cacheComplete:
 	}
@@ -143,7 +143,7 @@ func Test_Add(t *testing.T) {
 
 	close(interrupt)
 	select {
-	case <-time.After(time.Second):
+	case <-time.After(2 * time.Second):
 		t.Errorf("Cache shutdown timed out")
 	case <-cacheComplete:
 	}
@@ -202,7 +202,7 @@ func Test_Expire(t *testing.T) {
 
 	close(interrupt)
 	select {
-	case <-time.After(time.Second):
+	case <-time.After(2 * time.Second):
 		t.Errorf("Cache shutdown timed out")
 	case <-cacheComplete:
 	}

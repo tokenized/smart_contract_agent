@@ -212,13 +212,6 @@ func (c *Conductor) compileAction(ctx context.Context, agentActionsList *AgentAc
 				return errors.Wrap(err, "input locking script")
 			}
 
-			if ra, err := bitcoin.RawAddressFromLockingScript(lockingScript); err == nil {
-				logger.InfoWithFields(ctx, []logger.Field{
-					logger.Stringer("address", bitcoin.NewAddressFromRawAddress(ra, bitcoin.MainNet)),
-					logger.Stringer("locking_script", lockingScript),
-				}, "Settlement found")
-			}
-
 			if err := c.addAgentAction(ctx, agentActionsList, lockingScript, action); err != nil {
 				return errors.Wrap(err, "add agent action")
 			}

@@ -2,6 +2,10 @@ package cacher
 
 import (
 	"context"
+	"reflect"
+	"time"
+
+	"github.com/tokenized/pkg/storage"
 
 	"github.com/pkg/errors"
 )
@@ -30,24 +34,17 @@ func (c *Cache) createRequest(ctx context.Context, path string) (<-chan interfac
 	return response, nil
 }
 
-func (c *Cache) handleRequests(ctx context.Context) error {
-	var returnErr error
+func (c *Cache) handleRequests(ctx context.Context, threadIndex int) error {
 	for request := range c.requests {
-		if err := c.handleRequest(ctx, request); err != nil {
-			returnErr = err
-			break
+		if err := c.handleRequest(ctx, threadIndex, request); err != nil {
+			return err
 		}
 	}
 
-	return returnErr
+	return nil
 }
 
-func (c *Cache) handleRequest(ctx context.Context, request *Request) error {
-	// Check if item already exists. It could have been in a pending request when originally
-	// fetched.
-	c.itemsFetchLock.Lock()
-	defer c.itemsFetchLock.Unlock()
-
+func (c *Cache) handleRequest(ctx context.Context, threadIndex int, request *Request) error {
 	c.itemsLock.Lock()
 	item, exists := c.items[request.path]
 	if exists {
@@ -58,22 +55,58 @@ func (c *Cache) handleRequest(ctx context.Context, request *Request) error {
 	}
 	c.itemsLock.Unlock()
 
-	// Fetch from storage.
-	fetchResponse := make(chan interface{})
-	if err := c.addFetcher(ctx, request.path, fetchResponse); err != nil {
-		return errors.Wrap(err, "add fetcher")
+	value, err := c.fetchValue(ctx, request.path)
+	if err != nil {
+		return errors.Wrapf(err, "read: %s", request.path)
 	}
 
-	c.fetcherWait.Add(1)
-	go func() {
-		c.waitForFetch(ctx, request, fetchResponse)
-		c.fetcherWait.Done()
-	}()
+	if value == nil { // not found in storage
+		request.response <- nil
+		return nil
+	}
 
+	c.itemsLock.Lock()
+	item, exists = c.items[request.path]
+	if exists {
+		// Already fetched in another thread
+		item.addUser()
+		c.itemsLock.Unlock()
+
+		request.response <- item
+		return nil
+	}
+
+	item = &CacheItem{
+		value:    value,
+		users:    1,
+		lastUsed: time.Now(),
+	}
+
+	// Add to items
+	c.items[request.path] = item
+	c.itemsLock.Unlock()
+
+	request.response <- item
 	return nil
 }
 
-func clearRequests(requests chan *Request, err error) {
+func (c *Cache) fetchValue(ctx context.Context, path string) (CacheValue, error) {
+	itemValue := reflect.New(c.typ.Elem())
+	itemInterface := itemValue.Interface()
+	item := itemInterface.(CacheValue)
+
+	if err := storage.StreamRead(ctx, c.store, path, item); err != nil {
+		if errors.Cause(err) == storage.ErrNotFound {
+			return nil, nil
+		}
+
+		return nil, errors.Wrapf(err, "read: %s", path)
+	}
+
+	return item, nil
+}
+
+func flushRequests(requests chan *Request, err error) {
 	for {
 		select {
 		case request := <-requests:

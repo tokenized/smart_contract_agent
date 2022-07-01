@@ -7,6 +7,7 @@ import (
 	"github.com/tokenized/pkg/logger"
 	"github.com/tokenized/smart_contract_agent/internal/state"
 	"github.com/tokenized/specification/dist/golang/actions"
+	"github.com/tokenized/specification/dist/golang/protocol"
 
 	"github.com/pkg/errors"
 )
@@ -28,13 +29,22 @@ func (a *Agent) processTransfer(ctx context.Context, transaction TransactionWith
 		if agentLockingScript.Equal(contractOutput.LockingScript) {
 			found = true
 		}
+
+		fields := []logger.Field{
+			logger.Stringer("locking_script", agentLockingScript),
+		}
+
+		instrumentID, err := protocol.InstrumentIDForTransfer(instrument)
+		if err == nil {
+			fields = append(fields, logger.String("instrument_id", instrumentID))
+		}
+
+		logger.InfoWithFields(ctx, fields, "Processing transfer")
 	}
 
 	if !found {
 		return nil // Not for this contract
 	}
-
-	logger.Info(ctx, "Processing transfer")
 
 	return nil
 }
@@ -42,8 +52,6 @@ func (a *Agent) processTransfer(ctx context.Context, transaction TransactionWith
 func (a *Agent) processSettlement(ctx context.Context, transaction TransactionWithOutputs,
 	settlement *actions.Settlement) error {
 	txid := transaction.TxID()
-
-	logger.Info(ctx, "Processing settlement")
 
 	agentLockingScript := a.LockingScript()
 
@@ -76,6 +84,17 @@ func (a *Agent) processSettlement(ctx context.Context, transaction TransactionWi
 			return nil
 		}
 
+		fields := []logger.Field{
+			logger.Stringer("locking_script", agentLockingScript),
+		}
+
+		instrumentID, err := protocol.InstrumentIDForSettlement(instrument)
+		if err == nil {
+			fields = append(fields, logger.String("instrument_id", instrumentID))
+		}
+
+		logger.InfoWithFields(ctx, fields, "Processing settlement")
+
 		// Build balances based on the instrument's settlement quantities.
 		outputCount := transaction.OutputCount()
 		balances := make([]*state.Balance, len(instrument.Settlements))
@@ -97,7 +116,7 @@ func (a *Agent) processSettlement(ctx context.Context, transaction TransactionWi
 		addedBalances, err := a.balances.AddMulti(ctx, agentLockingScript, instrumentCode,
 			balances)
 		if err != nil {
-			return errors.Wrap(err, "get balances")
+			return errors.Wrap(err, "add balances")
 		}
 		defer a.balances.ReleaseMulti(ctx, agentLockingScript, instrumentCode, addedBalances)
 

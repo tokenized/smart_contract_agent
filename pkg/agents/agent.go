@@ -113,9 +113,9 @@ func (a *Agent) Process(ctx context.Context, transaction TransactionWithOutputs,
 		logger.Stringer("txid", transaction.TxID()),
 	}, "Processing transaction")
 
-	for _, action := range actions {
+	for i, action := range actions {
 		if err := a.processAction(ctx, transaction, action); err != nil {
-			return errors.Wrap(err, "process action")
+			return errors.Wrapf(err, "process action %d: %s", i, action.Code())
 		}
 	}
 

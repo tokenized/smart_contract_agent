@@ -36,23 +36,16 @@ type Cache struct {
 	expiration     time.Duration
 	expirationLock sync.Mutex
 
-	fetchTimeout     time.Duration
-	fetchTimeoutLock sync.Mutex
+	requestThreadCount int
+	requestTimeout     time.Duration
+	requestTimeoutLock sync.Mutex
 
 	requests     chan *Request
 	requestsLock sync.Mutex
 
-	fetchers    []*Fetcher
-	fetcherLock sync.Mutex
-	fetcherWait sync.WaitGroup
-
-	newFetchers     chan *Fetcher
-	newFetchersLock sync.Mutex
-
-	items          map[string]*CacheItem
-	itemsLock      sync.Mutex
-	itemsAddLock   sync.Mutex
-	itemsFetchLock sync.Mutex
+	items        map[string]*CacheItem
+	itemsLock    sync.Mutex
+	itemsAddLock sync.Mutex
 
 	// TODO Add function to check if expires is full and being waited on, then don't wait for
 	// expiration. This also limits the number of items in memory.
@@ -68,8 +61,8 @@ type CacheItem struct {
 	sync.Mutex
 }
 
-func NewCache(store storage.StreamStorage, typ reflect.Type, fetcherCount, expireCount int,
-	expiration, fetchTimeout time.Duration) (*Cache, error) {
+func NewCache(store storage.StreamStorage, typ reflect.Type, requestThreadCount, expireCount int,
+	expiration, requestTimeout time.Duration) (*Cache, error) {
 
 	if typ.Kind() != reflect.Ptr {
 		return nil, errors.New("Type must be a pointer")
@@ -86,16 +79,22 @@ func NewCache(store storage.StreamStorage, typ reflect.Type, fetcherCount, expir
 	}
 
 	return &Cache{
-		typ:          typ,
-		store:        store,
-		expiration:   expiration,
-		fetchTimeout: fetchTimeout,
-		requests:     make(chan *Request, 100),
-		fetchers:     make([]*Fetcher, fetcherCount),
-		newFetchers:  make(chan *Fetcher, fetcherCount),
-		items:        make(map[string]*CacheItem),
-		expirers:     make(chan *ExpireItem, expireCount),
+		typ:                typ,
+		store:              store,
+		expiration:         expiration,
+		requestThreadCount: requestThreadCount,
+		requestTimeout:     requestTimeout,
+		requests:           make(chan *Request, 100),
+		items:              make(map[string]*CacheItem),
+		expirers:           make(chan *ExpireItem, expireCount),
 	}, nil
+}
+
+func (c *Cache) RequestTimeout() time.Duration {
+	c.requestTimeoutLock.Lock()
+	defer c.requestTimeoutLock.Unlock()
+
+	return c.requestTimeout
 }
 
 func (c *Cache) Save(ctx context.Context, value CacheValue) error {
@@ -192,22 +191,13 @@ func (c *Cache) AddMulti(ctx context.Context, values []CacheValue) ([]CacheValue
 // then (nil, nil) is returned. Release must be called after the item is no longer used to allow it
 // to expire from the cache.
 func (c *Cache) Get(ctx context.Context, path string) (CacheValue, error) {
-	c.itemsLock.Lock()
-	item, exists := c.items[path]
-	if exists {
-		item.addUser()
-		c.itemsLock.Unlock()
-		return item.value, nil
-	}
-	c.itemsLock.Unlock()
-
 	response, err := c.createRequest(ctx, path)
 	if err != nil {
 		return nil, errors.Wrap(err, "request")
 	}
 
 	// Wait for the item to be retrieved.
-	timeout := c.FetchTimeout()
+	timeout := c.RequestTimeout()
 	select {
 	case r := <-response:
 		if r == nil {
@@ -222,50 +212,28 @@ func (c *Cache) Get(ctx context.Context, path string) (CacheValue, error) {
 		return nil, r.(error)
 
 	case <-time.After(timeout):
+		logger.ErrorWithFields(ctx, []logger.Field{
+			logger.String("path", path),
+		}, "Get timed out")
 		return nil, errors.Wrapf(ErrTimedOut, "%s", timeout)
 	}
 }
 
 func (c *Cache) GetMulti(ctx context.Context, paths []string) ([]CacheValue, error) {
-	result := make([]CacheValue, len(paths))
-
-	c.itemsLock.Lock()
-	foundAll := true
-	for i, path := range paths {
-		item, exists := c.items[path]
-		if exists {
-			item.addUser()
-			result[i] = item.value
-		} else {
-			foundAll = false
-		}
-	}
-	c.itemsLock.Unlock()
-
-	if foundAll {
-		return result, nil
-	}
-
 	// Create all requests
-	responses := make([]<-chan interface{}, len(result))
-	for i, value := range result {
-		if value != nil {
-			continue // already have this value
-		}
-		response, err := c.createRequest(ctx, paths[i])
+	responses := make([]<-chan interface{}, len(paths))
+	for i, path := range paths {
+		response, err := c.createRequest(ctx, path)
 		if err != nil {
 			return nil, errors.Wrap(err, "request")
 		}
 		responses[i] = response
 	}
 
-	// Wait for the item to be retrieved.
-	timeout := c.FetchTimeout()
+	// Wait for the items to be retrieved.
+	result := make([]CacheValue, len(paths))
+	timeout := c.RequestTimeout()
 	for i, response := range responses {
-		if response == nil {
-			continue // already have this value
-		}
-
 		select {
 		case r := <-response:
 			if r == nil {
@@ -282,6 +250,9 @@ func (c *Cache) GetMulti(ctx context.Context, paths []string) ([]CacheValue, err
 			return nil, r.(error)
 
 		case <-time.After(timeout):
+			logger.ErrorWithFields(ctx, []logger.Field{
+				logger.String("path", paths[i]),
+			}, "Get multi timed out")
 			return nil, errors.Wrapf(ErrTimedOut, "%s", timeout)
 		}
 	}
@@ -329,58 +300,75 @@ func (c *Cache) Release(ctx context.Context, path string) {
 
 // Run runs threads that fetch items from storage and expire items.
 func (c *Cache) Run(ctx context.Context, interrupt <-chan interface{}) error {
+	errors := make([]error, c.requestThreadCount+1)
+	selects := make([]reflect.SelectCase, c.requestThreadCount+2)
+	selectIndex := 0
 	var wait sync.WaitGroup
 
-	var handleRequestsError error
-	requestsComplete := make(chan interface{})
-	wait.Add(1)
-	go func() {
-		handleRequestsError = c.handleRequests(ctx)
-		close(requestsComplete)
-		wait.Done()
-	}()
+	for ; selectIndex < c.requestThreadCount; selectIndex++ {
+		requestsComplete := make(chan interface{})
+		requestIndex := selectIndex
+		wait.Add(1)
+		go func() {
+			errors[requestIndex] = c.handleRequests(ctx, requestIndex)
+			close(requestsComplete)
+			wait.Done()
+		}()
 
-	var expireError error
+		selects[selectIndex] = reflect.SelectCase{
+			Dir:  reflect.SelectRecv,
+			Chan: reflect.ValueOf(requestsComplete),
+		}
+	}
+
 	expireComplete := make(chan interface{})
+	expireIndex := selectIndex
 	wait.Add(1)
 	go func() {
-		expireError = c.expireItems(ctx)
+		errors[expireIndex] = c.expireItems(ctx)
 		close(expireComplete)
 		wait.Done()
 	}()
 
-	select {
-	case <-requestsComplete:
-		logger.Error(ctx, "Cache Handle Requests Completed : %s", handleRequestsError)
-	case <-expireComplete:
-		logger.Error(ctx, "Cache Expire Completed : %s", expireError)
-	case <-interrupt:
+	selects[selectIndex] = reflect.SelectCase{
+		Dir:  reflect.SelectRecv,
+		Chan: reflect.ValueOf(expireComplete),
+	}
+	selectIndex++
+
+	interruptIndex := selectIndex
+	selects[selectIndex] = reflect.SelectCase{
+		Dir:  reflect.SelectRecv,
+		Chan: reflect.ValueOf(interrupt),
 	}
 
-	c.newFetchersLock.Lock()
-	clearFetchers(c.newFetchers, ErrShuttingDown)
-	close(c.newFetchers)
-	c.newFetchers = nil
-	c.newFetchersLock.Unlock()
+	index, _, _ := reflect.Select(selects)
+	if index == expireIndex {
+		logger.Error(ctx, "Cache Expire Completed : %s", errors[index])
+	} else if index < interruptIndex {
+		logger.Error(ctx, "Cache Handle Requests %d Completed : %s", index, errors[index])
+	}
 
+	logger.Verbose(ctx, "Shutting down cache")
+
+	// stop new requests from being added
 	c.requestsLock.Lock()
-	clearRequests(c.requests, ErrShuttingDown)
-	close(c.requests)
+	requests := c.requests
 	c.requests = nil
 	c.requestsLock.Unlock()
+
+	// flush any existing requests
+	flushRequests(requests, ErrShuttingDown)
+	close(requests)
 
 	c.expireLock.Lock()
 	close(c.expirers)
 	c.expirers = nil
 	c.expireLock.Unlock()
 
-	c.fetcherWait.Wait()
 	wait.Wait()
 
-	return threads.CombineErrors(
-		handleRequestsError,
-		expireError,
-	)
+	return threads.CombineErrors(errors...)
 }
 
 func (w *CacheItem) addUser() {

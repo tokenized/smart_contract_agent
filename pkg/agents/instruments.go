@@ -28,9 +28,15 @@ func (a *Agent) processInstrumentCreation(ctx context.Context, transaction Trans
 
 	logger.Info(ctx, "Processing instrument creation")
 
-	instrument, err := protocol.DeserializeInstrumentPayload(creation.InstrumentPayloadVersion,
+	// Verify instrument payload is valid.
+	payload, err := protocol.DeserializeInstrumentPayload(creation.InstrumentPayloadVersion,
 		[]byte(creation.InstrumentType), creation.InstrumentPayload)
 	if err != nil {
+		logger.Warn(ctx, "Instrument payload malformed: %s", err)
+		return nil
+	}
+
+	if err := payload.Validate(); err != nil {
 		logger.Warn(ctx, "Instrument payload invalid: %s", err)
 		return nil
 	}
@@ -59,7 +65,6 @@ func (a *Agent) processInstrumentCreation(ctx context.Context, transaction Trans
 			ContractID:   state.CalculateContractID(a.contract.LockingScript),
 			Creation:     creation,
 			CreationTxID: &txid,
-			Instrument:   instrument,
 		}
 		copy(newInstrument.InstrumentType[:], []byte(creation.InstrumentType))
 		copy(newInstrument.InstrumentCode[:], creation.InstrumentCode)
@@ -70,11 +75,18 @@ func (a *Agent) processInstrumentCreation(ctx context.Context, transaction Trans
 		copy(existing.InstrumentCode[:], creation.InstrumentCode)
 		existing.Creation = creation
 		existing.CreationTxID = &txid
-		existing.Instrument = instrument
+		existing.ClearInstrument()
+	}
+
+	instrumentID, err := protocol.InstrumentIDForRaw(creation.InstrumentType,
+		creation.InstrumentCode)
+	if err != nil {
+		logger.Error(ctx, "Instrument id malformed: %s", err)
 	}
 
 	logger.InfoWithFields(ctx, []logger.Field{
 		logger.Timestamp("timestamp", int64(creation.Timestamp)),
+		logger.String("instrument_id", instrumentID),
 	}, "Updated instrument creation")
 
 	a.contract.Unlock()
