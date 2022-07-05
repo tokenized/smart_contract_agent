@@ -222,5 +222,5 @@ func (c *Conductor) GetAgent(ctx context.Context, lockingScript bitcoin.Script) 
 }
 
 func (c *Conductor) ReleaseAgent(ctx context.Context, agent *agents.Agent) {
-	agent.Release(ctx, c.contracts)
+	agent.Release(ctx)
 }

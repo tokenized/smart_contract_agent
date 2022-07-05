@@ -27,6 +27,8 @@ func (a *Agent) processContractFormation(ctx context.Context, transaction Transa
 
 	a.contract.Lock()
 
+	isFirst := a.contract.Formation == nil
+
 	if a.contract.Formation != nil && formation.Timestamp < a.contract.Formation.Timestamp {
 		logger.WarnWithFields(ctx, []logger.Field{
 			logger.Timestamp("timestamp", int64(formation.Timestamp)),
@@ -39,13 +41,17 @@ func (a *Agent) processContractFormation(ctx context.Context, transaction Transa
 	a.contract.FormationTxID = &txid
 	a.contract.MarkModified()
 
-	logger.InfoWithFields(ctx, []logger.Field{
-		logger.Timestamp("timestamp", int64(formation.Timestamp)),
-	}, "Updated contract formation")
+	if isFirst {
+		logger.InfoWithFields(ctx, []logger.Field{
+			logger.Timestamp("timestamp", int64(formation.Timestamp)),
+		}, "Initial contract formation")
+	} else {
+		logger.InfoWithFields(ctx, []logger.Field{
+			logger.Timestamp("timestamp", int64(formation.Timestamp)),
+		}, "Updated contract formation")
+	}
 
 	a.contract.Unlock()
-
-	a.contracts.Save(ctx, a.contract)
 
 	return nil
 }

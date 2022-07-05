@@ -1,6 +1,7 @@
 package state
 
 import (
+	"bytes"
 	"sync"
 
 	"github.com/tokenized/pkg/bitcoin"
@@ -43,6 +44,14 @@ func (i *Instrument) GetInstrument() (instruments.Instrument, error) {
 
 	i.instrument = inst
 	return i.instrument, nil
+}
+
+func (id InstrumentCode) Equal(other InstrumentCode) bool {
+	return bytes.Equal(id[:], other[:])
+}
+
+func (id InstrumentCode) Bytes() []byte {
+	return id[:]
 }
 
 func (id InstrumentCode) String() string {

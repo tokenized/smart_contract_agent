@@ -56,8 +56,8 @@ func NewAgent(key bitcoin.Key, contract *state.Contract, contracts *state.Contra
 	return result, nil
 }
 
-func (a *Agent) Release(ctx context.Context, contracts *state.ContractCache) {
-	contracts.Release(ctx, a.LockingScript())
+func (a *Agent) Release(ctx context.Context) {
+	a.contracts.Release(ctx, a.LockingScript())
 }
 
 func (a *Agent) LockingScript() bitcoin.Script {

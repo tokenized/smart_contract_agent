@@ -47,7 +47,5 @@ func (a *Agent) processBodyOfAgreementFormation(ctx context.Context,
 
 	a.contract.Unlock()
 
-	a.contracts.Save(ctx, a.contract)
-
 	return nil
 }

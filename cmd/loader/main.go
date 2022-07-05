@@ -8,7 +8,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/pkg/errors"
 	"github.com/tokenized/channels"
 	"github.com/tokenized/channels/wallet"
 	"github.com/tokenized/config"
@@ -19,6 +18,8 @@ import (
 	"github.com/tokenized/smart_contract_agent/internal/state"
 	"github.com/tokenized/smart_contract_agent/internal/whatsonchain"
 	"github.com/tokenized/smart_contract_agent/pkg/conductor"
+
+	"github.com/pkg/errors"
 )
 
 var (

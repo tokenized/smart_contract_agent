@@ -30,42 +30,6 @@ var (
 	ErrTimeout = errors.New("Timed Out")
 )
 
-type Tx struct {
-	Bytes *bitcoin.Hex    `json:"hex"`
-	TxID  *bitcoin.Hash32 `json:"txid"`
-	// "hash": "13686a10870d23b4c94642bf0b78d6630e2640fc0de83bc30af835d96bb17482"
-	Size uint64 `json:"size"`
-	// "version": 1,
-	// "locktime": 0,
-	// "vin": [
-	// 	{
-	// 		"coinbase": "0345520a2f7461616c2e636f6d2f506c656173652070617920302e3520736174732f627974652c20696e666f407461616c2e636f6d6eead6b0ad91f2ce86be0400",
-	// 		"sequence": 4294967295
-	// 	}
-	// ],
-	// "vout": [
-	// 	{
-	// 	"value": 6.2517439,
-	// 	"n": 0,
-	// 	"scriptPubKey":
-	// 		{
-	// 			"asm": "OP_DUP OP_HASH160 8e9170be3f733a9773c907517fb9b786f1c884c6 OP_EQUALVERIFY OP_CHECKSIG",
-	// 			"hex": "76a9148e9170be3f733a9773c907517fb9b786f1c884c688ac",
-	// 			"reqSigs": 1,
-	// 			"type": "pubkeyhash",
-	// 			"addresses": [
-	// 				"1DzqBck9oyCBzxJbbje2s15deZis6BeATi"
-	// 			],
-	// 			"isTruncated": false
-	// 		}
-	// 	}
-	// ],
-	BlockHash *bitcoin.Hash32 `json:"blockhash"`
-	// "confirmations": 4,
-	Time uint32 `json:"time"`
-	// "blocktime": 1614534798
-}
-
 type Service struct {
 	apiKey  string
 	network bitcoin.Network
@@ -157,31 +121,6 @@ func (s *Service) GetTx(ctx context.Context, txid bitcoin.Hash32) (*wire.MsgTx, 
 
 	return tx, nil
 }
-
-// func (s *Service) GetTxs(ctx context.Context, txids []*bitcoin.Hash32) ([]*wire.MsgTx, error) {
-// 	if len(txids) > MaxTxRequestCount {
-// 		return nil, fmt.Errorf("Too many txids in request : %d > %d", len(txids), MaxTxRequestCount)
-// 	}
-
-// 	url := fmt.Sprintf(URLGetRawTxs, s.NetworkName())
-// 	request := bulkTxRequest{
-// 		TxIDs: txids,
-// 	}
-// 	var response []*Tx
-// 	if err := postWithToken(ctx, url, s.apiKey, request, &response); err != nil {
-// 		return nil, errors.Wrap(err, "get")
-// 	}
-
-// 	result := make([][]byte, len(response))
-// 	for i, txData := range response {
-// 		if txData.Bytes == nil {
-// 			return nil, errors.New("Missing tx bytes")
-// 		}
-// 		result[i] = *txData.Bytes
-// 	}
-
-// 	return result, nil
-// }
 
 // postWithToken sends a request to the HTTP server using the POST method with an authentication
 // header token.

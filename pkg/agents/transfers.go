@@ -118,7 +118,6 @@ func (a *Agent) processSettlement(ctx context.Context, transaction TransactionWi
 		if err != nil {
 			return errors.Wrap(err, "add balances")
 		}
-		defer a.balances.ReleaseMulti(ctx, agentLockingScript, instrumentCode, addedBalances)
 
 		// Update any balances that weren't new and therefore weren't updated by the "add".
 		for i, balance := range balances {
@@ -144,6 +143,8 @@ func (a *Agent) processSettlement(ctx context.Context, transaction TransactionWi
 				addedBalances[i].Unlock()
 			}
 		}
+
+		a.balances.ReleaseMulti(ctx, agentLockingScript, instrumentCode, addedBalances)
 	}
 
 	return nil
