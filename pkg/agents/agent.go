@@ -21,10 +21,11 @@ var (
 type Agent struct {
 	key bitcoin.Key
 
-	contract     *state.Contract
-	contracts    *state.ContractCache
-	balances     *state.BalanceCache
-	transactions *state.TransactionCache
+	contract      *state.Contract
+	contracts     *state.ContractCache
+	balances      *state.BalanceCache
+	transactions  *state.TransactionCache
+	subscriptions *state.SubscriptionCache
 
 	isTest bool
 
@@ -43,14 +44,16 @@ type TransactionWithOutputs interface {
 }
 
 func NewAgent(key bitcoin.Key, contract *state.Contract, contracts *state.ContractCache,
-	balances *state.BalanceCache, transactions *state.TransactionCache) (*Agent, error) {
+	balances *state.BalanceCache, transactions *state.TransactionCache,
+	subscriptions *state.SubscriptionCache) (*Agent, error) {
 
 	result := &Agent{
-		key:          key,
-		contract:     contract,
-		contracts:    contracts,
-		balances:     balances,
-		transactions: transactions,
+		key:           key,
+		contract:      contract,
+		contracts:     contracts,
+		balances:      balances,
+		transactions:  transactions,
+		subscriptions: subscriptions,
 	}
 
 	return result, nil

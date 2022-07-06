@@ -23,7 +23,7 @@ func Test_CreateInstrument(t *testing.T) {
 	ctx := context.Background()
 	store := storage.NewMockStorage()
 
-	contracts, balances, transactions, cacheInterrupt, cacheComplete := state.StartTestCaches(ctx,
+	contracts, balances, transactions, subscriptions, cacheInterrupt, cacheComplete := state.StartTestCaches(ctx,
 		store, 4, 2*time.Second, 10000, 10*time.Second)
 
 	contractKey, err := bitcoin.GenerateKey(bitcoin.MainNet)
@@ -54,7 +54,7 @@ func Test_CreateInstrument(t *testing.T) {
 		t.Fatalf("Failed to add contract : %s", err)
 	}
 
-	agent, err := NewAgent(contractKey, contract, contracts, balances, transactions)
+	agent, err := NewAgent(contractKey, contract, contracts, balances, transactions, subscriptions)
 	if err != nil {
 		t.Fatalf("Failed to create agent : %s", err)
 	}

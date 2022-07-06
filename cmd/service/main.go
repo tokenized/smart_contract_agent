@@ -99,8 +99,14 @@ func main() {
 		logger.Fatal(ctx, "main : Failed to create transaction cache : %s", err)
 	}
 
+	subscriptions, err := state.NewSubscriptionCache(store, cfg.CacheRequestThreadCount,
+		cfg.CacheRequestTimeout.Duration, cfg.CacheExpireCount, cfg.CacheExpiration.Duration)
+	if err != nil {
+		logger.Fatal(ctx, "main : Failed to create subscription cache : %s", err)
+	}
+
 	conductor := conductor.NewConductor(cfg.BaseKey, cfg.IsTest, spyNodeClient, contracts, balances,
-		transactions)
+		transactions, subscriptions)
 	spyNodeClient.RegisterHandler(conductor)
 
 	var wait sync.WaitGroup
@@ -124,9 +130,15 @@ func main() {
 	transactionsComplete := transactionsThread.GetCompleteChannel()
 	stopper.Add(transactionsThread)
 
+	subscriptionsThread := threads.NewThread("Subscriptions", subscriptions.Run)
+	subscriptionsThread.SetWait(&wait)
+	subscriptionsComplete := subscriptionsThread.GetCompleteChannel()
+	stopper.Add(subscriptionsThread)
+
 	contractsThread.Start(ctx)
 	balancesThread.Start(ctx)
 	transactionsThread.Start(ctx)
+	subscriptionsThread.Start(ctx)
 
 	if err := spyNodeClient.Connect(ctx); err != nil {
 		logger.Fatal(ctx, "main : Failed to connect to spynode : %s", err)
@@ -154,6 +166,9 @@ func main() {
 
 	case <-transactionsComplete:
 		logger.Error(ctx, "main : Transactions thread completed : %s", transactionsThread.Error())
+
+	case <-subscriptionsComplete:
+		logger.Error(ctx, "main : Subscriptions thread completed : %s", subscriptionsThread.Error())
 
 	case <-osSignals:
 		logger.Info(ctx, "main : Start shutdown...")

@@ -26,9 +26,10 @@ type Conductor struct {
 	isTest        bool
 	spyNodeClient spynode.Client
 
-	contracts    *state.ContractCache
-	balances     *state.BalanceCache
-	transactions *state.TransactionCache
+	contracts     *state.ContractCache
+	balances      *state.BalanceCache
+	transactions  *state.TransactionCache
+	subscriptions *state.SubscriptionCache
 
 	lookup map[state.ContractID]bitcoin.Hash32
 
@@ -39,7 +40,7 @@ type Conductor struct {
 
 func NewConductor(baseKey bitcoin.Key, isTest bool, spyNodeClient spynode.Client,
 	contracts *state.ContractCache, balances *state.BalanceCache,
-	transactions *state.TransactionCache) *Conductor {
+	transactions *state.TransactionCache, subscriptions *state.SubscriptionCache) *Conductor {
 
 	return &Conductor{
 		baseKey:              baseKey,
@@ -48,6 +49,7 @@ func NewConductor(baseKey bitcoin.Key, isTest bool, spyNodeClient spynode.Client
 		contracts:            contracts,
 		balances:             balances,
 		transactions:         transactions,
+		subscriptions:        subscriptions,
 		lookup:               make(map[state.ContractID]bitcoin.Hash32),
 		nextSpyNodeMessageID: 1,
 	}
@@ -170,7 +172,8 @@ func (c *Conductor) AddAgent(ctx context.Context,
 		}, "Already have contract")
 	}
 
-	agent, err := agents.NewAgent(key, addedContract, c.contracts, c.balances, c.transactions)
+	agent, err := agents.NewAgent(key, addedContract, c.contracts, c.balances, c.transactions,
+		c.subscriptions)
 	if err != nil {
 		return nil, errors.Wrap(err, "new agent")
 	}
@@ -178,7 +181,9 @@ func (c *Conductor) AddAgent(ctx context.Context,
 	return agent, nil
 }
 
-func (c *Conductor) GetAgent(ctx context.Context, lockingScript bitcoin.Script) (*agents.Agent, error) {
+func (c *Conductor) GetAgent(ctx context.Context,
+	lockingScript bitcoin.Script) (*agents.Agent, error) {
+
 	contractID := state.CalculateContractID(lockingScript)
 
 	c.lock.Lock()
@@ -213,7 +218,8 @@ func (c *Conductor) GetAgent(ctx context.Context, lockingScript bitcoin.Script) 
 		return nil, nil
 	}
 
-	agent, err := agents.NewAgent(key, contract, c.contracts, c.balances, c.transactions)
+	agent, err := agents.NewAgent(key, contract, c.contracts, c.balances, c.transactions,
+		c.subscriptions)
 	if err != nil {
 		return nil, errors.Wrap(err, "new agent")
 	}

@@ -55,6 +55,8 @@ func (a *Agent) processSettlement(ctx context.Context, transaction TransactionWi
 
 	agentLockingScript := a.LockingScript()
 
+	var lockingScripts []bitcoin.Script
+
 	// Update one instrument at a time.
 	for _, instrument := range settlement.Instruments {
 		if int(instrument.ContractIndex) >= transaction.InputCount() {
@@ -104,8 +106,11 @@ func (a *Agent) processSettlement(ctx context.Context, transaction TransactionWi
 				return nil
 			}
 
+			lockingScript := transaction.Output(int(settle.Index)).LockingScript
+			lockingScripts = append(lockingScripts, lockingScript)
+
 			balances[i] = &state.Balance{
-				LockingScript: transaction.Output(int(settle.Index)).LockingScript,
+				LockingScript: lockingScript,
 				Quantity:      settle.Quantity,
 				Timestamp:     settlement.Timestamp,
 				TxID:          &txid,
@@ -121,31 +126,63 @@ func (a *Agent) processSettlement(ctx context.Context, transaction TransactionWi
 
 		// Update any balances that weren't new and therefore weren't updated by the "add".
 		for i, balance := range balances {
-			if balance != addedBalances[i] {
-				// If the balance doesn't match then it already existed and must be updated with a
-				// manual merge and save.
-				addedBalances[i].Lock()
-				if settlement.Timestamp < addedBalances[i].Timestamp {
-					logger.WarnWithFields(ctx, []logger.Field{
-						logger.Timestamp("timestamp", int64(addedBalances[i].Timestamp)),
-						logger.Timestamp("existing_timestamp", int64(settlement.Timestamp)),
-						logger.Stringer("locking_script", balance.LockingScript),
-					}, "Older settlement")
-					addedBalances[i].Unlock()
-					continue
-				}
-
-				// Update balance
-				addedBalances[i].Quantity = balance.Quantity
-				addedBalances[i].Timestamp = settlement.Timestamp
-				addedBalances[i].TxID = &txid
-				addedBalances[i].MarkModified()
-				addedBalances[i].Unlock()
+			if balance == addedBalances[i] {
+				continue // balance was new and already up to date from the add.
 			}
+
+			// If the balance doesn't match then it already existed and must be updated with a
+			// manual merge and save.
+			addedBalances[i].Lock()
+			if settlement.Timestamp < addedBalances[i].Timestamp {
+				logger.WarnWithFields(ctx, []logger.Field{
+					logger.Timestamp("timestamp", int64(addedBalances[i].Timestamp)),
+					logger.Timestamp("existing_timestamp", int64(settlement.Timestamp)),
+					logger.Stringer("locking_script", balance.LockingScript),
+				}, "Older settlement")
+				addedBalances[i].Unlock()
+				continue
+			}
+
+			// Update balance
+			addedBalances[i].Quantity = balance.Quantity
+			addedBalances[i].Timestamp = settlement.Timestamp
+			addedBalances[i].TxID = &txid
+			addedBalances[i].MarkModified()
+			addedBalances[i].Unlock()
 		}
 
 		a.balances.ReleaseMulti(ctx, agentLockingScript, instrumentCode, addedBalances)
 	}
+
+	subscriptions, err := a.subscriptions.GetLockingScriptMulti(ctx, agentLockingScript,
+		lockingScripts)
+	if err != nil {
+		logger.Error(ctx, "Failed to get locking script subscriptions : %s", err)
+		return nil
+	}
+	defer a.subscriptions.ReleaseMulti(ctx, agentLockingScript, subscriptions)
+
+	// for _, subscription := range subscriptions {
+	// 	subscription.Lock()
+	// 	channelHash := subscription.GetChannelHash()
+	// 	subscription.Unlock()
+
+	// 	// Send settlement over channel
+	// 	channel := a.GetChannel(ctx, channelHash)
+	// 	if channel == nil {
+	// 		continue
+	// 	}
+
+	// 	msg := channels_agent.Action{
+	// 		Tx: transaction.Tx,
+	// 	}
+
+	// 	if err := channel.SendMessage(ctx, msg, nil); err != nil {
+	// 		logger.WarnWithFields(ctx, []logger.Field{
+	// 			logger.Stringer("channel", channelHash),
+	// 		}, "Failed to send channels message : %s", err)
+	// 	}
+	// }
 
 	return nil
 }

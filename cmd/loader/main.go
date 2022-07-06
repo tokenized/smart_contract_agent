@@ -99,8 +99,14 @@ func main() {
 		logger.Fatal(ctx, "main : Failed to create transaction cache : %s", err)
 	}
 
+	subscriptions, err := state.NewSubscriptionCache(store, cfg.CacheRequestThreadCount,
+		cfg.CacheRequestTimeout.Duration, cfg.CacheExpireCount, cfg.CacheExpiration.Duration)
+	if err != nil {
+		logger.Fatal(ctx, "main : Failed to create subscription cache : %s", err)
+	}
+
 	conductor := conductor.NewConductor(cfg.BaseKey, cfg.IsTest, nil, contracts, balances,
-		transactions)
+		transactions, subscriptions)
 
 	var wait sync.WaitGroup
 	var stopper threads.StopCombiner
@@ -120,6 +126,11 @@ func main() {
 	transactionsComplete := transactionsThread.GetCompleteChannel()
 	stopper.Add(transactionsThread)
 
+	subscriptionsThread := threads.NewThread("Subscriptions", subscriptions.Run)
+	subscriptionsThread.SetWait(&wait)
+	subscriptionsComplete := subscriptionsThread.GetCompleteChannel()
+	stopper.Add(subscriptionsThread)
+
 	loadThread := threads.NewThread("Load", func(ctx context.Context, interrupt <-chan interface{}) error {
 		return load(ctx, interrupt, conductor, transactions, cfg.BaseKey, cfg.ContractKey, woc)
 	})
@@ -129,6 +140,7 @@ func main() {
 	contractsThread.Start(ctx)
 	balancesThread.Start(ctx)
 	transactionsThread.Start(ctx)
+	subscriptionsThread.Start(ctx)
 
 	if err := conductor.Load(ctx, store); err != nil {
 		logger.Fatal(ctx, "main : Failed to load conductor : %s", err)
@@ -155,6 +167,9 @@ func main() {
 
 	case <-transactionsComplete:
 		logger.Error(ctx, "main : Transactions thread completed : %s", transactionsThread.Error())
+
+	case <-subscriptionsComplete:
+		logger.Error(ctx, "main : Subscriptions thread completed : %s", subscriptionsThread.Error())
 
 	case <-loadComplete:
 		if err := loadThread.Error(); err != nil {
