@@ -123,6 +123,7 @@ func Test_CreateInstrument(t *testing.T) {
 		[]actions.Action{contractFormation}); err != nil {
 		t.Fatalf("Failed to process contract formation : %s", err)
 	}
+	transactions.Release(ctx, contractFormationTxID)
 
 	// Check contract is correct.
 	currentContract, err := contracts.Get(ctx, contractLockingScript)
@@ -224,6 +225,7 @@ func Test_CreateInstrument(t *testing.T) {
 		[]actions.Action{instrumentCreation}); err != nil {
 		t.Fatalf("Failed to process instrument creation : %s", err)
 	}
+	transactions.Release(ctx, instrumentCreationTxID)
 
 	// Check instrument is correct.
 	currentContract, err = contracts.Get(ctx, contractLockingScript)
@@ -393,6 +395,7 @@ func Test_CreateInstrument(t *testing.T) {
 		if err := agent.Process(ctx, settlementTx, []actions.Action{settlement}); err != nil {
 			t.Fatalf("Failed to process settlement : %s", err)
 		}
+		transactions.Release(ctx, settlementTxID)
 	}
 
 	// Check balances
@@ -515,6 +518,7 @@ func Test_CreateInstrument(t *testing.T) {
 		if err := agent.Process(ctx, settlementTx, []actions.Action{settlement}); err != nil {
 			t.Fatalf("Failed to process settlement : %s", err)
 		}
+		transactions.Release(ctx, settlementTxID)
 	}
 
 	for i := 0; i < recipientCount; i++ {
@@ -542,6 +546,8 @@ func Test_CreateInstrument(t *testing.T) {
 
 		balances.ReleaseMulti(ctx, contractLockingScript, instrumentCode, bothBalances)
 	}
+
+	contracts.Release(ctx, contractLockingScript)
 
 	state.StopTestCaches(time.Second, cacheInterrupt, cacheComplete)
 }

@@ -9,7 +9,6 @@ import (
 	"io"
 	"reflect"
 	"sync"
-	"time"
 
 	"github.com/tokenized/pkg/bitcoin"
 	"github.com/tokenized/pkg/bsor"
@@ -27,6 +26,7 @@ const (
 
 type ContractCache struct {
 	cacher *cacher.Cache
+	typ    reflect.Type
 }
 
 type Contract struct {
@@ -50,18 +50,27 @@ type ContractLookup struct {
 
 type ContractID bitcoin.Hash32
 
-func NewContractCache(store storage.StreamStorage, requestThreadCount int,
-	requestTimeout time.Duration, expireCount int,
-	expiration time.Duration) (*ContractCache, error) {
+func NewContractCache(cache *cacher.Cache) (*ContractCache, error) {
+	typ := reflect.TypeOf(&Contract{})
 
-	cacher, err := cacher.NewCache(store, reflect.TypeOf(&Contract{}), requestThreadCount,
-		requestTimeout, expireCount, expiration)
-	if err != nil {
-		return nil, errors.Wrap(err, "cacher")
+	// Verify item value type is valid for a cache item.
+	if typ.Kind() != reflect.Ptr {
+		return nil, errors.New("Type must be a pointer")
+	}
+
+	itemValue := reflect.New(typ.Elem())
+	if !itemValue.CanInterface() {
+		return nil, errors.New("Type must be support interface")
+	}
+
+	itemInterface := itemValue.Interface()
+	if _, ok := itemInterface.(cacher.CacheValue); !ok {
+		return nil, errors.New("Type must implement CacheValue")
 	}
 
 	return &ContractCache{
-		cacher: cacher,
+		cacher: cache,
+		typ:    typ,
 	}, nil
 }
 
@@ -75,7 +84,7 @@ func (c *ContractCache) List(ctx context.Context,
 
 	var result []*ContractLookup
 	for _, path := range paths {
-		item, err := c.cacher.Get(ctx, path)
+		item, err := c.cacher.Get(ctx, c.typ, path)
 		if err != nil {
 			return nil, errors.Wrap(err, "get")
 		}
@@ -98,16 +107,12 @@ func (c *ContractCache) List(ctx context.Context,
 	return result, nil
 }
 
-func (c *ContractCache) Run(ctx context.Context, interrupt <-chan interface{}) error {
-	return c.cacher.Run(ctx, interrupt)
-}
-
 func (c *ContractCache) Save(ctx context.Context, contract *Contract) {
 	c.cacher.Save(ctx, contract)
 }
 
 func (c *ContractCache) Add(ctx context.Context, contract *Contract) (*Contract, error) {
-	item, err := c.cacher.Add(ctx, contract)
+	item, err := c.cacher.Add(ctx, c.typ, contract)
 	if err != nil {
 		return nil, errors.Wrap(err, "add")
 	}
@@ -116,7 +121,7 @@ func (c *ContractCache) Add(ctx context.Context, contract *Contract) (*Contract,
 }
 
 func (c *ContractCache) Get(ctx context.Context, lockingScript bitcoin.Script) (*Contract, error) {
-	item, err := c.cacher.Get(ctx, ContractPath(lockingScript))
+	item, err := c.cacher.Get(ctx, c.typ, ContractPath(lockingScript))
 	if err != nil {
 		return nil, errors.Wrap(err, "get")
 	}

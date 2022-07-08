@@ -13,6 +13,7 @@ import (
 	"github.com/tokenized/pkg/logger"
 	"github.com/tokenized/pkg/storage"
 	"github.com/tokenized/pkg/threads"
+	"github.com/tokenized/smart_contract_agent/internal/cacher"
 	"github.com/tokenized/smart_contract_agent/internal/state"
 	"github.com/tokenized/smart_contract_agent/pkg/conductor"
 	spyNodeClient "github.com/tokenized/spynode/pkg/client"
@@ -81,26 +82,25 @@ func main() {
 		logger.Fatal(ctx, "main : Failed to create spynode remote client : %s", err)
 	}
 
-	contracts, err := state.NewContractCache(store, cfg.CacheRequestThreadCount,
-		cfg.CacheRequestTimeout.Duration, cfg.CacheExpireCount, cfg.CacheExpiration.Duration)
+	cache := cacher.NewCache(store, cfg.CacheRequestThreadCount, cfg.CacheRequestTimeout.Duration,
+		cfg.CacheExpireCount, cfg.CacheExpiration.Duration)
+
+	contracts, err := state.NewContractCache(cache)
 	if err != nil {
 		logger.Fatal(ctx, "main : Failed to create contracts cache : %s", err)
 	}
 
-	balances, err := state.NewBalanceCache(store, cfg.CacheRequestThreadCount,
-		cfg.CacheRequestTimeout.Duration, cfg.CacheExpireCount, cfg.CacheExpiration.Duration)
+	balances, err := state.NewBalanceCache(cache)
 	if err != nil {
 		logger.Fatal(ctx, "main : Failed to create balance cache : %s", err)
 	}
 
-	transactions, err := state.NewTransactionCache(store, cfg.CacheRequestThreadCount,
-		cfg.CacheRequestTimeout.Duration, cfg.CacheExpireCount, cfg.CacheExpiration.Duration)
+	transactions, err := state.NewTransactionCache(cache)
 	if err != nil {
 		logger.Fatal(ctx, "main : Failed to create transaction cache : %s", err)
 	}
 
-	subscriptions, err := state.NewSubscriptionCache(store, cfg.CacheRequestThreadCount,
-		cfg.CacheRequestTimeout.Duration, cfg.CacheExpireCount, cfg.CacheExpiration.Duration)
+	subscriptions, err := state.NewSubscriptionCache(cache)
 	if err != nil {
 		logger.Fatal(ctx, "main : Failed to create subscription cache : %s", err)
 	}
@@ -115,30 +115,12 @@ func main() {
 	spynodeErrors := make(chan error, 10)
 	spyNodeClient.SetListenerErrorChannel(&spynodeErrors)
 
-	contractsThread := threads.NewThread("Contracts", contracts.Run)
-	contractsThread.SetWait(&wait)
-	contractsComplete := contractsThread.GetCompleteChannel()
-	stopper.Add(contractsThread)
+	cacheThread := threads.NewThread("Cache", cache.Run)
+	cacheThread.SetWait(&wait)
+	cacheComplete := cacheThread.GetCompleteChannel()
+	stopper.Add(cacheThread)
 
-	balancesThread := threads.NewThread("Balances", balances.Run)
-	balancesThread.SetWait(&wait)
-	balancesComplete := balancesThread.GetCompleteChannel()
-	stopper.Add(balancesThread)
-
-	transactionsThread := threads.NewThread("Transactions", transactions.Run)
-	transactionsThread.SetWait(&wait)
-	transactionsComplete := transactionsThread.GetCompleteChannel()
-	stopper.Add(transactionsThread)
-
-	subscriptionsThread := threads.NewThread("Subscriptions", subscriptions.Run)
-	subscriptionsThread.SetWait(&wait)
-	subscriptionsComplete := subscriptionsThread.GetCompleteChannel()
-	stopper.Add(subscriptionsThread)
-
-	contractsThread.Start(ctx)
-	balancesThread.Start(ctx)
-	transactionsThread.Start(ctx)
-	subscriptionsThread.Start(ctx)
+	cacheThread.Start(ctx)
 
 	if err := spyNodeClient.Connect(ctx); err != nil {
 		logger.Fatal(ctx, "main : Failed to connect to spynode : %s", err)
@@ -158,17 +140,8 @@ func main() {
 	case err := <-spynodeErrors:
 		logger.Error(ctx, "main : Spynode failed : %s", err)
 
-	case <-contractsComplete:
-		logger.Error(ctx, "main : Contracts thread completed : %s", contractsThread.Error())
-
-	case <-balancesComplete:
-		logger.Error(ctx, "main : Balances thread completed : %s", balancesThread.Error())
-
-	case <-transactionsComplete:
-		logger.Error(ctx, "main : Transactions thread completed : %s", transactionsThread.Error())
-
-	case <-subscriptionsComplete:
-		logger.Error(ctx, "main : Subscriptions thread completed : %s", subscriptionsThread.Error())
+	case <-cacheComplete:
+		logger.Error(ctx, "main : Cache thread completed : %s", cacheThread.Error())
 
 	case <-osSignals:
 		logger.Info(ctx, "main : Start shutdown...")

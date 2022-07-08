@@ -9,11 +9,9 @@ import (
 	"io"
 	"reflect"
 	"sync"
-	"time"
 
 	"github.com/tokenized/pkg/bitcoin"
 	"github.com/tokenized/pkg/bsor"
-	"github.com/tokenized/pkg/storage"
 	"github.com/tokenized/smart_contract_agent/internal/cacher"
 	"github.com/tokenized/specification/dist/golang/protocol"
 
@@ -33,6 +31,7 @@ const (
 
 type BalanceCache struct {
 	cacher *cacher.Cache
+	typ    reflect.Type
 }
 
 type balanceSet struct {
@@ -71,23 +70,28 @@ type BalanceHolding struct {
 	TxID     *bitcoin.Hash32    `bsor:"4" json:"txID,omitempty"`
 }
 
-func NewBalanceCache(store storage.StreamStorage, requestThreadCount int,
-	requestTimeout time.Duration, expireCount int,
-	expiration time.Duration) (*BalanceCache, error) {
+func NewBalanceCache(cache *cacher.Cache) (*BalanceCache, error) {
+	typ := reflect.TypeOf(&balanceSet{})
 
-	cacher, err := cacher.NewCache(store, reflect.TypeOf(&balanceSet{}), requestThreadCount,
-		requestTimeout, expireCount, expiration)
-	if err != nil {
-		return nil, errors.Wrap(err, "cacher")
+	// Verify item value type is valid for a cache item.
+	if typ.Kind() != reflect.Ptr {
+		return nil, errors.New("Type must be a pointer")
+	}
+
+	itemValue := reflect.New(typ.Elem())
+	if !itemValue.CanInterface() {
+		return nil, errors.New("Type must be support interface")
+	}
+
+	itemInterface := itemValue.Interface()
+	if _, ok := itemInterface.(cacher.CacheValue); !ok {
+		return nil, errors.New("Type must implement CacheValue")
 	}
 
 	return &BalanceCache{
-		cacher: cacher,
+		cacher: cache,
+		typ:    typ,
 	}, nil
-}
-
-func (c *BalanceCache) Run(ctx context.Context, interrupt <-chan interface{}) error {
-	return c.cacher.Run(ctx, interrupt)
 }
 
 func (c *BalanceCache) Add(ctx context.Context, contractLockingScript bitcoin.Script,
@@ -102,7 +106,7 @@ func (c *BalanceCache) Add(ctx context.Context, contractLockingScript bitcoin.Sc
 	}
 	set.Balances[hash] = balance
 
-	item, err := c.cacher.Add(ctx, set)
+	item, err := c.cacher.Add(ctx, c.typ, set)
 	if err != nil {
 		return nil, errors.Wrap(err, "add")
 	}
@@ -136,7 +140,7 @@ func (c *BalanceCache) AddMulti(ctx context.Context, contractLockingScript bitco
 		values[i] = set
 	}
 
-	items, err := c.cacher.AddMulti(ctx, values)
+	items, err := c.cacher.AddMulti(ctx, c.typ, values)
 	if err != nil {
 		return nil, errors.Wrap(err, "add")
 	}
@@ -177,7 +181,7 @@ func (c *BalanceCache) Get(ctx context.Context, contractLockingScript bitcoin.Sc
 
 	hash, path := balanceSetPath(contractLockingScript, instrumentCode, lockingScript)
 
-	item, err := c.cacher.Get(ctx, path)
+	item, err := c.cacher.Get(ctx, c.typ, path)
 	if err != nil {
 		return nil, errors.Wrap(err, "get")
 	}
@@ -212,18 +216,18 @@ func (c *BalanceCache) GetMulti(ctx context.Context, contractLockingScript bitco
 		getPaths = appendStringIfDoesntExist(getPaths, path)
 	}
 
-	items, err := c.cacher.GetMulti(ctx, getPaths)
+	items, err := c.cacher.GetMulti(ctx, c.typ, getPaths)
 	if err != nil {
 		return nil, errors.Wrap(err, "get multi")
 	}
 
-	sets := make(balanceSets, len(items))
-	for i, item := range items {
+	var sets balanceSets
+	for _, item := range items {
 		if item == nil {
 			continue // a requested set must not exist
 		}
 
-		sets[i] = item.(*balanceSet)
+		sets = append(sets, item.(*balanceSet))
 	}
 
 	result := make([]*Balance, len(lockingScripts))
@@ -259,7 +263,7 @@ func (c *BalanceCache) Release(ctx context.Context, contractLockingScript bitcoi
 
 	// Set set as modified
 	if isModified {
-		item, err := c.cacher.Get(ctx, path)
+		item, err := c.cacher.Get(ctx, c.typ, path)
 		if err != nil {
 			return errors.Wrap(err, "get")
 		}
@@ -297,18 +301,18 @@ func (c *BalanceCache) ReleaseMulti(ctx context.Context, contractLockingScript b
 		}
 	}
 
-	modifiedItems, err := c.cacher.GetMulti(ctx, modifiedPaths)
+	modifiedItems, err := c.cacher.GetMulti(ctx, c.typ, modifiedPaths)
 	if err != nil {
 		return errors.Wrap(err, "get multi")
 	}
 
-	sets := make(balanceSets, len(modifiedItems))
-	for i, item := range modifiedItems {
+	var sets balanceSets
+	for _, item := range modifiedItems {
 		if item == nil {
 			continue // a requested set must not exist
 		}
 
-		sets[i] = item.(*balanceSet)
+		sets = append(sets, item.(*balanceSet))
 	}
 
 	for i, balance := range balances {

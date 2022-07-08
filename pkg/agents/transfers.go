@@ -154,13 +154,13 @@ func (a *Agent) processSettlement(ctx context.Context, transaction TransactionWi
 		a.balances.ReleaseMulti(ctx, agentLockingScript, instrumentCode, addedBalances)
 	}
 
-	subscriptions, err := a.subscriptions.GetLockingScriptMulti(ctx, agentLockingScript,
-		lockingScripts)
-	if err != nil {
-		logger.Error(ctx, "Failed to get locking script subscriptions : %s", err)
-		return nil
-	}
-	defer a.subscriptions.ReleaseMulti(ctx, agentLockingScript, subscriptions)
+	// subscriptions, err := a.subscriptions.GetLockingScriptMulti(ctx, agentLockingScript,
+	// 	lockingScripts)
+	// if err != nil {
+	// 	logger.Error(ctx, "Failed to get locking script subscriptions : %s", err)
+	// 	return nil
+	// }
+	// defer a.subscriptions.ReleaseMulti(ctx, agentLockingScript, subscriptions)
 
 	// for _, subscription := range subscriptions {
 	// 	subscription.Lock()

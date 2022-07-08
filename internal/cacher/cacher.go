@@ -42,7 +42,7 @@ type CacheValue interface {
 // The users of cache must be stopped before stopping the cache so that the cache can complete any
 // active requests. This is needed to prevent partial value updates.
 type Cache struct {
-	typ reflect.Type
+	// typ reflect.Type
 
 	store storage.StreamStorage
 
@@ -74,26 +74,26 @@ type CacheItem struct {
 	sync.Mutex
 }
 
-func NewCache(store storage.StreamStorage, typ reflect.Type, requestThreadCount int,
-	requestTimeout time.Duration, expireCount int, expiration time.Duration) (*Cache, error) {
+func NewCache(store storage.StreamStorage, requestThreadCount int,
+	requestTimeout time.Duration, expireCount int, expiration time.Duration) *Cache {
 
-	// Verify item value type is valid for a cache item.
-	if typ.Kind() != reflect.Ptr {
-		return nil, errors.New("Type must be a pointer")
-	}
+	// // Verify item value type is valid for a cache item.
+	// if typ.Kind() != reflect.Ptr {
+	// 	return nil, errors.New("Type must be a pointer")
+	// }
 
-	itemValue := reflect.New(typ.Elem())
-	if !itemValue.CanInterface() {
-		return nil, errors.New("Type must be support interface")
-	}
+	// itemValue := reflect.New(typ.Elem())
+	// if !itemValue.CanInterface() {
+	// 	return nil, errors.New("Type must be support interface")
+	// }
 
-	itemInterface := itemValue.Interface()
-	if _, ok := itemInterface.(CacheValue); !ok {
-		return nil, errors.New("Type must implement CacheValue")
-	}
+	// itemInterface := itemValue.Interface()
+	// if _, ok := itemInterface.(CacheValue); !ok {
+	// 	return nil, errors.New("Type must implement CacheValue")
+	// }
 
 	return &Cache{
-		typ:                typ,
+		// typ:                typ,
 		store:              store,
 		requestThreadCount: requestThreadCount,
 		requestTimeout:     requestTimeout,
@@ -103,7 +103,7 @@ func NewCache(store storage.StreamStorage, typ reflect.Type, requestThreadCount 
 		expiration:         expiration,
 		expirers:           make(chan *ExpireItem, expireCount),
 		items:              make(map[string]*CacheItem),
-	}, nil
+	}
 }
 
 func (c *Cache) RequestTimeout() time.Duration {
@@ -117,7 +117,7 @@ func (c *Cache) RequestTimeout() time.Duration {
 // storage then it returns the existing item and ignores the item parameter. This must be done this
 // way so that there is a lock across checking if the item already exists and adding the item.
 // Otherwise there can be conflicts in adding the item from multiple threads.
-func (c *Cache) Add(ctx context.Context, value CacheValue) (CacheValue, error) {
+func (c *Cache) Add(ctx context.Context, typ reflect.Type, value CacheValue) (CacheValue, error) {
 	path := value.Path()
 
 	// TODO This might be slow to add items since it requires a hit to storage to ensure it isn't
@@ -125,7 +125,7 @@ func (c *Cache) Add(ctx context.Context, value CacheValue) (CacheValue, error) {
 	c.itemsAddLock.Lock()
 	defer c.itemsAddLock.Unlock()
 
-	gotItem, err := c.Get(ctx, path)
+	gotItem, err := c.Get(ctx, typ, path)
 	if err != nil {
 		return nil, errors.Wrap(err, "get")
 	}
@@ -147,7 +147,9 @@ func (c *Cache) Add(ctx context.Context, value CacheValue) (CacheValue, error) {
 	return value, nil
 }
 
-func (c *Cache) AddMulti(ctx context.Context, values []CacheValue) ([]CacheValue, error) {
+func (c *Cache) AddMulti(ctx context.Context, typ reflect.Type,
+	values []CacheValue) ([]CacheValue, error) {
+
 	paths := make([]string, len(values))
 	for i, value := range values {
 		paths[i] = value.Path()
@@ -158,7 +160,7 @@ func (c *Cache) AddMulti(ctx context.Context, values []CacheValue) ([]CacheValue
 	c.itemsAddLock.Lock()
 	defer c.itemsAddLock.Unlock()
 
-	gotItems, err := c.GetMulti(ctx, paths)
+	gotItems, err := c.GetMulti(ctx, typ, paths)
 	if err != nil {
 		return nil, errors.Wrap(err, "get")
 	}
@@ -189,8 +191,8 @@ func (c *Cache) AddMulti(ctx context.Context, values []CacheValue) ([]CacheValue
 // If it is found in storage it is added to the cache. If it isn't found in the cache or storage
 // then (nil, nil) is returned. Release must be called after the item is no longer used to allow it
 // to expire from the cache.
-func (c *Cache) Get(ctx context.Context, path string) (CacheValue, error) {
-	response, err := c.createRequest(ctx, path)
+func (c *Cache) Get(ctx context.Context, typ reflect.Type, path string) (CacheValue, error) {
+	response, err := c.createRequest(ctx, path, typ)
 	if err != nil {
 		return nil, errors.Wrap(err, "request")
 	}
@@ -217,11 +219,13 @@ func (c *Cache) Get(ctx context.Context, path string) (CacheValue, error) {
 	}
 }
 
-func (c *Cache) GetMulti(ctx context.Context, paths []string) ([]CacheValue, error) {
+func (c *Cache) GetMulti(ctx context.Context, typ reflect.Type,
+	paths []string) ([]CacheValue, error) {
+
 	// Create all requests
 	responses := make([]<-chan interface{}, len(paths))
 	for i, path := range paths {
-		response, err := c.createRequest(ctx, path)
+		response, err := c.createRequest(ctx, path, typ)
 		if err != nil {
 			return nil, errors.Wrap(err, "request")
 		}

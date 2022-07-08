@@ -112,9 +112,9 @@ func (a *Agent) ActionIsSupported(action actions.Action) bool {
 
 func (a *Agent) Process(ctx context.Context, transaction TransactionWithOutputs,
 	actions []actions.Action) error {
-	logger.InfoWithFields(ctx, []logger.Field{
-		logger.Stringer("txid", transaction.TxID()),
-	}, "Processing transaction")
+
+	ctx = logger.ContextWithLogFields(ctx, logger.Stringer("txid", transaction.TxID()))
+	logger.Info(ctx, "Processing transaction")
 
 	for i, action := range actions {
 		if err := a.processAction(ctx, transaction, action); err != nil {

@@ -9,11 +9,9 @@ import (
 	"io"
 	"reflect"
 	"sync"
-	"time"
 
 	"github.com/tokenized/pkg/bitcoin"
 	"github.com/tokenized/pkg/bsor"
-	"github.com/tokenized/pkg/storage"
 	"github.com/tokenized/smart_contract_agent/internal/cacher"
 
 	"github.com/pkg/errors"
@@ -28,6 +26,7 @@ const (
 
 type SubscriptionCache struct {
 	cacher *cacher.Cache
+	typ    reflect.Type
 }
 
 type subscriptionSet struct {
@@ -91,23 +90,28 @@ func (s *LockingScriptSubscription) IsModified() bool {
 	return s.isModified
 }
 
-func NewSubscriptionCache(store storage.StreamStorage, requestThreadCount int,
-	requestTimeout time.Duration, expireCount int,
-	expiration time.Duration) (*SubscriptionCache, error) {
+func NewSubscriptionCache(cache *cacher.Cache) (*SubscriptionCache, error) {
+	typ := reflect.TypeOf(&subscriptionSet{})
 
-	cacher, err := cacher.NewCache(store, reflect.TypeOf(&subscriptionSet{}), requestThreadCount,
-		requestTimeout, expireCount, expiration)
-	if err != nil {
-		return nil, errors.Wrap(err, "cacher")
+	// Verify item value type is valid for a cache item.
+	if typ.Kind() != reflect.Ptr {
+		return nil, errors.New("Type must be a pointer")
+	}
+
+	itemValue := reflect.New(typ.Elem())
+	if !itemValue.CanInterface() {
+		return nil, errors.New("Type must be support interface")
+	}
+
+	itemInterface := itemValue.Interface()
+	if _, ok := itemInterface.(cacher.CacheValue); !ok {
+		return nil, errors.New("Type must implement CacheValue")
 	}
 
 	return &SubscriptionCache{
-		cacher: cacher,
+		cacher: cache,
+		typ:    typ,
 	}, nil
-}
-
-func (c *SubscriptionCache) Run(ctx context.Context, interrupt <-chan interface{}) error {
-	return c.cacher.Run(ctx, interrupt)
 }
 
 func (c *SubscriptionCache) Add(ctx context.Context, contractLockingScript bitcoin.Script,
@@ -122,7 +126,7 @@ func (c *SubscriptionCache) Add(ctx context.Context, contractLockingScript bitco
 	}
 	set.Subscriptions[hash] = subscription
 
-	item, err := c.cacher.Add(ctx, set)
+	item, err := c.cacher.Add(ctx, c.typ, set)
 	if err != nil {
 		return nil, errors.Wrap(err, "add")
 	}
@@ -156,7 +160,7 @@ func (c *SubscriptionCache) AddMulti(ctx context.Context, contractLockingScript 
 		values[i] = set
 	}
 
-	items, err := c.cacher.AddMulti(ctx, values)
+	items, err := c.cacher.AddMulti(ctx, c.typ, values)
 	if err != nil {
 		return nil, errors.Wrap(err, "add")
 	}
@@ -198,7 +202,7 @@ func (c *SubscriptionCache) GetLockingScript(ctx context.Context,
 	hash := LockingScriptHash(lockingScript)
 	path := subscriptionSetPath(contractLockingScript, hashPathID(hash))
 
-	item, err := c.cacher.Get(ctx, path)
+	item, err := c.cacher.Get(ctx, c.typ, path)
 	if err != nil {
 		return nil, errors.Wrap(err, "get")
 	}
@@ -235,18 +239,18 @@ func (c *SubscriptionCache) GetLockingScriptMulti(ctx context.Context,
 		getPaths = appendStringIfDoesntExist(getPaths, path)
 	}
 
-	items, err := c.cacher.GetMulti(ctx, getPaths)
+	items, err := c.cacher.GetMulti(ctx, c.typ, getPaths)
 	if err != nil {
 		return nil, errors.Wrap(err, "get multi")
 	}
 
-	sets := make(subscriptionSets, len(items))
-	for i, item := range items {
+	var sets subscriptionSets
+	for _, item := range items {
 		if item == nil {
 			continue // a requested set must not exist
 		}
 
-		sets[i] = item.(*subscriptionSet)
+		sets = append(sets, item.(*subscriptionSet))
 	}
 
 	result := make(Subscriptions, len(lockingScripts))
@@ -282,7 +286,7 @@ func (c *SubscriptionCache) Release(ctx context.Context, contractLockingScript b
 
 	// Set set as modified
 	if isModified {
-		item, err := c.cacher.Get(ctx, path)
+		item, err := c.cacher.Get(ctx, c.typ, path)
 		if err != nil {
 			return errors.Wrap(err, "get")
 		}
@@ -322,18 +326,18 @@ func (c *SubscriptionCache) ReleaseMulti(ctx context.Context, contractLockingScr
 		}
 	}
 
-	modifiedItems, err := c.cacher.GetMulti(ctx, modifiedPaths)
+	modifiedItems, err := c.cacher.GetMulti(ctx, c.typ, modifiedPaths)
 	if err != nil {
 		return errors.Wrap(err, "get multi")
 	}
 
-	sets := make(subscriptionSets, len(modifiedItems))
-	for i, item := range modifiedItems {
+	var sets subscriptionSets
+	for _, item := range modifiedItems {
 		if item == nil {
 			continue // a requested set must not exist
 		}
 
-		sets[i] = item.(*subscriptionSet)
+		sets = append(sets, item.(*subscriptionSet))
 	}
 
 	for i := range subscriptions {

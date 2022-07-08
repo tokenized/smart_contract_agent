@@ -15,6 +15,7 @@ import (
 	"github.com/tokenized/pkg/logger"
 	"github.com/tokenized/pkg/storage"
 	"github.com/tokenized/pkg/threads"
+	"github.com/tokenized/smart_contract_agent/internal/cacher"
 	"github.com/tokenized/smart_contract_agent/internal/state"
 	"github.com/tokenized/smart_contract_agent/internal/whatsonchain"
 	"github.com/tokenized/smart_contract_agent/pkg/conductor"
@@ -81,26 +82,25 @@ func main() {
 		logger.Fatal(ctx, "main : Failed to create storage : %s", err)
 	}
 
-	contracts, err := state.NewContractCache(store, cfg.CacheRequestThreadCount,
-		cfg.CacheRequestTimeout.Duration, cfg.CacheExpireCount, cfg.CacheExpiration.Duration)
+	cache := cacher.NewCache(store, cfg.CacheRequestThreadCount, cfg.CacheRequestTimeout.Duration,
+		cfg.CacheExpireCount, cfg.CacheExpiration.Duration)
+
+	contracts, err := state.NewContractCache(cache)
 	if err != nil {
 		logger.Fatal(ctx, "main : Failed to create contracts cache : %s", err)
 	}
 
-	balances, err := state.NewBalanceCache(store, cfg.CacheRequestThreadCount,
-		cfg.CacheRequestTimeout.Duration, cfg.CacheExpireCount, cfg.CacheExpiration.Duration)
+	balances, err := state.NewBalanceCache(cache)
 	if err != nil {
 		logger.Fatal(ctx, "main : Failed to create balance cache : %s", err)
 	}
 
-	transactions, err := state.NewTransactionCache(store, cfg.CacheRequestThreadCount,
-		cfg.CacheRequestTimeout.Duration, cfg.CacheExpireCount, cfg.CacheExpiration.Duration)
+	transactions, err := state.NewTransactionCache(cache)
 	if err != nil {
 		logger.Fatal(ctx, "main : Failed to create transaction cache : %s", err)
 	}
 
-	subscriptions, err := state.NewSubscriptionCache(store, cfg.CacheRequestThreadCount,
-		cfg.CacheRequestTimeout.Duration, cfg.CacheExpireCount, cfg.CacheExpiration.Duration)
+	subscriptions, err := state.NewSubscriptionCache(cache)
 	if err != nil {
 		logger.Fatal(ctx, "main : Failed to create subscription cache : %s", err)
 	}
@@ -111,25 +111,10 @@ func main() {
 	var wait sync.WaitGroup
 	var stopper threads.StopCombiner
 
-	contractsThread := threads.NewThread("Contracts", contracts.Run)
-	contractsThread.SetWait(&wait)
-	contractsComplete := contractsThread.GetCompleteChannel()
-	stopper.Add(contractsThread)
-
-	balancesThread := threads.NewThread("Balances", balances.Run)
-	balancesThread.SetWait(&wait)
-	balancesComplete := balancesThread.GetCompleteChannel()
-	stopper.Add(balancesThread)
-
-	transactionsThread := threads.NewThread("Transactions", transactions.Run)
-	transactionsThread.SetWait(&wait)
-	transactionsComplete := transactionsThread.GetCompleteChannel()
-	stopper.Add(transactionsThread)
-
-	subscriptionsThread := threads.NewThread("Subscriptions", subscriptions.Run)
-	subscriptionsThread.SetWait(&wait)
-	subscriptionsComplete := subscriptionsThread.GetCompleteChannel()
-	stopper.Add(subscriptionsThread)
+	cacheThread := threads.NewThread("Cache", cache.Run)
+	cacheThread.SetWait(&wait)
+	cacheComplete := cacheThread.GetCompleteChannel()
+	stopper.Add(cacheThread)
 
 	loadThread := threads.NewThread("Load", func(ctx context.Context, interrupt <-chan interface{}) error {
 		return load(ctx, interrupt, conductor, transactions, cfg.BaseKey, cfg.ContractKey, woc)
@@ -137,10 +122,7 @@ func main() {
 	loadThread.SetWait(&wait)
 	loadComplete := loadThread.GetCompleteChannel()
 
-	contractsThread.Start(ctx)
-	balancesThread.Start(ctx)
-	transactionsThread.Start(ctx)
-	subscriptionsThread.Start(ctx)
+	cacheThread.Start(ctx)
 
 	if err := conductor.Load(ctx, store); err != nil {
 		logger.Fatal(ctx, "main : Failed to load conductor : %s", err)
@@ -159,21 +141,12 @@ func main() {
 	//
 	// Blocking main and waiting for shutdown.
 	select {
-	case <-contractsComplete:
-		logger.Error(ctx, "main : Contracts thread completed : %s", contractsThread.Error())
-
-	case <-balancesComplete:
-		logger.Error(ctx, "main : Balances thread completed : %s", balancesThread.Error())
-
-	case <-transactionsComplete:
-		logger.Error(ctx, "main : Transactions thread completed : %s", transactionsThread.Error())
-
-	case <-subscriptionsComplete:
-		logger.Error(ctx, "main : Subscriptions thread completed : %s", subscriptionsThread.Error())
+	case <-cacheComplete:
+		logger.Error(ctx, "main : Cache thread completed : %s", cacheThread.Error())
 
 	case <-loadComplete:
 		if err := loadThread.Error(); err != nil {
-			logger.Error(ctx, "main : Loading failed : %s", transactionsThread.Error())
+			logger.Error(ctx, "main : Loading failed : %s", loadThread.Error())
 		} else {
 			logger.Info(ctx, "main : Finished loading")
 		}

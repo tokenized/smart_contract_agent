@@ -10,13 +10,16 @@ import (
 	"github.com/tokenized/pkg/storage"
 	"github.com/tokenized/pkg/txbuilder"
 	"github.com/tokenized/pkg/wire"
+	"github.com/tokenized/smart_contract_agent/internal/cacher"
 )
 
 func Test_FetchTxs(t *testing.T) {
 	ctx := context.Background()
 	store := storage.NewMockStorage()
 
-	cache, err := NewTransactionCache(store, 4, 2*time.Second, 10000, 10*time.Second)
+	cacher := cacher.NewCache(store, 4, 2*time.Second, 10000, 10*time.Second)
+
+	cache, err := NewTransactionCache(cacher)
 	if err != nil {
 		t.Fatalf("Failed to create tx cache : %s", err)
 	}
@@ -24,7 +27,7 @@ func Test_FetchTxs(t *testing.T) {
 	interrupt := make(chan interface{})
 	cacheComplete := make(chan interface{})
 	go func() {
-		cache.Run(ctx, interrupt)
+		cacher.Run(ctx, interrupt)
 		close(cacheComplete)
 	}()
 

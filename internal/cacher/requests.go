@@ -12,14 +12,18 @@ import (
 
 type Request struct {
 	path     string
+	typ      reflect.Type
 	response chan<- interface{}
 }
 
-func (c *Cache) createRequest(ctx context.Context, path string) (<-chan interface{}, error) {
+func (c *Cache) createRequest(ctx context.Context, path string,
+	typ reflect.Type) (<-chan interface{}, error) {
+
 	// Create a request to get the tx.
 	response := make(chan interface{}, 1)
 	request := &Request{
 		path:     path,
+		typ:      typ,
 		response: response,
 	}
 
@@ -99,7 +103,7 @@ func (c *Cache) handleRequest(ctx context.Context, threadIndex int, request *Req
 	}
 	c.itemsLock.Unlock()
 
-	value, err := c.fetchValue(ctx, request.path)
+	value, err := c.fetchValue(ctx, request.path, request.typ)
 	if err != nil {
 		return errors.Wrapf(err, "read: %s", request.path)
 	}
@@ -133,8 +137,8 @@ func (c *Cache) handleRequest(ctx context.Context, threadIndex int, request *Req
 	return nil
 }
 
-func (c *Cache) fetchValue(ctx context.Context, path string) (CacheValue, error) {
-	itemValue := reflect.New(c.typ.Elem())
+func (c *Cache) fetchValue(ctx context.Context, path string, typ reflect.Type) (CacheValue, error) {
+	itemValue := reflect.New(typ.Elem())
 	itemInterface := itemValue.Interface()
 	item := itemInterface.(CacheValue)
 

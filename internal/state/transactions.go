@@ -7,14 +7,12 @@ import (
 	"io"
 	"reflect"
 	"sync"
-	"time"
 
 	"github.com/tokenized/channels"
 	"github.com/tokenized/channels/wallet"
 	"github.com/tokenized/pkg/bitcoin"
 	"github.com/tokenized/pkg/bsor"
 	"github.com/tokenized/pkg/merkle_proof"
-	"github.com/tokenized/pkg/storage"
 	"github.com/tokenized/pkg/wire"
 	"github.com/tokenized/smart_contract_agent/internal/cacher"
 	"github.com/tokenized/specification/dist/golang/actions"
@@ -30,6 +28,7 @@ const (
 
 type TransactionCache struct {
 	cacher *cacher.Cache
+	typ    reflect.Type
 }
 
 type Transaction struct {
@@ -46,23 +45,28 @@ type Transaction struct {
 	sync.Mutex `bsor:"-"`
 }
 
-func NewTransactionCache(store storage.StreamStorage, requestThreadCount int,
-	requestTimeout time.Duration, expireCount int,
-	expiration time.Duration) (*TransactionCache, error) {
+func NewTransactionCache(cache *cacher.Cache) (*TransactionCache, error) {
+	typ := reflect.TypeOf(&Transaction{})
 
-	cacher, err := cacher.NewCache(store, reflect.TypeOf(&Transaction{}), requestThreadCount,
-		requestTimeout, expireCount, expiration)
-	if err != nil {
-		return nil, errors.Wrap(err, "cacher")
+	// Verify item value type is valid for a cache item.
+	if typ.Kind() != reflect.Ptr {
+		return nil, errors.New("Type must be a pointer")
+	}
+
+	itemValue := reflect.New(typ.Elem())
+	if !itemValue.CanInterface() {
+		return nil, errors.New("Type must be support interface")
+	}
+
+	itemInterface := itemValue.Interface()
+	if _, ok := itemInterface.(cacher.CacheValue); !ok {
+		return nil, errors.New("Type must implement CacheValue")
 	}
 
 	return &TransactionCache{
-		cacher: cacher,
+		cacher: cache,
+		typ:    typ,
 	}, nil
-}
-
-func (c *TransactionCache) Run(ctx context.Context, interrupt <-chan interface{}) error {
-	return c.cacher.Run(ctx, interrupt)
 }
 
 func (c *TransactionCache) Save(ctx context.Context, tx *Transaction) {
@@ -70,7 +74,7 @@ func (c *TransactionCache) Save(ctx context.Context, tx *Transaction) {
 }
 
 func (c *TransactionCache) Add(ctx context.Context, tx *Transaction) (*Transaction, error) {
-	item, err := c.cacher.Add(ctx, tx)
+	item, err := c.cacher.Add(ctx, c.typ, tx)
 	if err != nil {
 		return nil, errors.Wrap(err, "add")
 	}
@@ -107,7 +111,7 @@ func (c *TransactionCache) AddRaw(ctx context.Context, tx *wire.MsgTx,
 		MerkleProofs: merkleProofs,
 	}
 
-	item, err := c.cacher.Add(ctx, itx)
+	item, err := c.cacher.Add(ctx, c.typ, itx)
 	if err != nil {
 		return nil, errors.Wrap(err, "add")
 	}
@@ -159,7 +163,7 @@ func (tx *Transaction) AddMerkleProof(merkleProof *merkle_proof.MerkleProof) boo
 func (c *TransactionCache) GetTxWithAncestors(ctx context.Context,
 	txid bitcoin.Hash32) (*Transaction, error) {
 
-	item, err := c.cacher.Get(ctx, TransactionPath(txid))
+	item, err := c.cacher.Get(ctx, c.typ, TransactionPath(txid))
 	if err != nil {
 		return nil, errors.Wrap(err, "get tx")
 	}
@@ -202,7 +206,7 @@ func (c *TransactionCache) GetTxWithAncestors(ctx context.Context,
 }
 
 func (c *TransactionCache) Get(ctx context.Context, txid bitcoin.Hash32) (*Transaction, error) {
-	item, err := c.cacher.Get(ctx, TransactionPath(txid))
+	item, err := c.cacher.Get(ctx, c.typ, TransactionPath(txid))
 	if err != nil {
 		return nil, errors.Wrap(err, "get")
 	}

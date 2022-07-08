@@ -28,11 +28,9 @@ type TestItem struct {
 func Test_NotFound(t *testing.T) {
 	ctx := context.Background()
 	store := storage.NewMockStorage()
+	typ := reflect.TypeOf(&TestItem{})
 
-	cache, err := NewCache(store, reflect.TypeOf(&TestItem{}), 2, time.Second, 10, time.Second)
-	if err != nil {
-		t.Fatalf("Failed to create cache : %s", err)
-	}
+	cache := NewCache(store, 2, time.Second, 10, time.Second)
 
 	interrupt := make(chan interface{})
 	cacheComplete := make(chan interface{})
@@ -43,7 +41,7 @@ func Test_NotFound(t *testing.T) {
 
 	var hash bitcoin.Hash32
 	rand.Read(hash[:])
-	notFound, err := cache.Get(ctx, GetTestItemPath(hash))
+	notFound, err := cache.Get(ctx, typ, GetTestItemPath(hash))
 	if err != nil {
 		t.Fatalf("Failed to get item : %s", err)
 	}
@@ -63,11 +61,9 @@ func Test_NotFound(t *testing.T) {
 func Test_Add(t *testing.T) {
 	ctx := context.Background()
 	store := storage.NewMockStorage()
+	typ := reflect.TypeOf(&TestItem{})
 
-	cache, err := NewCache(store, reflect.TypeOf(&TestItem{}), 2, time.Second, 10, time.Second)
-	if err != nil {
-		t.Fatalf("Failed to create cache : %s", err)
-	}
+	cache := NewCache(store, 2, time.Second, 10, time.Second)
 
 	interrupt := make(chan interface{})
 	cacheComplete := make(chan interface{})
@@ -81,7 +77,7 @@ func Test_Add(t *testing.T) {
 	}
 	path := item.Path()
 
-	addedCacheItem, err := cache.Add(ctx, item)
+	addedCacheItem, err := cache.Add(ctx, typ, item)
 	if err != nil {
 		t.Fatalf("Failed to add item : %s", err)
 	}
@@ -101,7 +97,7 @@ func Test_Add(t *testing.T) {
 
 	cache.Release(ctx, path)
 
-	gotCacheItem, err := cache.Get(ctx, path)
+	gotCacheItem, err := cache.Get(ctx, typ, path)
 	if err != nil {
 		t.Fatalf("Failed to get item : %s", err)
 	}
@@ -126,7 +122,7 @@ func Test_Add(t *testing.T) {
 	}
 	path = duplicateItem.Path()
 
-	addedCacheItem, err = cache.Add(ctx, duplicateItem)
+	addedCacheItem, err = cache.Add(ctx, typ, duplicateItem)
 	if err != nil {
 		t.Fatalf("Failed to add item : %s", err)
 	}
@@ -157,12 +153,9 @@ func Test_Add(t *testing.T) {
 func Test_Expire(t *testing.T) {
 	ctx := context.Background()
 	store := storage.NewMockStorage()
+	typ := reflect.TypeOf(&TestItem{})
 
-	cache, err := NewCache(store, reflect.TypeOf(&TestItem{}), 2, time.Second, 10,
-		100*time.Millisecond)
-	if err != nil {
-		t.Fatalf("Failed to create cache : %s", err)
-	}
+	cache := NewCache(store, 2, time.Second, 10, 100*time.Millisecond)
 
 	interrupt := make(chan interface{})
 	cacheComplete := make(chan interface{})
@@ -176,13 +169,13 @@ func Test_Expire(t *testing.T) {
 	}
 	path := item.Path()
 
-	if _, err := cache.Add(ctx, item); err != nil {
+	if _, err := cache.Add(ctx, typ, item); err != nil {
 		t.Fatalf("Failed to add item : %s", err)
 	}
 
 	cache.Release(ctx, path)
 
-	gotCacheItem, err := cache.Get(ctx, path)
+	gotCacheItem, err := cache.Get(ctx, typ, path)
 	if err != nil {
 		t.Fatalf("Failed to get item : %s", err)
 	}
@@ -209,7 +202,7 @@ func Test_Expire(t *testing.T) {
 
 	time.Sleep(110 * time.Millisecond)
 
-	gotCacheItem, err = cache.Get(ctx, path)
+	gotCacheItem, err = cache.Get(ctx, typ, path)
 	if err != nil {
 		t.Fatalf("Failed to get item : %s", err)
 	}

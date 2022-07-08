@@ -8,6 +8,7 @@ import (
 
 	"github.com/tokenized/pkg/bitcoin"
 	"github.com/tokenized/pkg/storage"
+	"github.com/tokenized/smart_contract_agent/internal/cacher"
 )
 
 func Test_Balances(t *testing.T) {
@@ -27,7 +28,9 @@ func Test_Balances(t *testing.T) {
 	var instrumentCode InstrumentCode
 	rand.Read(instrumentCode[:])
 
-	cache, err := NewBalanceCache(store, 4, 2*time.Second, 10000, 10*time.Second)
+	cacher := cacher.NewCache(store, 4, 2*time.Second, 10000, 10*time.Second)
+
+	cache, err := NewBalanceCache(cacher)
 	if err != nil {
 		t.Fatalf("Failed to create balance cache : %s", err)
 	}
@@ -35,7 +38,7 @@ func Test_Balances(t *testing.T) {
 	interrupt := make(chan interface{})
 	cacheComplete := make(chan interface{})
 	go func() {
-		cache.Run(ctx, interrupt)
+		cacher.Run(ctx, interrupt)
 		close(cacheComplete)
 	}()
 
