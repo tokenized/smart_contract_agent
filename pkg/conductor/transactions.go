@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/tokenized/channels"
 	"github.com/tokenized/channels/wallet"
 	"github.com/tokenized/pkg/bitcoin"
 	"github.com/tokenized/pkg/logger"
@@ -32,8 +33,15 @@ func (c *Conductor) addTx(ctx context.Context, txid bitcoin.Hash32,
 	spyNodeTx *spynode.Tx) (*state.Transaction, error) {
 
 	transaction := &state.Transaction{
-		Tx:      spyNodeTx.Tx,
-		Outputs: spyNodeTx.Outputs,
+		Tx: spyNodeTx.Tx,
+	}
+
+	transaction.SpentOutputs = make([]*channels.Output, len(spyNodeTx.Outputs))
+	for i, txout := range spyNodeTx.Outputs {
+		transaction.SpentOutputs[i] = &channels.Output{
+			Value:         txout.Value,
+			LockingScript: txout.LockingScript,
+		}
 	}
 
 	if spyNodeTx.State.Safe {

@@ -1,9 +1,7 @@
 package state
 
 import (
-	"bytes"
 	"context"
-	"crypto/sha256"
 	"encoding/binary"
 	"fmt"
 	"io"
@@ -18,6 +16,7 @@ import (
 )
 
 const (
+	SubscriptionTypeInvalid       = SubscriptionType(0)
 	SubscriptionTypeLockingScript = SubscriptionType(1)
 
 	subscriptionVersion = uint8(0)
@@ -29,34 +28,30 @@ type SubscriptionCache struct {
 	typ    reflect.Type
 }
 
-type subscriptionSet struct {
-	PathID [2]byte `json:"path_id"`
-
-	ContractLockingScript bitcoin.Script `json:"contract_locking_script"`
-
-	Subscriptions map[bitcoin.Hash32]Subscription `json:"subscriptions"`
-
-	isModified bool
-	sync.Mutex
-}
-
-type subscriptionSets []*subscriptionSet
-
 type SubscriptionType uint8
 
-type Subscription interface {
-	Type() SubscriptionType
-	Hash() bitcoin.Hash32
+type Subscription struct {
+	value SubscriptionValue
+}
+
+type Subscriptions []*Subscription
+
+type SubscriptionValue interface {
 	GetChannelHash() bitcoin.Hash32
 
-	MarkModified()
+	// Object has been modified since last write to storage.
 	IsModified() bool
+	ClearModified()
 
+	// Storage path and serialization.
+	Hash() bitcoin.Hash32
+	Serialize(w io.Writer) error
+	Deserialize(r io.Reader) error
+
+	// All functions will be called by cache while the object is locked.
 	Lock()
 	Unlock()
 }
-
-type Subscriptions []Subscription
 
 type LockingScriptSubscription struct {
 	LockingScript bitcoin.Script `bsor:"1" json:"locking_script"`
@@ -66,16 +61,226 @@ type LockingScriptSubscription struct {
 	sync.Mutex `bsor:"-"`
 }
 
-func (s *LockingScriptSubscription) Type() SubscriptionType {
-	return SubscriptionTypeLockingScript
+func NewSubscriptionCache(cache *cacher.Cache) (*SubscriptionCache, error) {
+	typ := reflect.TypeOf(&Subscription{})
+
+	// Verify item value type is valid for a cache item.
+	if typ.Kind() != reflect.Ptr {
+		return nil, errors.New("Type must be a pointer")
+	}
+
+	itemValue := reflect.New(typ.Elem())
+	if !itemValue.CanInterface() {
+		return nil, errors.New("Type must be support interface")
+	}
+
+	itemInterface := itemValue.Interface()
+	if _, ok := itemInterface.(cacher.CacheSetValue); !ok {
+		return nil, errors.New("Type must implement CacheSetValue")
+	}
+
+	return &SubscriptionCache{
+		cacher: cache,
+		typ:    typ,
+	}, nil
+}
+
+func (c *SubscriptionCache) Add(ctx context.Context, contractLockingScript bitcoin.Script,
+	subscription *Subscription) (*Subscription, error) {
+
+	pathPrefix := subscriptionPathPrefix(contractLockingScript)
+
+	value, err := c.cacher.AddSetValue(ctx, c.typ, pathPrefix, subscription)
+	if err != nil {
+		return nil, errors.Wrap(err, "add set")
+	}
+
+	return value.(*Subscription), nil
+}
+
+func (c *SubscriptionCache) AddMulti(ctx context.Context, contractLockingScript bitcoin.Script,
+	subscriptions Subscriptions) (Subscriptions, error) {
+
+	pathPrefix := subscriptionPathPrefix(contractLockingScript)
+
+	values := make([]cacher.CacheSetValue, len(subscriptions))
+	for i, subscription := range subscriptions {
+		values[i] = subscription
+	}
+
+	addedValues, err := c.cacher.AddSetMultiValue(ctx, c.typ, pathPrefix, values)
+	if err != nil {
+		return nil, errors.Wrap(err, "add set multi")
+	}
+
+	result := make(Subscriptions, len(addedValues))
+	for i, value := range addedValues {
+		result[i] = value.(*Subscription)
+	}
+
+	return result, nil
+}
+
+func (c *SubscriptionCache) GetLockingScript(ctx context.Context,
+	contractLockingScript bitcoin.Script, lockingScript bitcoin.Script) (*Subscription, error) {
+
+	pathPrefix := subscriptionPathPrefix(contractLockingScript)
+	hash := LockingScriptHash(lockingScript)
+
+	value, err := c.cacher.GetSetValue(ctx, c.typ, pathPrefix, hash)
+	if err != nil {
+		return nil, errors.Wrap(err, "get set")
+	}
+
+	return value.(*Subscription), nil
+}
+
+func (c *SubscriptionCache) GetLockingScriptMulti(ctx context.Context,
+	contractLockingScript bitcoin.Script,
+	lockingScripts []bitcoin.Script) (Subscriptions, error) {
+
+	pathPrefix := subscriptionPathPrefix(contractLockingScript)
+	hashes := make([]bitcoin.Hash32, len(lockingScripts))
+	for i, lockingScript := range lockingScripts {
+		hashes[i] = LockingScriptHash(lockingScript)
+	}
+
+	values, err := c.cacher.GetSetMultiValue(ctx, c.typ, pathPrefix, hashes)
+	if err != nil {
+		return nil, errors.Wrap(err, "get set multi")
+	}
+
+	result := make(Subscriptions, len(values))
+	for i, value := range values {
+		if value == nil {
+			continue
+		}
+
+		result[i] = value.(*Subscription)
+	}
+
+	return result, nil
+}
+
+func (c *SubscriptionCache) Release(ctx context.Context, contractLockingScript bitcoin.Script,
+	subscription *Subscription) error {
+
+	pathPrefix := subscriptionPathPrefix(contractLockingScript)
+	subscription.Lock()
+	hash := subscription.Hash()
+	isModified := subscription.IsModified()
+	subscription.Unlock()
+
+	if err := c.cacher.ReleaseSetValue(ctx, c.typ, pathPrefix, hash, isModified); err != nil {
+		return errors.Wrap(err, "release set")
+	}
+
+	return nil
+}
+
+func (c *SubscriptionCache) ReleaseMulti(ctx context.Context, contractLockingScript bitcoin.Script,
+	subscriptions Subscriptions) error {
+
+	pathPrefix := subscriptionPathPrefix(contractLockingScript)
+	var hashes []bitcoin.Hash32
+	var isModified []bool
+	for _, subscription := range subscriptions {
+		if subscription == nil {
+			continue
+		}
+
+		subscription.Lock()
+		hashes = append(hashes, subscription.Hash())
+		isModified = append(isModified, subscription.IsModified())
+		subscription.Unlock()
+	}
+
+	if err := c.cacher.ReleaseSetMultiValue(ctx, c.typ, pathPrefix, hashes, isModified); err != nil {
+		return errors.Wrap(err, "release set multi")
+	}
+
+	return nil
+}
+
+func subscriptionPathPrefix(contractLockingScript bitcoin.Script) string {
+	return fmt.Sprintf("%s/%s", subscriptionPath, CalculateContractID(contractLockingScript))
+}
+
+func SubscriptionForType(typ SubscriptionType) SubscriptionValue {
+	switch typ {
+	case SubscriptionTypeLockingScript:
+		return &LockingScriptSubscription{}
+	default:
+		return nil
+	}
+}
+
+func (s *Subscription) Type() SubscriptionType {
+	switch s.value.(type) {
+	case *LockingScriptSubscription:
+		return SubscriptionTypeLockingScript
+	default:
+		return 0
+	}
+}
+
+func (s *Subscription) GetChannelHash() bitcoin.Hash32 {
+	return s.value.GetChannelHash()
+}
+
+func (s *Subscription) IsModified() bool {
+	return s.value.IsModified()
+}
+
+func (s *Subscription) ClearModified() {
+	s.value.ClearModified()
+}
+
+func (s *Subscription) Hash() bitcoin.Hash32 {
+	return s.value.Hash()
+}
+
+func (s *Subscription) Serialize(w io.Writer) error {
+	typ := s.Type()
+	if typ == 0 {
+		return errors.New("Unknown Subscription Type")
+	}
+
+	if err := binary.Write(w, endian, typ); err != nil {
+		return errors.Wrap(err, "type")
+	}
+
+	return s.value.Serialize(w)
+}
+
+func (s *Subscription) Deserialize(r io.Reader) error {
+	var typ SubscriptionType
+	if err := binary.Read(r, endian, &typ); err != nil {
+		return errors.Wrap(err, "type")
+	}
+
+	s.value = SubscriptionForType(typ)
+	if s.value == nil {
+		return fmt.Errorf("Unknown subscription type : %d %s", uint8(typ), typ)
+	}
+
+	if err := s.value.Deserialize(r); err != nil {
+		return errors.Wrap(err, "value")
+	}
+
+	return nil
+}
+
+func (s *Subscription) Lock() {
+	s.value.Lock()
+}
+
+func (s *Subscription) Unlock() {
+	s.value.Unlock()
 }
 
 func (s *LockingScriptSubscription) Hash() bitcoin.Hash32 {
 	return LockingScriptHash(s.LockingScript)
-}
-
-func LockingScriptHash(lockingScript bitcoin.Script) bitcoin.Hash32 {
-	return bitcoin.Hash32(sha256.Sum256(lockingScript))
 }
 
 func (s *LockingScriptSubscription) GetChannelHash() bitcoin.Hash32 {
@@ -90,475 +295,43 @@ func (s *LockingScriptSubscription) IsModified() bool {
 	return s.isModified
 }
 
-func NewSubscriptionCache(cache *cacher.Cache) (*SubscriptionCache, error) {
-	typ := reflect.TypeOf(&subscriptionSet{})
-
-	// Verify item value type is valid for a cache item.
-	if typ.Kind() != reflect.Ptr {
-		return nil, errors.New("Type must be a pointer")
-	}
-
-	itemValue := reflect.New(typ.Elem())
-	if !itemValue.CanInterface() {
-		return nil, errors.New("Type must be support interface")
-	}
-
-	itemInterface := itemValue.Interface()
-	if _, ok := itemInterface.(cacher.CacheValue); !ok {
-		return nil, errors.New("Type must implement CacheValue")
-	}
-
-	return &SubscriptionCache{
-		cacher: cache,
-		typ:    typ,
-	}, nil
+func (s *LockingScriptSubscription) ClearModified() {
+	s.isModified = false
 }
 
-func (c *SubscriptionCache) Add(ctx context.Context, contractLockingScript bitcoin.Script,
-	subscription Subscription) (Subscription, error) {
-
-	hash := subscription.Hash()
-	pathID := hashPathID(hash)
-	set := &subscriptionSet{
-		PathID:                pathID,
-		ContractLockingScript: contractLockingScript,
-		Subscriptions:         make(map[bitcoin.Hash32]Subscription),
-	}
-	set.Subscriptions[hash] = subscription
-
-	item, err := c.cacher.Add(ctx, c.typ, set)
+func (s *LockingScriptSubscription) Serialize(w io.Writer) error {
+	b, err := bsor.MarshalBinary(s)
 	if err != nil {
-		return nil, errors.Wrap(err, "add")
-	}
-	set = item.(*subscriptionSet)
-
-	set.Lock()
-	result, exists := set.Subscriptions[hash]
-
-	if exists {
-		set.Unlock()
-		return result, nil
+		return errors.Wrap(err, "marshal")
 	}
 
-	set.Subscriptions[hash] = subscription
-	set.MarkModified()
-	set.Unlock()
-
-	return subscription, nil
-}
-
-func (c *SubscriptionCache) AddMulti(ctx context.Context, contractLockingScript bitcoin.Script,
-	subscriptions Subscriptions) (Subscriptions, error) {
-
-	var sets subscriptionSets
-	for _, subscription := range subscriptions {
-		sets.add(contractLockingScript, subscription)
-	}
-
-	values := make([]cacher.CacheValue, len(sets))
-	for i, set := range sets {
-		values[i] = set
-	}
-
-	items, err := c.cacher.AddMulti(ctx, c.typ, values)
-	if err != nil {
-		return nil, errors.Wrap(err, "add")
-	}
-
-	// Convert from items to sets
-	sets = make(subscriptionSets, len(items))
-	for i, item := range items {
-		sets[i] = item.(*subscriptionSet)
-	}
-
-	// Build resulting subscriptions from sets.
-	result := make(Subscriptions, len(subscriptions))
-	for i, subscription := range subscriptions {
-		hash := subscription.Hash()
-		set := sets.getSet(contractLockingScript, hash)
-		if set == nil {
-			// This shouldn't be possible if cacher.AddMulti is functioning properly.
-			return nil, errors.New("Subscription Set Missing") // subscription set not within sets
-		}
-
-		set.Lock()
-		gotSubscription, exists := set.Subscriptions[hash]
-		if exists {
-			result[i] = gotSubscription
-		} else {
-			result[i] = subscription
-			set.Subscriptions[hash] = subscription
-			set.isModified = true
-		}
-		set.Unlock()
-	}
-
-	return result, nil
-}
-
-func (c *SubscriptionCache) GetLockingScript(ctx context.Context,
-	contractLockingScript bitcoin.Script, lockingScript bitcoin.Script) (Subscription, error) {
-
-	hash := LockingScriptHash(lockingScript)
-	path := subscriptionSetPath(contractLockingScript, hashPathID(hash))
-
-	item, err := c.cacher.Get(ctx, c.typ, path)
-	if err != nil {
-		return nil, errors.Wrap(err, "get")
-	}
-
-	if item == nil {
-		return nil, nil // set doesn't exist
-	}
-
-	set := item.(*subscriptionSet)
-	set.Lock()
-	subscription, exists := set.Subscriptions[hash]
-	set.Unlock()
-
-	if !exists {
-		c.cacher.Release(ctx, path)
-		return nil, nil // subscription not within set
-	}
-
-	return subscription, nil
-}
-
-func (c *SubscriptionCache) GetLockingScriptMulti(ctx context.Context,
-	contractLockingScript bitcoin.Script,
-	lockingScripts []bitcoin.Script) (Subscriptions, error) {
-
-	hashes := make([]bitcoin.Hash32, len(lockingScripts))
-	paths := make([]string, len(lockingScripts))
-	var getPaths []string
-	for i, lockingScript := range lockingScripts {
-		hash := LockingScriptHash(lockingScript)
-		path := subscriptionSetPath(contractLockingScript, hashPathID(hash))
-		hashes[i] = hash
-		paths[i] = path
-		getPaths = appendStringIfDoesntExist(getPaths, path)
-	}
-
-	items, err := c.cacher.GetMulti(ctx, c.typ, getPaths)
-	if err != nil {
-		return nil, errors.Wrap(err, "get multi")
-	}
-
-	var sets subscriptionSets
-	for _, item := range items {
-		if item == nil {
-			continue // a requested set must not exist
-		}
-
-		sets = append(sets, item.(*subscriptionSet))
-	}
-
-	result := make(Subscriptions, len(lockingScripts))
-	for i := range lockingScripts {
-		set := sets.getSet(contractLockingScript, hashes[i])
-		if set == nil {
-			c.cacher.Release(ctx, paths[i])
-			continue
-		}
-
-		set.Lock()
-		subscription, exists := set.Subscriptions[hashes[i]]
-		set.Unlock()
-
-		if !exists {
-			c.cacher.Release(ctx, paths[i])
-			continue // subscription not within set
-		}
-
-		result[i] = subscription
-	}
-
-	return result, nil
-}
-
-func (c *SubscriptionCache) Release(ctx context.Context, contractLockingScript bitcoin.Script,
-	subscription Subscription) error {
-
-	subscription.Lock()
-	path := subscriptionSetPath(contractLockingScript, hashPathID(subscription.Hash()))
-	isModified := subscription.IsModified()
-	subscription.Unlock()
-
-	// Set set as modified
-	if isModified {
-		item, err := c.cacher.Get(ctx, c.typ, path)
-		if err != nil {
-			return errors.Wrap(err, "get")
-		}
-
-		if item == nil {
-			return errors.New("Subscription Set Missing")
-		}
-
-		set := item.(*subscriptionSet)
-		set.Lock()
-		set.isModified = true
-		set.Unlock()
-
-		c.cacher.Release(ctx, path) // release for get above
-	}
-
-	c.cacher.Release(ctx, path) // release for original request
-	return nil
-}
-
-func (c *SubscriptionCache) ReleaseMulti(ctx context.Context, contractLockingScript bitcoin.Script,
-	subscriptions Subscriptions) error {
-
-	var modifiedPaths, allPaths []string
-	hashes := make([]bitcoin.Hash32, len(subscriptions))
-	isModified := make([]bool, len(subscriptions))
-	for i, subscription := range subscriptions {
-		subscription.Lock()
-		hashes[i] = subscription.Hash()
-		path := subscriptionSetPath(contractLockingScript, hashPathID(hashes[i]))
-		isModified[i] = subscription.IsModified()
-		subscription.Unlock()
-
-		allPaths = appendStringIfDoesntExist(allPaths, path)
-		if isModified[i] {
-			modifiedPaths = appendStringIfDoesntExist(modifiedPaths, path)
-		}
-	}
-
-	modifiedItems, err := c.cacher.GetMulti(ctx, c.typ, modifiedPaths)
-	if err != nil {
-		return errors.Wrap(err, "get multi")
-	}
-
-	var sets subscriptionSets
-	for _, item := range modifiedItems {
-		if item == nil {
-			continue // a requested set must not exist
-		}
-
-		sets = append(sets, item.(*subscriptionSet))
-	}
-
-	for i := range subscriptions {
-		if !isModified[i] {
-			continue
-		}
-
-		set := sets.getSet(contractLockingScript, hashes[i])
-		if set == nil {
-			return errors.New("Subscription Set Missing")
-		}
-
-		set.MarkModified()
-	}
-
-	// Release from GetMulti above.
-	for _, path := range modifiedPaths {
-		c.cacher.Release(ctx, path)
-	}
-
-	// Release for subscriptions specified in this function call.
-	for _, path := range allPaths {
-		c.cacher.Release(ctx, path)
-	}
-
-	return nil
-}
-
-func (sets *subscriptionSets) add(contractLockingScript bitcoin.Script, subscription Subscription) {
-	hash := subscription.Hash()
-	pathID := hashPathID(hash)
-
-	for _, set := range *sets {
-		set.Lock()
-		if !set.ContractLockingScript.Equal(contractLockingScript) {
-			set.Unlock()
-			continue
-		}
-		if !bytes.Equal(set.PathID[:], pathID[:]) {
-			set.Unlock()
-			continue
-		}
-
-		set.Subscriptions[hash] = subscription
-		set.Unlock()
-		return
-	}
-
-	set := &subscriptionSet{
-		PathID:                pathID,
-		ContractLockingScript: contractLockingScript,
-		Subscriptions:         make(map[bitcoin.Hash32]Subscription),
-	}
-
-	set.Lock()
-	set.Subscriptions[hash] = subscription
-	set.Unlock()
-	*sets = append(*sets, set)
-}
-
-func (sets *subscriptionSets) getSet(contractLockingScript bitcoin.Script,
-	hash bitcoin.Hash32) *subscriptionSet {
-
-	pathID := hashPathID(hash)
-	for _, set := range *sets {
-		set.Lock()
-		if !set.ContractLockingScript.Equal(contractLockingScript) {
-			set.Unlock()
-			continue
-		}
-		if !bytes.Equal(set.PathID[:], pathID[:]) {
-			set.Unlock()
-			continue
-		}
-
-		set.Unlock()
-		return set
-	}
-
-	return nil
-}
-
-func subscriptionSetPath(contractLockingScript bitcoin.Script, pathID [2]byte) string {
-	return fmt.Sprintf("%s/%s/%x", subscriptionPath,
-		CalculateContractID(contractLockingScript), pathID)
-}
-
-func (set *subscriptionSet) Path() string {
-	return fmt.Sprintf("%s/%s/%x", subscriptionPath,
-		CalculateContractID(set.ContractLockingScript), set.PathID)
-}
-
-func (set *subscriptionSet) MarkModified() {
-	set.isModified = true
-}
-
-func (set *subscriptionSet) ClearModified() {
-	set.isModified = false
-}
-
-func (set *subscriptionSet) IsModified() bool {
-	return set.isModified
-}
-
-func (set *subscriptionSet) Serialize(w io.Writer) error {
-	if err := binary.Write(w, endian, subscriptionVersion); err != nil {
-		return errors.Wrap(err, "version")
-	}
-
-	if _, err := w.Write(set.PathID[:]); err != nil {
-		return errors.Wrap(err, "path_id")
-	}
-
-	if err := writeString(w, set.ContractLockingScript); err != nil {
-		return errors.Wrap(err, "contract")
-	}
-
-	if err := binary.Write(w, endian, uint32(len(set.Subscriptions))); err != nil {
+	if err := binary.Write(w, endian, uint32(len(b))); err != nil {
 		return errors.Wrap(err, "size")
 	}
 
-	for _, subscription := range set.Subscriptions {
-		if err := binary.Write(w, endian, subscription.Type()); err != nil {
-			return errors.Wrap(err, "type")
-		}
-
-		b, err := bsor.MarshalBinary(subscription)
-		if err != nil {
-			return errors.Wrap(err, "marshal")
-		}
-
-		if err := binary.Write(w, endian, uint32(len(b))); err != nil {
-			return errors.Wrap(err, "size")
-		}
-
-		if _, err := w.Write(b); err != nil {
-			return errors.Wrap(err, "write")
-		}
+	if _, err := w.Write(b); err != nil {
+		return errors.Wrap(err, "write")
 	}
 
 	return nil
 }
 
-func (set *subscriptionSet) Deserialize(r io.Reader) error {
-	var version uint8
-	if err := binary.Read(r, endian, &version); err != nil {
-		return errors.Wrap(err, "version")
-	}
-
-	if version != 0 {
-		return fmt.Errorf("Unsupported version : %d", version)
-	}
-
-	if _, err := io.ReadFull(r, set.PathID[:]); err != nil {
-		return errors.Wrap(err, "path_id")
-	}
-
-	contractLockingScript, err := readString(r)
-	if err != nil {
-		return errors.Wrap(err, "contract")
-	}
-	set.ContractLockingScript = contractLockingScript
-
-	var count uint32
-	if err := binary.Read(r, endian, &count); err != nil {
-		return errors.Wrap(err, "count")
-	}
-
-	set.Subscriptions = make(map[bitcoin.Hash32]Subscription)
-	for i := uint32(0); i < count; i++ {
-		var size uint32
-		if err := binary.Read(r, endian, &size); err != nil {
-			return errors.Wrap(err, "size")
-		}
-
-		b := make([]byte, size)
-		if _, err := io.ReadFull(r, b); err != nil {
-			return errors.Wrap(err, "read")
-		}
-
-		subscription, err := DeserializeSubscription(r)
-		if err != nil {
-			return errors.Wrap(err, "subscription")
-		}
-
-		hash := subscription.Hash()
-		set.Subscriptions[hash] = subscription
-	}
-
-	return nil
-}
-
-func DeserializeSubscription(r io.Reader) (Subscription, error) {
-	var typ [1]byte
-	if _, err := io.ReadFull(r, typ[:]); err != nil {
-		return nil, errors.Wrap(err, "type")
-	}
-
-	var subscription Subscription
-	switch SubscriptionType(typ[0]) {
-	case SubscriptionTypeLockingScript:
-		subscription = &LockingScriptSubscription{}
-	default:
-		return nil, fmt.Errorf("Unknown subscription type %d : %s", typ, SubscriptionType(typ[0]))
-	}
-
+func (s *LockingScriptSubscription) Deserialize(r io.Reader) error {
 	var size uint32
 	if err := binary.Read(r, endian, &size); err != nil {
-		return nil, errors.Wrap(err, "size")
+		return errors.Wrap(err, "size")
 	}
 
 	b := make([]byte, size)
 	if _, err := io.ReadFull(r, b); err != nil {
-		return nil, errors.Wrap(err, "read")
+		return errors.Wrap(err, "read")
 	}
 
-	if _, err := bsor.UnmarshalBinary(b, subscription); err != nil {
-		return nil, errors.Wrap(err, "unmarshal")
+	if _, err := bsor.UnmarshalBinary(b, s); err != nil {
+		return errors.Wrap(err, "unmarshal")
 	}
 
-	return subscription, nil
+	return nil
 }
 
 func (v SubscriptionType) MarshalText() ([]byte, error) {

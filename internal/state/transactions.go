@@ -35,7 +35,7 @@ type Transaction struct {
 	Tx           *wire.MsgTx                 `bsor:"1" json:"tx"`
 	State        wallet.TxState              `bsor:"2" json:"safe,omitempty"`
 	MerkleProofs []*merkle_proof.MerkleProof `bsor:"3" json:"merkle_proofs,omitempty"`
-	Outputs      []*wire.TxOut               `bsor:"4" json:"outputs,omitempty"` // outputs being spent by inputs in Tx
+	SpentOutputs []*channels.Output          `bsor:"4" json:"spent_outputs,omitempty"` // outputs being spent by inputs in Tx
 
 	IsProcessed bool `bsor:"5" json:"is_processed"`
 
@@ -160,6 +160,25 @@ func (tx *Transaction) AddMerkleProof(merkleProof *merkle_proof.MerkleProof) boo
 	return true
 }
 
+func (c *TransactionCache) GetExpandedTx(ctx context.Context,
+	txid bitcoin.Hash32) (*channels.ExpandedTx, error) {
+
+	tx, err := c.GetTxWithAncestors(ctx, txid)
+	if err != nil {
+		return nil, errors.Wrap(err, "get tx")
+	}
+
+	if tx == nil {
+		return nil, nil
+	}
+
+	return &channels.ExpandedTx{
+		Tx:           tx.Tx,
+		Ancestors:    tx.Ancestors,
+		SpentOutputs: tx.SpentOutputs,
+	}, nil
+}
+
 func (c *TransactionCache) GetTxWithAncestors(ctx context.Context,
 	txid bitcoin.Hash32) (*Transaction, error) {
 
@@ -171,8 +190,6 @@ func (c *TransactionCache) GetTxWithAncestors(ctx context.Context,
 	if item == nil {
 		return nil, nil
 	}
-
-	defer c.Release(ctx, txid)
 
 	tx := item.(*Transaction)
 	tx.Lock()
@@ -187,7 +204,11 @@ func (c *TransactionCache) GetTxWithAncestors(ctx context.Context,
 
 		inputTx, err := c.Get(ctx, txin.PreviousOutPoint.Hash)
 		if err != nil {
+			c.Release(ctx, txid)
 			return nil, errors.Wrapf(err, "get input tx: %s", txin.PreviousOutPoint.Hash)
+		}
+		if inputTx == nil {
+			continue
 		}
 
 		inputTx.Lock()
@@ -202,7 +223,7 @@ func (c *TransactionCache) GetTxWithAncestors(ctx context.Context,
 		c.Release(ctx, txin.PreviousOutPoint.Hash)
 	}
 
-	return nil, nil
+	return tx, nil
 }
 
 func (c *TransactionCache) Get(ctx context.Context, txid bitcoin.Hash32) (*Transaction, error) {
@@ -249,7 +270,6 @@ func (tx *Transaction) IsModified() bool {
 func (tx *Transaction) Serialize(w io.Writer) error {
 	b, err := bsor.MarshalBinary(tx)
 	if err != nil {
-		tx.Unlock()
 		return errors.Wrap(err, "marshal")
 	}
 
@@ -310,8 +330,8 @@ func (tx Transaction) InputLockingScript(index int) (bitcoin.Script, error) {
 		return nil, errors.New("Index out of range")
 	}
 
-	if index < len(tx.Outputs) {
-		return tx.Outputs[index].LockingScript, nil
+	if index < len(tx.SpentOutputs) {
+		return tx.SpentOutputs[index].LockingScript, nil
 	}
 
 	txin := tx.Tx.TxIn[index]
@@ -333,6 +353,36 @@ func (tx Transaction) InputLockingScript(index int) (bitcoin.Script, error) {
 	}
 
 	return ptx.TxOut[txin.PreviousOutPoint.Index].LockingScript, nil
+}
+
+func (tx Transaction) InputValue(index int) (uint64, error) {
+	if index >= len(tx.Tx.TxIn) {
+		return 0, errors.New("Index out of range")
+	}
+
+	if index < len(tx.SpentOutputs) {
+		return tx.SpentOutputs[index].Value, nil
+	}
+
+	txin := tx.Tx.TxIn[index]
+
+	parentTx := tx.Ancestors.GetTx(txin.PreviousOutPoint.Hash)
+	if parentTx == nil {
+		return 0, errors.Wrap(channels.MissingInput,
+			"parent:"+txin.PreviousOutPoint.Hash.String())
+	}
+
+	ptx := parentTx.GetTx()
+	if ptx == nil {
+		return 0, errors.Wrap(channels.MissingInput,
+			"parent tx:"+txin.PreviousOutPoint.Hash.String())
+	}
+
+	if txin.PreviousOutPoint.Index >= uint32(len(ptx.TxOut)) {
+		return 0, errors.Wrap(channels.MissingInput, txin.PreviousOutPoint.String())
+	}
+
+	return ptx.TxOut[txin.PreviousOutPoint.Index].Value, nil
 }
 
 func (tx Transaction) OutputCount() int {

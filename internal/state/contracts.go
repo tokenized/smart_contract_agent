@@ -174,7 +174,6 @@ func (c *Contract) IsModified() bool {
 func (c *Contract) Serialize(w io.Writer) error {
 	b, err := bsor.MarshalBinary(c)
 	if err != nil {
-		c.Unlock()
 		return errors.Wrap(err, "marshal")
 	}
 

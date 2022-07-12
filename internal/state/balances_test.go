@@ -42,7 +42,7 @@ func Test_Balances(t *testing.T) {
 		close(cacheComplete)
 	}()
 
-	for j := 0; j < 1; j++ {
+	for j := 0; j < 100; j++ {
 		var txid bitcoin.Hash32
 		rand.Read(txid[:])
 		var balances []*Balance
@@ -182,7 +182,7 @@ func Test_Balances(t *testing.T) {
 
 	close(interrupt)
 	select {
-	case <-time.After(3 * time.Second):
+	case <-time.After(time.Second):
 		t.Errorf("Cache shutdown timed out")
 	case <-cacheComplete:
 	}

@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tokenized/channels"
 	"github.com/tokenized/channels/wallet"
 	"github.com/tokenized/pkg/bitcoin"
 	"github.com/tokenized/pkg/storage"
@@ -60,13 +61,13 @@ func Test_CreateInstrument(t *testing.T) {
 	}
 
 	// Create a contract by processing contract formation.
-	var outputs []*wire.TxOut
+	var outputs []*channels.Output
 	tx := &wire.MsgTx{}
 
 	// Contract input
 	txid := &bitcoin.Hash32{}
 	rand.Read(txid[:])
-	outputs = append(outputs, &wire.TxOut{
+	outputs = append(outputs, &channels.Output{
 		LockingScript: contractLockingScript,
 		Value:         2200,
 	})
@@ -108,10 +109,10 @@ func Test_CreateInstrument(t *testing.T) {
 	contractFormationTxID := *tx.TxHash()
 
 	contractFormationTx := &state.Transaction{
-		Tx:          tx,
-		State:       wallet.TxStateSafe,
-		Outputs:     outputs,
-		IsProcessed: false,
+		Tx:           tx,
+		State:        wallet.TxStateSafe,
+		SpentOutputs: outputs,
+		IsProcessed:  false,
 	}
 
 	contractFormationTx, err = transactions.Add(ctx, contractFormationTx)
@@ -165,7 +166,7 @@ func Test_CreateInstrument(t *testing.T) {
 	// Contract input
 	txid = &bitcoin.Hash32{}
 	rand.Read(txid[:])
-	outputs = append(outputs, &wire.TxOut{
+	outputs = append(outputs, &channels.Output{
 		LockingScript: contractLockingScript,
 		Value:         2200,
 	})
@@ -210,10 +211,10 @@ func Test_CreateInstrument(t *testing.T) {
 	instrumentCreationTxID := *tx.TxHash()
 
 	instrumentCreationTx := &state.Transaction{
-		Tx:          tx,
-		State:       wallet.TxStateSafe,
-		Outputs:     outputs,
-		IsProcessed: false,
+		Tx:           tx,
+		State:        wallet.TxStateSafe,
+		SpentOutputs: outputs,
+		IsProcessed:  false,
 	}
 
 	instrumentCreationTx, err = transactions.Add(ctx, instrumentCreationTx)
@@ -338,7 +339,7 @@ func Test_CreateInstrument(t *testing.T) {
 		// Contract input
 		txid = &bitcoin.Hash32{}
 		rand.Read(txid[:])
-		outputs = append(outputs, &wire.TxOut{
+		outputs = append(outputs, &channels.Output{
 			LockingScript: contractLockingScript,
 			Value:         2200,
 		})
@@ -381,10 +382,10 @@ func Test_CreateInstrument(t *testing.T) {
 		txids = append(txids, settlementTxID)
 
 		settlementTx := &state.Transaction{
-			Tx:          tx,
-			State:       wallet.TxStateSafe,
-			Outputs:     outputs,
-			IsProcessed: false,
+			Tx:           tx,
+			State:        wallet.TxStateSafe,
+			SpentOutputs: outputs,
+			IsProcessed:  false,
 		}
 
 		settlementTx, err = transactions.Add(ctx, settlementTx)
@@ -461,7 +462,7 @@ func Test_CreateInstrument(t *testing.T) {
 		// Contract input
 		txid = &bitcoin.Hash32{}
 		rand.Read(txid[:])
-		outputs = append(outputs, &wire.TxOut{
+		outputs = append(outputs, &channels.Output{
 			LockingScript: contractLockingScript,
 			Value:         2200,
 		})
@@ -504,10 +505,10 @@ func Test_CreateInstrument(t *testing.T) {
 		txids2 = append(txids2, settlementTxID)
 
 		settlementTx := &state.Transaction{
-			Tx:          tx,
-			State:       wallet.TxStateSafe,
-			Outputs:     outputs,
-			IsProcessed: false,
+			Tx:           tx,
+			State:        wallet.TxStateSafe,
+			SpentOutputs: outputs,
+			IsProcessed:  false,
 		}
 
 		settlementTx, err = transactions.Add(ctx, settlementTx)

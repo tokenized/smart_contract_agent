@@ -2,7 +2,9 @@ package agents
 
 import (
 	"context"
+	"fmt"
 
+	channels_agent "github.com/tokenized/channels/smart_contract_agent"
 	"github.com/tokenized/pkg/bitcoin"
 	"github.com/tokenized/pkg/logger"
 	"github.com/tokenized/smart_contract_agent/internal/state"
@@ -49,12 +51,33 @@ func (a *Agent) processTransfer(ctx context.Context, transaction TransactionWith
 	return nil
 }
 
+func (a *Agent) getSettlementSubscriptions(ctx context.Context, transaction TransactionWithOutputs,
+	settlement *actions.Settlement) (state.Subscriptions, error) {
+
+	outputCount := transaction.OutputCount()
+	var lockingScripts []bitcoin.Script
+	for _, instrument := range settlement.Instruments {
+		for _, settle := range instrument.Settlements {
+			if int(settle.Index) >= outputCount {
+				return nil, fmt.Errorf("Invalid settlement output index: %d >= %d", settle.Index,
+					outputCount)
+			}
+
+			lockingScript := transaction.Output(int(settle.Index)).LockingScript
+			lockingScripts = append(lockingScripts, lockingScript)
+		}
+	}
+
+	return a.subscriptions.GetLockingScriptMulti(ctx, a.LockingScript(), lockingScripts)
+}
+
 func (a *Agent) processSettlement(ctx context.Context, transaction TransactionWithOutputs,
 	settlement *actions.Settlement) error {
 	txid := transaction.TxID()
 
 	agentLockingScript := a.LockingScript()
 
+	outputCount := transaction.OutputCount()
 	var lockingScripts []bitcoin.Script
 
 	// Update one instrument at a time.
@@ -98,11 +121,11 @@ func (a *Agent) processSettlement(ctx context.Context, transaction TransactionWi
 		logger.InfoWithFields(ctx, fields, "Processing settlement")
 
 		// Build balances based on the instrument's settlement quantities.
-		outputCount := transaction.OutputCount()
 		balances := make([]*state.Balance, len(instrument.Settlements))
 		for i, settle := range instrument.Settlements {
 			if int(settle.Index) >= outputCount {
-				logger.Error(ctx, "Invalid settlement output index: %d: %s", settle.Index, err)
+				logger.Error(ctx, "Invalid settlement output index: %d >= %d", settle.Index,
+					outputCount)
 				return nil
 			}
 
@@ -154,47 +177,58 @@ func (a *Agent) processSettlement(ctx context.Context, transaction TransactionWi
 		a.balances.ReleaseMulti(ctx, agentLockingScript, instrumentCode, addedBalances)
 	}
 
-	// subscriptions, err := a.subscriptions.GetLockingScriptMulti(ctx, agentLockingScript,
-	// 	lockingScripts)
-	// if err != nil {
-	// 	logger.Error(ctx, "Failed to get locking script subscriptions : %s", err)
-	// 	return nil
-	// }
-	// defer a.subscriptions.ReleaseMulti(ctx, agentLockingScript, subscriptions)
+	subscriptions, err := a.subscriptions.GetLockingScriptMulti(ctx, agentLockingScript,
+		lockingScripts)
+	if err != nil {
+		logger.Error(ctx, "Failed to get locking script subscriptions : %s", err)
+		return nil
+	}
+	defer a.subscriptions.ReleaseMulti(ctx, agentLockingScript, subscriptions)
 
-	// for _, subscription := range subscriptions {
-	// 	subscription.Lock()
-	// 	channelHash := subscription.GetChannelHash()
-	// 	subscription.Unlock()
+	if len(subscriptions) == 0 {
+		return nil
+	}
 
-	// 	// Send settlement over channel
-	// 	channel := a.GetChannel(ctx, channelHash)
-	// 	if channel == nil {
-	// 		continue
-	// 	}
+	expandedTx, err := a.transactions.GetExpandedTx(ctx, txid)
+	if err != nil {
+		logger.Error(ctx, "Failed to get expanded tx : %s", err)
+		return nil
+	}
+	if expandedTx == nil {
+		logger.Error(ctx, "Expanded tx not found")
+		return nil
+	}
+	defer a.transactions.Release(ctx, txid)
 
-	// 	msg := channels_agent.Action{
-	// 		Tx: transaction.Tx,
-	// 	}
+	msg := &channels_agent.Action{
+		Tx: expandedTx,
+	}
 
-	// 	if err := channel.SendMessage(ctx, msg, nil); err != nil {
-	// 		logger.WarnWithFields(ctx, []logger.Field{
-	// 			logger.Stringer("channel", channelHash),
-	// 		}, "Failed to send channels message : %s", err)
-	// 	}
-	// }
+	for _, subscription := range subscriptions {
+		if subscription == nil {
+			continue
+		}
 
-	return nil
-}
+		subscription.Lock()
+		channelHash := subscription.GetChannelHash()
+		subscription.Unlock()
 
-func appendIfDoesntExist(lockingScripts []bitcoin.Script,
-	lockingScript bitcoin.Script) []bitcoin.Script {
+		// Send settlement over channel
+		channel, err := a.GetChannel(ctx, channelHash)
+		if err != nil {
+			logger.Error(ctx, "Failed to get subscription channel : %s", err)
+			return nil
+		}
+		if channel == nil {
+			continue
+		}
 
-	for _, script := range lockingScripts {
-		if script.Equal(lockingScript) {
-			return lockingScripts
+		if err := channel.SendMessage(ctx, msg); err != nil {
+			logger.WarnWithFields(ctx, []logger.Field{
+				logger.Stringer("channel", channelHash),
+			}, "Failed to send channels message : %s", err)
 		}
 	}
 
-	return append(lockingScripts, lockingScript)
+	return nil
 }

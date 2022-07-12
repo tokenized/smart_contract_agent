@@ -63,6 +63,8 @@ type Cache struct {
 
 	itemsUseCount     int
 	itemsUseCountLock sync.Mutex
+
+	cacheSetType reflect.Type
 }
 
 type CacheItem struct {
@@ -103,6 +105,7 @@ func NewCache(store storage.StreamStorage, requestThreadCount int,
 		expiration:         expiration,
 		expirers:           make(chan *ExpireItem, expireCount),
 		items:              make(map[string]*CacheItem),
+		cacheSetType:       reflect.TypeOf(&cacheSet{}),
 	}
 }
 

@@ -10,3 +10,5 @@ require (
 	github.com/tokenized/specification v1.1.2-0.20220705200230-ef408a102fbf
 	github.com/tokenized/spynode v0.2.2-0.20220628035011-9815320ab778
 )
+
+replace github.com/tokenized/channels => ../channels
