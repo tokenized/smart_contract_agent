@@ -4,7 +4,7 @@ import (
 	"context"
 
 	"github.com/tokenized/channels/wallet"
-	"github.com/tokenized/pkg/logger"
+	"github.com/tokenized/logger"
 	spynode "github.com/tokenized/spynode/pkg/client"
 )
 

@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/tokenized/logger"
 	"github.com/tokenized/pkg/bitcoin"
-	"github.com/tokenized/pkg/logger"
 	"github.com/tokenized/pkg/wire"
 	"github.com/tokenized/smart_contract_agent/internal/state"
 	"github.com/tokenized/specification/dist/golang/actions"
@@ -34,10 +34,11 @@ type Agent struct {
 
 type TransactionWithOutputs interface {
 	TxID() bitcoin.Hash32
+	GetMsgTx() *wire.MsgTx
 
 	InputCount() int
 	Input(index int) *wire.TxIn
-	InputLockingScript(index int) (bitcoin.Script, error)
+	InputOutput(index int) (*wire.TxOut, error) // The output being spent by the input
 
 	OutputCount() int
 	Output(index int) *wire.TxOut

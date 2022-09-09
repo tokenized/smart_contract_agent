@@ -6,18 +6,18 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tokenized/cacher"
 	"github.com/tokenized/pkg/bitcoin"
 	"github.com/tokenized/pkg/storage"
 	"github.com/tokenized/pkg/txbuilder"
 	"github.com/tokenized/pkg/wire"
-	"github.com/tokenized/smart_contract_agent/internal/cacher"
 )
 
 func Test_FetchTxs(t *testing.T) {
 	ctx := context.Background()
 	store := storage.NewMockStorage()
 
-	cacher := cacher.NewCache(store, 4, 2*time.Second, 10000, 10*time.Second)
+	cacher := cacher.NewCache(store, cacher.DefaultConfig())
 
 	cache, err := NewTransactionCache(cacher)
 	if err != nil {

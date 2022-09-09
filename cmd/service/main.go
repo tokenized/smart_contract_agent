@@ -4,19 +4,20 @@ import (
 	"context"
 	"os"
 	"os/signal"
+	"runtime/debug"
 	"sync"
 	"syscall"
 
+	"github.com/tokenized/cacher"
 	"github.com/tokenized/channels/wallet"
 	"github.com/tokenized/config"
+	"github.com/tokenized/logger"
 	"github.com/tokenized/pkg/bitcoin"
-	"github.com/tokenized/pkg/logger"
 	"github.com/tokenized/pkg/storage"
-	"github.com/tokenized/pkg/threads"
-	"github.com/tokenized/smart_contract_agent/internal/cacher"
 	"github.com/tokenized/smart_contract_agent/internal/state"
 	"github.com/tokenized/smart_contract_agent/pkg/conductor"
 	spyNodeClient "github.com/tokenized/spynode/pkg/client"
+	"github.com/tokenized/threads"
 )
 
 var (
@@ -30,10 +31,7 @@ type Config struct {
 
 	IsTest bool `default:"true" envconfig:"IS_TEST" json:"is_test"`
 
-	CacheRequestThreadCount int             `default:"4" envconfig:"CACHE_REQUEST_THREAD_COUNT" json:"cache_request_thread_count"`
-	CacheRequestTimeout     config.Duration `default:"1m" envconfig:"CACHE_REQUEST_TIMEOUT" json:"cache_request_timeout"`
-	CacheExpireCount        int             `default:"10000" envconfig:"CACHE_EXPIRE_COUNT" json:"cache_expire_count"`
-	CacheExpiration         config.Duration `default:"3s" envconfig:"CACHE_EXPIRATION" json:"cache_expiration"`
+	Cache cacher.Config `json:"cache"`
 
 	Wallet  wallet.Config        `json:"wallet"`
 	Storage storage.Config       `json:"storage"`
@@ -54,8 +52,12 @@ func main() {
 
 	logger.Info(ctx, "Starting %s : Build %s (%s on %s)", "Smart Contract Agent", buildVersion,
 		buildUser, buildDate)
-
 	defer logger.Info(ctx, "main : Completed")
+	defer func() {
+		if err := recover(); err != nil {
+			logger.Error(ctx, "Panic : %s : %s", err, string(debug.Stack()))
+		}
+	}()
 
 	// Config
 	maskedConfig, err := config.MarshalJSONMaskedRaw(cfg)
@@ -77,13 +79,12 @@ func main() {
 		logger.Fatal(ctx, "main : Spynode connection type must be full to receive data : %s", err)
 	}
 
-	spyNodeClient, err := spyNodeClient.NewRemoteClient(&cfg.SpyNode)
+	spyNode, err := spyNodeClient.NewRemoteClient(&cfg.SpyNode)
 	if err != nil {
 		logger.Fatal(ctx, "main : Failed to create spynode remote client : %s", err)
 	}
 
-	cache := cacher.NewCache(store, cfg.CacheRequestThreadCount, cfg.CacheRequestTimeout.Duration,
-		cfg.CacheExpireCount, cfg.CacheExpiration.Duration)
+	cache := cacher.NewCache(store, cfg.Cache)
 
 	contracts, err := state.NewContractCache(cache)
 	if err != nil {
@@ -105,26 +106,20 @@ func main() {
 		logger.Fatal(ctx, "main : Failed to create subscription cache : %s", err)
 	}
 
-	conductor := conductor.NewConductor(cfg.BaseKey, cfg.IsTest, spyNodeClient, contracts, balances,
+	conductor := conductor.NewConductor(cfg.BaseKey, cfg.IsTest, spyNode, contracts, balances,
 		transactions, subscriptions)
-	spyNodeClient.RegisterHandler(conductor)
+	spyNode.RegisterHandler(conductor)
 
-	var wait sync.WaitGroup
-	var stopper threads.StopCombiner
+	var spyNodeWait, cacheWait sync.WaitGroup
 
-	spynodeErrors := make(chan error, 10)
-	spyNodeClient.SetListenerErrorChannel(&spynodeErrors)
+	cacheThread, cacheComplete := threads.NewInterruptableThreadComplete("Cache", cache.Run,
+		&cacheWait)
 
-	cacheThread := threads.NewThread("Cache", cache.Run)
-	cacheThread.SetWait(&wait)
-	cacheComplete := cacheThread.GetCompleteChannel()
-	stopper.Add(cacheThread)
+	spyNodeThread, spyNodeComplete := threads.NewInterruptableThreadComplete("SpyNode", spyNode.Run,
+		&spyNodeWait)
 
 	cacheThread.Start(ctx)
-
-	if err := spyNodeClient.Connect(ctx); err != nil {
-		logger.Fatal(ctx, "main : Failed to connect to spynode : %s", err)
-	}
+	spyNodeThread.Start(ctx)
 
 	// Shutdown
 	//
@@ -137,23 +132,23 @@ func main() {
 	//
 	// Blocking main and waiting for shutdown.
 	select {
-	case err := <-spynodeErrors:
-		logger.Error(ctx, "main : Spynode failed : %s", err)
+	case err := <-cacheComplete:
+		logger.Error(ctx, "Cache completed : %s", err)
 
-	case <-cacheComplete:
-		logger.Error(ctx, "main : Cache thread completed : %s", cacheThread.Error())
+	case err := <-spyNodeComplete:
+		logger.Error(ctx, "SpyNode completed : %s", err)
 
 	case <-osSignals:
-		logger.Info(ctx, "main : Start shutdown...")
+		logger.Info(ctx, "Start shutdown")
 	}
 
-	// This waits for spynode to finish which must happen before stopping the caches.
-	spyNodeClient.Close(ctx)
-	stopper.Stop(ctx)
-
-	wait.Wait()
+	spyNodeThread.Stop(ctx)
+	spyNodeWait.Wait()
 
 	if err := conductor.Save(ctx, store); err != nil {
 		logger.Error(ctx, "main : Failed to save conductor : %s", err)
 	}
+
+	cacheThread.Stop(ctx)
+	cacheWait.Wait()
 }

@@ -3,7 +3,7 @@ package agents
 import (
 	"context"
 
-	"github.com/tokenized/pkg/logger"
+	"github.com/tokenized/logger"
 	"github.com/tokenized/specification/dist/golang/actions"
 
 	"github.com/pkg/errors"
@@ -13,13 +13,13 @@ func (a *Agent) processBodyOfAgreementFormation(ctx context.Context,
 	transaction TransactionWithOutputs, formation *actions.BodyOfAgreementFormation) error {
 
 	// First input must be the agent's locking script
-	inputLockingScript, err := transaction.InputLockingScript(0)
+	inputOutput, err := transaction.InputOutput(0)
 	if err != nil {
 		return errors.Wrapf(err, "input locking script %d", 0)
 	}
 
 	agentLockingScript := a.LockingScript()
-	if !agentLockingScript.Equal(inputLockingScript) {
+	if !agentLockingScript.Equal(inputOutput.LockingScript) {
 		return nil // Not for this agent's contract
 	}
 

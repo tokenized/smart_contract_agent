@@ -4,30 +4,19 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/tokenized/channels"
 	"github.com/tokenized/channels/wallet"
+	"github.com/tokenized/logger"
 	"github.com/tokenized/pkg/bitcoin"
-	"github.com/tokenized/pkg/logger"
+	"github.com/tokenized/pkg/expanded_tx"
 	"github.com/tokenized/pkg/merkle_proof"
-	"github.com/tokenized/pkg/wire"
 	"github.com/tokenized/smart_contract_agent/internal/state"
+	"github.com/tokenized/smart_contract_agent/pkg/agents"
 	"github.com/tokenized/specification/dist/golang/actions"
 	"github.com/tokenized/specification/dist/golang/protocol"
 	spynode "github.com/tokenized/spynode/pkg/client"
 
 	"github.com/pkg/errors"
 )
-
-type TransactionWithOutputs interface {
-	TxID() bitcoin.Hash32
-
-	InputCount() int
-	Input(index int) *wire.TxIn
-	InputLockingScript(index int) (bitcoin.Script, error)
-
-	OutputCount() int
-	Output(index int) *wire.TxOut
-}
 
 func (c *Conductor) addTx(ctx context.Context, txid bitcoin.Hash32,
 	spyNodeTx *spynode.Tx) (*state.Transaction, error) {
@@ -36,9 +25,9 @@ func (c *Conductor) addTx(ctx context.Context, txid bitcoin.Hash32,
 		Tx: spyNodeTx.Tx,
 	}
 
-	transaction.SpentOutputs = make([]*channels.Output, len(spyNodeTx.Outputs))
+	transaction.SpentOutputs = make([]*expanded_tx.Output, len(spyNodeTx.Outputs))
 	for i, txout := range spyNodeTx.Outputs {
-		transaction.SpentOutputs[i] = &channels.Output{
+		transaction.SpentOutputs[i] = &expanded_tx.Output{
 			Value:         txout.Value,
 			LockingScript: txout.LockingScript,
 		}
@@ -101,7 +90,9 @@ func (c *Conductor) UpdateTransaction(ctx context.Context, transaction *state.Tr
 	return nil
 }
 
-func (c *Conductor) processTransaction(ctx context.Context, transaction TransactionWithOutputs) error {
+func (c *Conductor) processTransaction(ctx context.Context,
+	transaction agents.TransactionWithOutputs) error {
+
 	agentActionsList, err := c.compileTx(ctx, transaction)
 	if err != nil {
 		return errors.Wrap(err, "compile tx")
@@ -130,7 +121,9 @@ func (c *Conductor) processTransaction(ctx context.Context, transaction Transact
 	return nil
 }
 
-func (c *Conductor) compileTx(ctx context.Context, tx TransactionWithOutputs) (AgentActionsList, error) {
+func (c *Conductor) compileTx(ctx context.Context,
+	tx agents.TransactionWithOutputs) (AgentActionsList, error) {
+
 	isTest := c.IsTest()
 	var agentActionsList AgentActionsList
 	outputCount := tx.OutputCount()
@@ -149,7 +142,7 @@ func (c *Conductor) compileTx(ctx context.Context, tx TransactionWithOutputs) (A
 }
 
 func (c *Conductor) compileAction(ctx context.Context, agentActionsList *AgentActionsList,
-	tx TransactionWithOutputs, action actions.Action) error {
+	tx agents.TransactionWithOutputs, action actions.Action) error {
 	ctx = logger.ContextWithLogFields(ctx, logger.String("action", action.Code()))
 
 	switch act := action.(type) {
@@ -170,19 +163,20 @@ func (c *Conductor) compileAction(ctx context.Context, agentActionsList *AgentAc
 		*actions.Confiscation, *actions.Reconciliation:
 
 		// Response actions where first input is the contract.
-		lockingScript, err := tx.InputLockingScript(0)
+		inputOutput, err := tx.InputOutput(0)
 		if err != nil {
 			return errors.Wrap(err, "input locking script")
 		}
 
-		if ra, err := bitcoin.RawAddressFromLockingScript(lockingScript); err == nil {
+		if ra, err := bitcoin.RawAddressFromLockingScript(inputOutput.LockingScript); err == nil {
 			logger.InfoWithFields(ctx, []logger.Field{
 				logger.Stringer("address", bitcoin.NewAddressFromRawAddress(ra, bitcoin.MainNet)),
-				logger.Stringer("locking_script", lockingScript),
+				logger.Stringer("locking_script", inputOutput.LockingScript),
 			}, "Contract response found")
 		}
 
-		if err := c.addAgentAction(ctx, agentActionsList, lockingScript, action); err != nil {
+		if err := c.addAgentAction(ctx, agentActionsList, inputOutput.LockingScript,
+			action); err != nil {
 			return errors.Wrap(err, "add agent action")
 		}
 
@@ -206,12 +200,13 @@ func (c *Conductor) compileAction(ctx context.Context, agentActionsList *AgentAc
 					instrument.ContractIndex, tx.InputCount())
 			}
 
-			lockingScript, err := tx.InputLockingScript(int(instrument.ContractIndex))
+			inputOutput, err := tx.InputOutput(int(instrument.ContractIndex))
 			if err != nil {
 				return errors.Wrap(err, "input locking script")
 			}
 
-			if err := c.addAgentAction(ctx, agentActionsList, lockingScript, action); err != nil {
+			if err := c.addAgentAction(ctx, agentActionsList, inputOutput.LockingScript,
+				action); err != nil {
 				return errors.Wrap(err, "add agent action")
 			}
 		}
@@ -223,12 +218,13 @@ func (c *Conductor) compileAction(ctx context.Context, agentActionsList *AgentAc
 					tx.InputCount())
 			}
 
-			lockingScript, err := tx.InputLockingScript(int(senderIndex))
+			inputOutput, err := tx.InputOutput(int(senderIndex))
 			if err != nil {
 				return errors.Wrap(err, "input locking script")
 			}
 
-			if err := c.addAgentAction(ctx, agentActionsList, lockingScript, action); err != nil {
+			if err := c.addAgentAction(ctx, agentActionsList, inputOutput.LockingScript,
+				action); err != nil {
 				return errors.Wrap(err, "add agent action")
 			}
 		}
@@ -248,12 +244,13 @@ func (c *Conductor) compileAction(ctx context.Context, agentActionsList *AgentAc
 	case *actions.Rejection:
 		inputCount := tx.InputCount()
 		for i := 0; i < inputCount; i++ {
-			lockingScript, err := tx.InputLockingScript(i)
+			inputOutput, err := tx.InputOutput(i)
 			if err != nil {
 				return errors.Wrap(err, "input locking script")
 			}
 
-			if err := c.addAgentAction(ctx, agentActionsList, lockingScript, action); err != nil {
+			if err := c.addAgentAction(ctx, agentActionsList, inputOutput.LockingScript,
+				action); err != nil {
 				return errors.Wrap(err, "add agent action")
 			}
 		}

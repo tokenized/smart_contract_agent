@@ -4,7 +4,7 @@ import (
 	"context"
 
 	"github.com/pkg/errors"
-	"github.com/tokenized/pkg/logger"
+	"github.com/tokenized/logger"
 	"github.com/tokenized/specification/dist/golang/actions"
 )
 
@@ -12,13 +12,13 @@ func (a *Agent) processFreeze(ctx context.Context, transaction TransactionWithOu
 	freeze *actions.Freeze) error {
 
 	// First input must be the agent's locking script
-	inputLockingScript, err := transaction.InputLockingScript(0)
+	inputOutput, err := transaction.InputOutput(0)
 	if err != nil {
 		return errors.Wrapf(err, "input locking script %d", 0)
 	}
 
 	agentLockingScript := a.LockingScript()
-	if !agentLockingScript.Equal(inputLockingScript) {
+	if !agentLockingScript.Equal(inputOutput.LockingScript) {
 		return nil // Not for this agent's contract
 	}
 
@@ -31,13 +31,13 @@ func (a *Agent) processThaw(ctx context.Context, transaction TransactionWithOutp
 	thaw *actions.Thaw) error {
 
 	// First input must be the agent's locking script
-	inputLockingScript, err := transaction.InputLockingScript(0)
+	inputOutput, err := transaction.InputOutput(0)
 	if err != nil {
 		return errors.Wrapf(err, "input locking script %d", 0)
 	}
 
 	agentLockingScript := a.LockingScript()
-	if !agentLockingScript.Equal(inputLockingScript) {
+	if !agentLockingScript.Equal(inputOutput.LockingScript) {
 		return nil // Not for this agent's contract
 	}
 
@@ -50,13 +50,13 @@ func (a *Agent) processConfiscation(ctx context.Context, transaction Transaction
 	confiscation *actions.Confiscation) error {
 
 	// First input must be the agent's locking script
-	inputLockingScript, err := transaction.InputLockingScript(0)
+	inputOutput, err := transaction.InputOutput(0)
 	if err != nil {
 		return errors.Wrapf(err, "input locking script %d", 0)
 	}
 
 	agentLockingScript := a.LockingScript()
-	if !agentLockingScript.Equal(inputLockingScript) {
+	if !agentLockingScript.Equal(inputOutput.LockingScript) {
 		return nil // Not for this agent's contract
 	}
 
@@ -69,13 +69,13 @@ func (a *Agent) processReconciliation(ctx context.Context, transaction Transacti
 	reconciliation *actions.Reconciliation) error {
 
 	// First input must be the agent's locking script
-	inputLockingScript, err := transaction.InputLockingScript(0)
+	inputOutput, err := transaction.InputOutput(0)
 	if err != nil {
 		return errors.Wrapf(err, "input locking script %d", 0)
 	}
 
 	agentLockingScript := a.LockingScript()
-	if !agentLockingScript.Equal(inputLockingScript) {
+	if !agentLockingScript.Equal(inputOutput.LockingScript) {
 		return nil // Not for this agent's contract
 	}
 

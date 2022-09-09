@@ -4,10 +4,11 @@ import (
 	"bytes"
 	"context"
 
+	"github.com/tokenized/logger"
 	"github.com/tokenized/pkg/bitcoin"
-	"github.com/tokenized/pkg/logger"
 	"github.com/tokenized/smart_contract_agent/internal/state"
 	"github.com/tokenized/specification/dist/golang/actions"
+	"github.com/tokenized/specification/dist/golang/instruments"
 	"github.com/tokenized/specification/dist/golang/protocol"
 
 	"github.com/pkg/errors"
@@ -17,21 +18,21 @@ func (a *Agent) processInstrumentCreation(ctx context.Context, transaction Trans
 	creation *actions.InstrumentCreation) error {
 
 	// First input must be the agent's locking script
-	inputLockingScript, err := transaction.InputLockingScript(0)
+	inputOutput, err := transaction.InputOutput(0)
 	if err != nil {
 		return errors.Wrapf(err, "input locking script %d", 0)
 	}
 
 	agentLockingScript := a.LockingScript()
-	if !agentLockingScript.Equal(inputLockingScript) {
+	if !agentLockingScript.Equal(inputOutput.LockingScript) {
 		return nil // Not for this agent's contract
 	}
 
 	logger.Info(ctx, "Processing instrument creation")
 
 	// Verify instrument payload is valid.
-	payload, err := protocol.DeserializeInstrumentPayload(creation.InstrumentPayloadVersion,
-		[]byte(creation.InstrumentType), creation.InstrumentPayload)
+	payload, err := instruments.Deserialize([]byte(creation.InstrumentType),
+		creation.InstrumentPayload)
 	if err != nil {
 		logger.Warn(ctx, "Instrument payload malformed: %s", err)
 		return nil

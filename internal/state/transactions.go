@@ -8,13 +8,13 @@ import (
 	"reflect"
 	"sync"
 
-	"github.com/tokenized/channels"
+	"github.com/tokenized/cacher"
 	"github.com/tokenized/channels/wallet"
 	"github.com/tokenized/pkg/bitcoin"
 	"github.com/tokenized/pkg/bsor"
+	"github.com/tokenized/pkg/expanded_tx"
 	"github.com/tokenized/pkg/merkle_proof"
 	"github.com/tokenized/pkg/wire"
-	"github.com/tokenized/smart_contract_agent/internal/cacher"
 	"github.com/tokenized/specification/dist/golang/actions"
 	"github.com/tokenized/specification/dist/golang/protocol"
 
@@ -33,13 +33,13 @@ type TransactionCache struct {
 
 type Transaction struct {
 	Tx           *wire.MsgTx                 `bsor:"1" json:"tx"`
-	State        wallet.TxState              `bsor:"2" json:"safe,omitempty"`
+	State        wallet.TxState              `bsor:"2" json:"state,omitempty"`
 	MerkleProofs []*merkle_proof.MerkleProof `bsor:"3" json:"merkle_proofs,omitempty"`
-	SpentOutputs []*channels.Output          `bsor:"4" json:"spent_outputs,omitempty"` // outputs being spent by inputs in Tx
+	SpentOutputs []*expanded_tx.Output       `bsor:"4" json:"spent_outputs,omitempty"` // outputs being spent by inputs in Tx
 
 	IsProcessed bool `bsor:"5" json:"is_processed"`
 
-	Ancestors channels.AncestorTxs `bsor:"-" json:"ancestors,omitempty"`
+	Ancestors expanded_tx.AncestorTxs `bsor:"-" json:"ancestors,omitempty"`
 
 	isModified bool
 	sync.Mutex `bsor:"-"`
@@ -83,7 +83,7 @@ func (c *TransactionCache) Add(ctx context.Context, tx *Transaction) (*Transacti
 }
 
 func (c *TransactionCache) AddExpandedTx(ctx context.Context,
-	etx *channels.ExpandedTx) (*Transaction, error) {
+	etx *expanded_tx.ExpandedTx) (*Transaction, error) {
 
 	for _, atx := range etx.Ancestors {
 		atxid := *atx.Tx.TxHash()
@@ -161,7 +161,7 @@ func (tx *Transaction) AddMerkleProof(merkleProof *merkle_proof.MerkleProof) boo
 }
 
 func (c *TransactionCache) GetExpandedTx(ctx context.Context,
-	txid bitcoin.Hash32) (*channels.ExpandedTx, error) {
+	txid bitcoin.Hash32) (*expanded_tx.ExpandedTx, error) {
 
 	tx, err := c.GetTxWithAncestors(ctx, txid)
 	if err != nil {
@@ -172,7 +172,7 @@ func (c *TransactionCache) GetExpandedTx(ctx context.Context,
 		return nil, nil
 	}
 
-	return &channels.ExpandedTx{
+	return &expanded_tx.ExpandedTx{
 		Tx:           tx.Tx,
 		Ancestors:    tx.Ancestors,
 		SpentOutputs: tx.SpentOutputs,
@@ -212,7 +212,7 @@ func (c *TransactionCache) GetTxWithAncestors(ctx context.Context,
 		}
 
 		inputTx.Lock()
-		atx = &channels.AncestorTx{
+		atx = &expanded_tx.AncestorTx{
 			Tx:           inputTx.Tx,
 			MerkleProofs: inputTx.MerkleProofs,
 		}
@@ -325,64 +325,38 @@ func (tx Transaction) Input(index int) *wire.TxIn {
 	return tx.Tx.TxIn[index]
 }
 
-func (tx Transaction) InputLockingScript(index int) (bitcoin.Script, error) {
+func (tx Transaction) InputOutput(index int) (*wire.TxOut, error) {
 	if index >= len(tx.Tx.TxIn) {
 		return nil, errors.New("Index out of range")
 	}
 
 	if index < len(tx.SpentOutputs) {
-		return tx.SpentOutputs[index].LockingScript, nil
+		output := tx.SpentOutputs[index]
+		return &wire.TxOut{
+			LockingScript: output.LockingScript,
+			Value:         output.Value,
+		}, nil
 	}
 
 	txin := tx.Tx.TxIn[index]
 
 	parentTx := tx.Ancestors.GetTx(txin.PreviousOutPoint.Hash)
 	if parentTx == nil {
-		return nil, errors.Wrap(channels.MissingInput,
+		return nil, errors.Wrap(expanded_tx.MissingInput,
 			"parent:"+txin.PreviousOutPoint.Hash.String())
 	}
 
 	ptx := parentTx.GetTx()
 	if ptx == nil {
-		return nil, errors.Wrap(channels.MissingInput,
+		return nil, errors.Wrap(expanded_tx.MissingInput,
 			"parent tx:"+txin.PreviousOutPoint.Hash.String())
 	}
 
 	if txin.PreviousOutPoint.Index >= uint32(len(ptx.TxOut)) {
-		return nil, errors.Wrap(channels.MissingInput, txin.PreviousOutPoint.String())
+		return nil, errors.Wrap(expanded_tx.MissingInput, txin.PreviousOutPoint.String())
 	}
 
-	return ptx.TxOut[txin.PreviousOutPoint.Index].LockingScript, nil
-}
-
-func (tx Transaction) InputValue(index int) (uint64, error) {
-	if index >= len(tx.Tx.TxIn) {
-		return 0, errors.New("Index out of range")
-	}
-
-	if index < len(tx.SpentOutputs) {
-		return tx.SpentOutputs[index].Value, nil
-	}
-
-	txin := tx.Tx.TxIn[index]
-
-	parentTx := tx.Ancestors.GetTx(txin.PreviousOutPoint.Hash)
-	if parentTx == nil {
-		return 0, errors.Wrap(channels.MissingInput,
-			"parent:"+txin.PreviousOutPoint.Hash.String())
-	}
-
-	ptx := parentTx.GetTx()
-	if ptx == nil {
-		return 0, errors.Wrap(channels.MissingInput,
-			"parent tx:"+txin.PreviousOutPoint.Hash.String())
-	}
-
-	if txin.PreviousOutPoint.Index >= uint32(len(ptx.TxOut)) {
-		return 0, errors.Wrap(channels.MissingInput, txin.PreviousOutPoint.String())
-	}
-
-	return ptx.TxOut[txin.PreviousOutPoint.Index].Value, nil
+	return ptx.TxOut[txin.PreviousOutPoint.Index], nil
 }
 
 func (tx Transaction) OutputCount() int {
@@ -405,4 +379,8 @@ func (tx Transaction) ParseActions(isTest bool) []actions.Action {
 	}
 
 	return result
+}
+
+func (tx Transaction) GetMsgTx() *wire.MsgTx {
+	return tx.Tx
 }

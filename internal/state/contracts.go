@@ -10,10 +10,10 @@ import (
 	"reflect"
 	"sync"
 
+	"github.com/tokenized/cacher"
 	"github.com/tokenized/pkg/bitcoin"
 	"github.com/tokenized/pkg/bsor"
 	"github.com/tokenized/pkg/storage"
-	"github.com/tokenized/smart_contract_agent/internal/cacher"
 	"github.com/tokenized/specification/dist/golang/actions"
 
 	"github.com/pkg/errors"

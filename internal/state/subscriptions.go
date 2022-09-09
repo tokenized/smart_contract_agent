@@ -8,9 +8,9 @@ import (
 	"reflect"
 	"sync"
 
+	"github.com/tokenized/cacher"
 	"github.com/tokenized/pkg/bitcoin"
 	"github.com/tokenized/pkg/bsor"
-	"github.com/tokenized/smart_contract_agent/internal/cacher"
 
 	"github.com/pkg/errors"
 )

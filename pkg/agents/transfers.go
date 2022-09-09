@@ -4,9 +4,9 @@ import (
 	"context"
 	"fmt"
 
-	channels_agent "github.com/tokenized/channels/smart_contract_agent"
+	channels_expanded_tx "github.com/tokenized/channels/expanded_tx"
+	"github.com/tokenized/logger"
 	"github.com/tokenized/pkg/bitcoin"
-	"github.com/tokenized/pkg/logger"
 	"github.com/tokenized/smart_contract_agent/internal/state"
 	"github.com/tokenized/specification/dist/golang/actions"
 	"github.com/tokenized/specification/dist/golang/protocol"
@@ -88,12 +88,12 @@ func (a *Agent) processSettlement(ctx context.Context, transaction TransactionWi
 			return nil
 		}
 
-		contractLockingScript, err := transaction.InputLockingScript(int(instrument.ContractIndex))
+		contractInputOutput, err := transaction.InputOutput(int(instrument.ContractIndex))
 		if err != nil {
-			return errors.Wrap(err, "input locking script")
+			return errors.Wrap(err, "contract input locking script")
 		}
 
-		if !contractLockingScript.Equal(agentLockingScript) {
+		if !contractInputOutput.LockingScript.Equal(agentLockingScript) {
 			continue
 		}
 
@@ -200,9 +200,7 @@ func (a *Agent) processSettlement(ctx context.Context, transaction TransactionWi
 	}
 	defer a.transactions.Release(ctx, txid)
 
-	msg := &channels_agent.Action{
-		Tx: expandedTx,
-	}
+	msg := channels_expanded_tx.ExpandedTxMessage(*expandedTx)
 
 	for _, subscription := range subscriptions {
 		if subscription == nil {
@@ -223,7 +221,7 @@ func (a *Agent) processSettlement(ctx context.Context, transaction TransactionWi
 			continue
 		}
 
-		if err := channel.SendMessage(ctx, msg); err != nil {
+		if err := channel.SendMessage(ctx, &msg); err != nil {
 			logger.WarnWithFields(ctx, []logger.Field{
 				logger.Stringer("channel", channelHash),
 			}, "Failed to send channels message : %s", err)

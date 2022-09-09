@@ -3,7 +3,7 @@ package agents
 import (
 	"context"
 
-	"github.com/tokenized/pkg/logger"
+	"github.com/tokenized/logger"
 	"github.com/tokenized/specification/dist/golang/actions"
 )
 

@@ -6,19 +6,18 @@ import (
 	"os/signal"
 	"sync"
 	"syscall"
-	"time"
 
-	"github.com/tokenized/channels"
+	"github.com/tokenized/cacher"
 	"github.com/tokenized/channels/wallet"
 	"github.com/tokenized/config"
+	"github.com/tokenized/logger"
 	"github.com/tokenized/pkg/bitcoin"
-	"github.com/tokenized/pkg/logger"
+	"github.com/tokenized/pkg/expanded_tx"
 	"github.com/tokenized/pkg/storage"
-	"github.com/tokenized/pkg/threads"
-	"github.com/tokenized/smart_contract_agent/internal/cacher"
 	"github.com/tokenized/smart_contract_agent/internal/state"
 	"github.com/tokenized/smart_contract_agent/internal/whatsonchain"
 	"github.com/tokenized/smart_contract_agent/pkg/conductor"
+	"github.com/tokenized/threads"
 
 	"github.com/pkg/errors"
 )
@@ -34,10 +33,7 @@ type Config struct {
 
 	IsTest bool `default:"true" envconfig:"IS_TEST" json:"is_test"`
 
-	CacheRequestThreadCount int             `default:"4" envconfig:"CACHE_REQUEST_THREAD_COUNT" json:"cache_request_thread_count"`
-	CacheRequestTimeout     config.Duration `default:"1m" envconfig:"CACHE_REQUEST_TIMEOUT" json:"cache_request_timeout"`
-	CacheExpireCount        int             `default:"10000" envconfig:"CACHE_EXPIRE_COUNT" json:"cache_expire_count"`
-	CacheExpiration         config.Duration `default:"3s" envconfig:"CACHE_EXPIRATION" json:"cache_expiration"`
+	Cache cacher.Config `json:"cache"`
 
 	Wallet  wallet.Config      `json:"wallet"`
 	Storage storage.Config     `json:"storage"`
@@ -82,8 +78,7 @@ func main() {
 		logger.Fatal(ctx, "main : Failed to create storage : %s", err)
 	}
 
-	cache := cacher.NewCache(store, cfg.CacheRequestThreadCount, cfg.CacheRequestTimeout.Duration,
-		cfg.CacheExpireCount, cfg.CacheExpiration.Duration)
+	cache := cacher.NewCache(store, cfg.Cache)
 
 	contracts, err := state.NewContractCache(cache)
 	if err != nil {
@@ -108,19 +103,15 @@ func main() {
 	conductor := conductor.NewConductor(cfg.BaseKey, cfg.IsTest, nil, contracts, balances,
 		transactions, subscriptions)
 
-	var wait sync.WaitGroup
-	var stopper threads.StopCombiner
+	var cacheWait, loadWait sync.WaitGroup
 
-	cacheThread := threads.NewThread("Cache", cache.Run)
-	cacheThread.SetWait(&wait)
-	cacheComplete := cacheThread.GetCompleteChannel()
-	stopper.Add(cacheThread)
+	cacheThread, cacheComplete := threads.NewInterruptableThreadComplete("Cache", cache.Run,
+		&cacheWait)
 
-	loadThread := threads.NewThread("Load", func(ctx context.Context, interrupt <-chan interface{}) error {
-		return load(ctx, interrupt, conductor, transactions, cfg.BaseKey, cfg.ContractKey, woc)
-	})
-	loadThread.SetWait(&wait)
-	loadComplete := loadThread.GetCompleteChannel()
+	loadThread, loadComplete := threads.NewInterruptableThreadComplete("Load",
+		func(ctx context.Context, interrupt <-chan interface{}) error {
+			return load(ctx, interrupt, conductor, transactions, cfg.BaseKey, cfg.ContractKey, woc)
+		}, &loadWait)
 
 	cacheThread.Start(ctx)
 
@@ -141,14 +132,14 @@ func main() {
 	//
 	// Blocking main and waiting for shutdown.
 	select {
-	case <-cacheComplete:
-		logger.Error(ctx, "main : Cache thread completed : %s", cacheThread.Error())
+	case err := <-cacheComplete:
+		logger.Error(ctx, "Cache completed : %s", err)
 
-	case <-loadComplete:
-		if err := loadThread.Error(); err != nil {
-			logger.Error(ctx, "main : Loading failed : %s", loadThread.Error())
+	case err := <-loadComplete:
+		if err != nil {
+			logger.Error(ctx, "Load completed : %s", err)
 		} else {
-			logger.Info(ctx, "main : Finished loading")
+			logger.Info(ctx, "Load completed")
 		}
 
 	case <-osSignals:
@@ -156,13 +147,14 @@ func main() {
 	}
 
 	loadThread.Stop(ctx)
-	time.Sleep(time.Second) // wait for loader to finish before stopping cachers
-	stopper.Stop(ctx)
-	wait.Wait()
+	loadWait.Wait()
 
 	if err := conductor.Save(ctx, store); err != nil {
 		logger.Error(ctx, "main : Failed to save conductor : %s", err)
 	}
+
+	cacheThread.Stop(ctx)
+	cacheWait.Wait()
 }
 
 func getTx(ctx context.Context, transactions *state.TransactionCache, woc *whatsonchain.Service,
@@ -192,7 +184,7 @@ func getInputs(ctx context.Context, transactions *state.TransactionCache,
 
 	transaction.Lock()
 	for index, txin := range transaction.Tx.TxIn {
-		if _, err := transaction.InputLockingScript(index); err == nil {
+		if _, err := transaction.InputOutput(index); err == nil {
 			continue
 		}
 
@@ -203,7 +195,7 @@ func getInputs(ctx context.Context, transactions *state.TransactionCache,
 		}
 
 		inputTx.Lock()
-		transaction.Ancestors = append(transaction.Ancestors, &channels.AncestorTx{
+		transaction.Ancestors = append(transaction.Ancestors, &expanded_tx.AncestorTx{
 			Tx: inputTx.Tx,
 		})
 		inputTx.Unlock()

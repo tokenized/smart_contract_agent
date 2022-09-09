@@ -7,7 +7,6 @@ import (
 	"github.com/tokenized/pkg/bitcoin"
 	"github.com/tokenized/specification/dist/golang/actions"
 	"github.com/tokenized/specification/dist/golang/instruments"
-	"github.com/tokenized/specification/dist/golang/protocol"
 
 	"github.com/pkg/errors"
 )
@@ -36,8 +35,8 @@ func (i *Instrument) GetInstrument() (instruments.Instrument, error) {
 	}
 
 	// Decode payload
-	inst, err := protocol.DeserializeInstrumentPayload(i.Creation.InstrumentPayloadVersion,
-		[]byte(i.Creation.InstrumentType), i.Creation.InstrumentPayload)
+	inst, err := instruments.Deserialize([]byte(i.Creation.InstrumentType),
+		i.Creation.InstrumentPayload)
 	if err != nil {
 		return nil, errors.Wrap(err, "deserialize")
 	}

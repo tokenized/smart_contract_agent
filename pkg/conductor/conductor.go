@@ -6,8 +6,8 @@ import (
 	"encoding/binary"
 	"sync"
 
+	"github.com/tokenized/logger"
 	"github.com/tokenized/pkg/bitcoin"
-	"github.com/tokenized/pkg/logger"
 	"github.com/tokenized/pkg/storage"
 	"github.com/tokenized/smart_contract_agent/internal/state"
 	"github.com/tokenized/smart_contract_agent/pkg/agents"
@@ -93,6 +93,8 @@ func (c *Conductor) Load(ctx context.Context, store storage.StreamStorage) error
 
 	if b, err := store.Read(ctx, nextMesageIDPath); err != nil {
 		if errors.Cause(err) != storage.ErrNotFound {
+			return errors.Wrap(err, "read next message id")
+		} else {
 			c.nextSpyNodeMessageID = 1
 		}
 	} else {

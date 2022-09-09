@@ -4,7 +4,7 @@ import (
 	"context"
 
 	"github.com/pkg/errors"
-	"github.com/tokenized/pkg/logger"
+	"github.com/tokenized/logger"
 	"github.com/tokenized/specification/dist/golang/actions"
 )
 
@@ -12,13 +12,13 @@ func (a *Agent) processVote(ctx context.Context, transaction TransactionWithOutp
 	vote *actions.Vote) error {
 
 	// First input must be the agent's locking script
-	inputLockingScript, err := transaction.InputLockingScript(0)
+	inputOutput, err := transaction.InputOutput(0)
 	if err != nil {
 		return errors.Wrapf(err, "input locking script %d", 0)
 	}
 
 	agentLockingScript := a.LockingScript()
-	if !agentLockingScript.Equal(inputLockingScript) {
+	if !agentLockingScript.Equal(inputOutput.LockingScript) {
 		return nil // Not for this agent's contract
 	}
 
@@ -31,13 +31,13 @@ func (a *Agent) processBallotCounted(ctx context.Context, transaction Transactio
 	ballotCounted *actions.BallotCounted) error {
 
 	// First input must be the agent's locking script
-	inputLockingScript, err := transaction.InputLockingScript(0)
+	inputOutput, err := transaction.InputOutput(0)
 	if err != nil {
 		return errors.Wrapf(err, "input locking script %d", 0)
 	}
 
 	agentLockingScript := a.LockingScript()
-	if !agentLockingScript.Equal(inputLockingScript) {
+	if !agentLockingScript.Equal(inputOutput.LockingScript) {
 		return nil // Not for this agent's contract
 	}
 
@@ -50,13 +50,13 @@ func (a *Agent) processGovernanceResult(ctx context.Context, transaction Transac
 	result *actions.Result) error {
 
 	// First input must be the agent's locking script
-	inputLockingScript, err := transaction.InputLockingScript(0)
+	inputOutput, err := transaction.InputOutput(0)
 	if err != nil {
 		return errors.Wrapf(err, "input locking script %d", 0)
 	}
 
 	agentLockingScript := a.LockingScript()
-	if !agentLockingScript.Equal(inputLockingScript) {
+	if !agentLockingScript.Equal(inputOutput.LockingScript) {
 		return nil // Not for this agent's contract
 	}
 

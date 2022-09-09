@@ -8,9 +8,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tokenized/channels"
+	"github.com/tokenized/cacher"
 	"github.com/tokenized/channels/wallet"
+	"github.com/tokenized/logger"
 	"github.com/tokenized/pkg/bitcoin"
+	"github.com/tokenized/pkg/expanded_tx"
 	"github.com/tokenized/pkg/storage"
 	"github.com/tokenized/pkg/txbuilder"
 	"github.com/tokenized/pkg/wire"
@@ -20,12 +22,11 @@ import (
 	"github.com/tokenized/specification/dist/golang/protocol"
 )
 
-func Test_CreateInstrument(t *testing.T) {
-	ctx := context.Background()
+func Test_Process(t *testing.T) {
+	ctx := logger.ContextWithLogger(context.Background(), true, false, "")
 	store := storage.NewMockStorage()
 
-	contracts, balances, transactions, subscriptions, cacheInterrupt, cacheComplete := state.StartTestCaches(ctx,
-		store, 4, 2*time.Second, 10000, 10*time.Second)
+	caches := state.StartTestCaches(ctx, t, store, cacher.DefaultConfig(), time.Second)
 
 	contractKey, err := bitcoin.GenerateKey(bitcoin.MainNet)
 	if err != nil {
@@ -50,24 +51,25 @@ func Test_CreateInstrument(t *testing.T) {
 		LockingScript: contractLockingScript,
 	}
 
-	contract, err = contracts.Add(ctx, contract)
+	contract, err = caches.Contracts.Add(ctx, contract)
 	if err != nil {
 		t.Fatalf("Failed to add contract : %s", err)
 	}
 
-	agent, err := NewAgent(contractKey, contract, contracts, balances, transactions, subscriptions)
+	agent, err := NewAgent(contractKey, contract, caches.Contracts, caches.Balances,
+		caches.Transactions, caches.Subscriptions)
 	if err != nil {
 		t.Fatalf("Failed to create agent : %s", err)
 	}
 
 	// Create a contract by processing contract formation.
-	var outputs []*channels.Output
+	var outputs []*expanded_tx.Output
 	tx := &wire.MsgTx{}
 
 	// Contract input
 	txid := &bitcoin.Hash32{}
 	rand.Read(txid[:])
-	outputs = append(outputs, &channels.Output{
+	outputs = append(outputs, &expanded_tx.Output{
 		LockingScript: contractLockingScript,
 		Value:         2200,
 	})
@@ -115,7 +117,7 @@ func Test_CreateInstrument(t *testing.T) {
 		IsProcessed:  false,
 	}
 
-	contractFormationTx, err = transactions.Add(ctx, contractFormationTx)
+	contractFormationTx, err = caches.Transactions.Add(ctx, contractFormationTx)
 	if err != nil {
 		t.Fatalf("Failed to add contract formation tx : %s", err)
 	}
@@ -124,10 +126,10 @@ func Test_CreateInstrument(t *testing.T) {
 		[]actions.Action{contractFormation}); err != nil {
 		t.Fatalf("Failed to process contract formation : %s", err)
 	}
-	transactions.Release(ctx, contractFormationTxID)
+	caches.Transactions.Release(ctx, contractFormationTxID)
 
 	// Check contract is correct.
-	currentContract, err := contracts.Get(ctx, contractLockingScript)
+	currentContract, err := caches.Contracts.Get(ctx, contractLockingScript)
 	if err != nil {
 		t.Fatalf("Failed to get contract : %s", err)
 	}
@@ -157,7 +159,7 @@ func Test_CreateInstrument(t *testing.T) {
 	t.Logf("Found %d instruments", len(currentContract.Instruments))
 
 	currentContract.Unlock()
-	contracts.Release(ctx, contractLockingScript)
+	caches.Contracts.Release(ctx, contractLockingScript)
 
 	// Create instrument by processing instrument creation.
 	outputs = nil
@@ -166,7 +168,7 @@ func Test_CreateInstrument(t *testing.T) {
 	// Contract input
 	txid = &bitcoin.Hash32{}
 	rand.Read(txid[:])
-	outputs = append(outputs, &channels.Output{
+	outputs = append(outputs, &expanded_tx.Output{
 		LockingScript: contractLockingScript,
 		Value:         2200,
 	})
@@ -190,13 +192,12 @@ func Test_CreateInstrument(t *testing.T) {
 	instrumentCode := state.InstrumentCode(protocol.InstrumentCodeFromContract(contractAddress, 0))
 	authorizedQuantity := uint64(1000000000)
 	instrumentCreation := &actions.InstrumentCreation{
-		InstrumentCode:           instrumentCode.Bytes(),
-		InstrumentIndex:          0,
-		AuthorizedTokenQty:       authorizedQuantity,
-		InstrumentType:           instruments.CodeCurrency,
-		InstrumentPayload:        currencyBuf.Bytes(),
-		Timestamp:                uint64(time.Now().UnixNano()),
-		InstrumentPayloadVersion: 1,
+		InstrumentCode:     instrumentCode.Bytes(),
+		InstrumentIndex:    0,
+		AuthorizedTokenQty: authorizedQuantity,
+		InstrumentType:     instruments.CodeCurrency,
+		InstrumentPayload:  currencyBuf.Bytes(),
+		Timestamp:          uint64(time.Now().UnixNano()),
 	}
 
 	t.Logf("Creating instrument : %s", protocol.InstrumentID(currency.Code(),
@@ -217,7 +218,7 @@ func Test_CreateInstrument(t *testing.T) {
 		IsProcessed:  false,
 	}
 
-	instrumentCreationTx, err = transactions.Add(ctx, instrumentCreationTx)
+	instrumentCreationTx, err = caches.Transactions.Add(ctx, instrumentCreationTx)
 	if err != nil {
 		t.Fatalf("Failed to add instrument creation tx : %s", err)
 	}
@@ -226,10 +227,10 @@ func Test_CreateInstrument(t *testing.T) {
 		[]actions.Action{instrumentCreation}); err != nil {
 		t.Fatalf("Failed to process instrument creation : %s", err)
 	}
-	transactions.Release(ctx, instrumentCreationTxID)
+	caches.Transactions.Release(ctx, instrumentCreationTxID)
 
 	// Check instrument is correct.
-	currentContract, err = contracts.Get(ctx, contractLockingScript)
+	currentContract, err = caches.Contracts.Get(ctx, contractLockingScript)
 	if err != nil {
 		t.Fatalf("Failed to get contract : %s", err)
 	}
@@ -289,10 +290,14 @@ func Test_CreateInstrument(t *testing.T) {
 	}
 
 	currentContract.Unlock()
-	contracts.Release(ctx, contractLockingScript)
+	caches.Contracts.Release(ctx, contractLockingScript)
+
+	if err := caches.IsFailed(); err != nil {
+		t.Fatalf("Cache failed : %s", err)
+	}
 
 	// Check admin balance is correct.
-	adminBalance, err := balances.Get(ctx, contractLockingScript, instrumentCode,
+	adminBalance, err := caches.Balances.Get(ctx, contractLockingScript, instrumentCode,
 		adminLockingScript)
 	if err != nil {
 		t.Fatalf("Failed to get admin balance : %s", err)
@@ -308,15 +313,23 @@ func Test_CreateInstrument(t *testing.T) {
 		t.Errorf("Wrong admin balance quantity : got %d, want %d", adminBalance.Quantity,
 			authorizedQuantity)
 	}
-	balances.Release(ctx, contractLockingScript, instrumentCode, adminBalance)
+	caches.Balances.Release(ctx, contractLockingScript, instrumentCode, adminBalance)
+
+	if err := caches.IsFailed(); err != nil {
+		t.Fatalf("Cache failed : %s", err)
+	}
 
 	// Transfer to a lot of locking scripts.
 	var lockingScripts []bitcoin.Script
 	var quantities []uint64
 	var txids []bitcoin.Hash32
 	remainingQuantity := authorizedQuantity
-	recipientCount := 1000
+	recipientCount := 10
 	for i := 0; i < recipientCount; i++ {
+		if err := caches.IsFailed(); err != nil {
+			t.Fatalf("Cache failed : %s", err)
+		}
+
 		key, err := bitcoin.GenerateKey(bitcoin.MainNet)
 		if err != nil {
 			t.Fatalf("Failed to generate key : %s", err)
@@ -339,7 +352,7 @@ func Test_CreateInstrument(t *testing.T) {
 		// Contract input
 		txid = &bitcoin.Hash32{}
 		rand.Read(txid[:])
-		outputs = append(outputs, &channels.Output{
+		outputs = append(outputs, &expanded_tx.Output{
 			LockingScript: contractLockingScript,
 			Value:         2200,
 		})
@@ -388,7 +401,7 @@ func Test_CreateInstrument(t *testing.T) {
 			IsProcessed:  false,
 		}
 
-		settlementTx, err = transactions.Add(ctx, settlementTx)
+		settlementTx, err = caches.Transactions.Add(ctx, settlementTx)
 		if err != nil {
 			t.Fatalf("Failed to add settlement tx : %s", err)
 		}
@@ -396,12 +409,17 @@ func Test_CreateInstrument(t *testing.T) {
 		if err := agent.Process(ctx, settlementTx, []actions.Action{settlement}); err != nil {
 			t.Fatalf("Failed to process settlement : %s", err)
 		}
-		transactions.Release(ctx, settlementTxID)
+		caches.Transactions.Release(ctx, settlementTxID)
 	}
 
-	// Check balances
+	// Check caches.Balances
 	for i := 0; i < recipientCount; i++ {
-		balance, err := balances.Get(ctx, contractLockingScript, instrumentCode, lockingScripts[i])
+		if err := caches.IsFailed(); err != nil {
+			t.Fatalf("Cache failed : %s", err)
+		}
+
+		balance, err := caches.Balances.Get(ctx, contractLockingScript, instrumentCode,
+			lockingScripts[i])
 		if err != nil {
 			t.Fatalf("Failed to get balance : %s", err)
 		}
@@ -415,11 +433,12 @@ func Test_CreateInstrument(t *testing.T) {
 		if balance.Quantity != quantities[i] {
 			t.Errorf("Wrong balance quantity : got %d, want %d", balance.Quantity, quantities[i])
 		}
-		balances.Release(ctx, contractLockingScript, instrumentCode, balance)
+		caches.Balances.Release(ctx, contractLockingScript, instrumentCode, balance)
 	}
 
 	// Check admin balance is correct.
-	adminBalance, err = balances.Get(ctx, contractLockingScript, instrumentCode, adminLockingScript)
+	adminBalance, err = caches.Balances.Get(ctx, contractLockingScript, instrumentCode,
+		adminLockingScript)
 	if err != nil {
 		t.Fatalf("Failed to get admin balance : %s", err)
 	}
@@ -434,13 +453,17 @@ func Test_CreateInstrument(t *testing.T) {
 		t.Errorf("Wrong admin balance quantity : got %d, want %d", adminBalance.Quantity,
 			remainingQuantity)
 	}
-	balances.Release(ctx, contractLockingScript, instrumentCode, adminBalance)
+	caches.Balances.Release(ctx, contractLockingScript, instrumentCode, adminBalance)
 
-	// Transfer balances from scripts
+	// Transfer caches.Balances from scripts
 	var lockingScripts2 []bitcoin.Script
 	var quantities2 []uint64
 	var txids2 []bitcoin.Hash32
 	for i := 0; i < recipientCount; i++ {
+		if err := caches.IsFailed(); err != nil {
+			t.Fatalf("Cache failed : %s", err)
+		}
+
 		key, err := bitcoin.GenerateKey(bitcoin.MainNet)
 		if err != nil {
 			t.Fatalf("Failed to generate key : %s", err)
@@ -462,7 +485,7 @@ func Test_CreateInstrument(t *testing.T) {
 		// Contract input
 		txid = &bitcoin.Hash32{}
 		rand.Read(txid[:])
-		outputs = append(outputs, &channels.Output{
+		outputs = append(outputs, &expanded_tx.Output{
 			LockingScript: contractLockingScript,
 			Value:         2200,
 		})
@@ -511,7 +534,7 @@ func Test_CreateInstrument(t *testing.T) {
 			IsProcessed:  false,
 		}
 
-		settlementTx, err = transactions.Add(ctx, settlementTx)
+		settlementTx, err = caches.Transactions.Add(ctx, settlementTx)
 		if err != nil {
 			t.Fatalf("Failed to add settlement tx : %s", err)
 		}
@@ -519,18 +542,22 @@ func Test_CreateInstrument(t *testing.T) {
 		if err := agent.Process(ctx, settlementTx, []actions.Action{settlement}); err != nil {
 			t.Fatalf("Failed to process settlement : %s", err)
 		}
-		transactions.Release(ctx, settlementTxID)
+		caches.Transactions.Release(ctx, settlementTxID)
 	}
 
 	for i := 0; i < recipientCount; i++ {
-		bothBalances, err := balances.GetMulti(ctx, contractLockingScript, instrumentCode,
+		if err := caches.IsFailed(); err != nil {
+			t.Fatalf("Cache failed : %s", err)
+		}
+
+		bothBalances, err := caches.Balances.GetMulti(ctx, contractLockingScript, instrumentCode,
 			[]bitcoin.Script{lockingScripts[i], lockingScripts2[i]})
 		if err != nil {
-			t.Fatalf("Failed to get balances : %s", err)
+			t.Fatalf("Failed to get caches.Balances : %s", err)
 		}
 
 		if len(bothBalances) != 2 {
-			t.Fatalf("Missing balances : %d", len(bothBalances))
+			t.Fatalf("Missing caches.Balances : %d", len(bothBalances))
 		}
 
 		t.Logf("Balances : %d, %d", bothBalances[0].Quantity, bothBalances[1].Quantity)
@@ -545,10 +572,10 @@ func Test_CreateInstrument(t *testing.T) {
 				quantities2[i])
 		}
 
-		balances.ReleaseMulti(ctx, contractLockingScript, instrumentCode, bothBalances)
+		caches.Balances.ReleaseMulti(ctx, contractLockingScript, instrumentCode, bothBalances)
 	}
 
-	contracts.Release(ctx, contractLockingScript)
+	caches.Contracts.Release(ctx, contractLockingScript)
 
-	state.StopTestCaches(time.Second, cacheInterrupt, cacheComplete)
+	caches.StopTestCaches()
 }

@@ -6,9 +6,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tokenized/cacher"
 	"github.com/tokenized/pkg/bitcoin"
 	"github.com/tokenized/pkg/storage"
-	"github.com/tokenized/smart_contract_agent/internal/cacher"
 )
 
 func Test_Balances(t *testing.T) {
@@ -28,7 +28,7 @@ func Test_Balances(t *testing.T) {
 	var instrumentCode InstrumentCode
 	rand.Read(instrumentCode[:])
 
-	cacher := cacher.NewCache(store, 4, 2*time.Second, 10000, 10*time.Second)
+	cacher := cacher.NewCache(store, cacher.DefaultConfig())
 
 	cache, err := NewBalanceCache(cacher)
 	if err != nil {
