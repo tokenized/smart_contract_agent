@@ -4,10 +4,11 @@ import (
 	"context"
 
 	"github.com/tokenized/logger"
+	"github.com/tokenized/smart_contract_agent/internal/state"
 	"github.com/tokenized/specification/dist/golang/actions"
 )
 
-func (a *Agent) processMessage(ctx context.Context, transaction TransactionWithOutputs,
+func (a *Agent) processMessage(ctx context.Context, transaction *state.Transaction,
 	message *actions.Message) error {
 
 	// TODO Verify appropriate input or output belongs to this contract.
@@ -44,7 +45,7 @@ func (a *Agent) processMessage(ctx context.Context, transaction TransactionWithO
 	return nil
 }
 
-func (a *Agent) processRejection(ctx context.Context, transaction TransactionWithOutputs,
+func (a *Agent) processRejection(ctx context.Context, transaction *state.Transaction,
 	rejection *actions.Rejection) error {
 
 	// TODO Verify appropriate input or output belongs to this contract.

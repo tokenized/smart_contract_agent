@@ -64,7 +64,7 @@ func NewBalanceCache(cache *cacher.Cache) (*BalanceCache, error) {
 
 	itemValue := reflect.New(typ.Elem())
 	if !itemValue.CanInterface() {
-		return nil, errors.New("Type must be support interface")
+		return nil, errors.New("Type must support interface")
 	}
 
 	itemInterface := itemValue.Interface()
@@ -101,7 +101,7 @@ func (c *BalanceCache) AddMulti(ctx context.Context, contractLockingScript bitco
 		values[i] = balance
 	}
 
-	addedValues, err := c.cacher.AddSetMultiValue(ctx, c.typ, pathPrefix, values)
+	addedValues, err := c.cacher.AddMultiSetValue(ctx, c.typ, pathPrefix, values)
 	if err != nil {
 		return nil, errors.Wrap(err, "add set multi")
 	}
@@ -125,6 +125,10 @@ func (c *BalanceCache) Get(ctx context.Context, contractLockingScript bitcoin.Sc
 		return nil, errors.Wrap(err, "get set")
 	}
 
+	if value == nil {
+		return nil, nil
+	}
+
 	return value.(*Balance), nil
 }
 
@@ -137,7 +141,7 @@ func (c *BalanceCache) GetMulti(ctx context.Context, contractLockingScript bitco
 		hashes[i] = LockingScriptHash(lockingScript)
 	}
 
-	values, err := c.cacher.GetSetMultiValue(ctx, c.typ, pathPrefix, hashes)
+	values, err := c.cacher.GetMultiSetValue(ctx, c.typ, pathPrefix, hashes)
 	if err != nil {
 		return nil, errors.Wrap(err, "get set multi")
 	}
@@ -187,7 +191,8 @@ func (c *BalanceCache) ReleaseMulti(ctx context.Context, contractLockingScript b
 		balance.Unlock()
 	}
 
-	if err := c.cacher.ReleaseSetMultiValue(ctx, c.typ, pathPrefix, hashes, isModified); err != nil {
+	if err := c.cacher.ReleaseMultiSetValue(ctx, c.typ, pathPrefix, hashes,
+		isModified); err != nil {
 		return errors.Wrap(err, "release set multi")
 	}
 
@@ -261,7 +266,7 @@ func (b *Balance) Deserialize(r io.Reader) error {
 }
 
 func balancePathPrefix(contractLockingScript bitcoin.Script, instrumentCode InstrumentCode) string {
-	return fmt.Sprintf("%s/%s/%s", balancePath, CalculateContractID(contractLockingScript),
+	return fmt.Sprintf("%s/%s/%s", balancePath, CalculateContractHash(contractLockingScript),
 		instrumentCode)
 }
 

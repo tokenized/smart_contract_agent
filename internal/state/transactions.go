@@ -55,7 +55,7 @@ func NewTransactionCache(cache *cacher.Cache) (*TransactionCache, error) {
 
 	itemValue := reflect.New(typ.Elem())
 	if !itemValue.CanInterface() {
-		return nil, errors.New("Type must be support interface")
+		return nil, errors.New("Type must support interface")
 	}
 
 	itemInterface := itemValue.Interface()
@@ -158,6 +158,14 @@ func (tx *Transaction) AddMerkleProof(merkleProof *merkle_proof.MerkleProof) boo
 	tx.MerkleProofs = append(tx.MerkleProofs, &mp)
 	tx.MarkModified()
 	return true
+}
+
+func (tx *Transaction) ExpandedTx(ctx context.Context) (*expanded_tx.ExpandedTx, error) {
+	return &expanded_tx.ExpandedTx{
+		Tx:           tx.Tx,
+		Ancestors:    tx.Ancestors,
+		SpentOutputs: tx.SpentOutputs,
+	}, nil
 }
 
 func (c *TransactionCache) GetExpandedTx(ctx context.Context,
@@ -383,4 +391,10 @@ func (tx Transaction) ParseActions(isTest bool) []actions.Action {
 
 func (tx Transaction) GetMsgTx() *wire.MsgTx {
 	return tx.Tx
+}
+
+func (tx *Transaction) GetTxID() bitcoin.Hash32 {
+	tx.Lock()
+	defer tx.Unlock()
+	return *tx.Tx.TxHash()
 }

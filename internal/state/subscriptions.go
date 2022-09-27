@@ -108,7 +108,7 @@ func (c *SubscriptionCache) AddMulti(ctx context.Context, contractLockingScript 
 		values[i] = subscription
 	}
 
-	addedValues, err := c.cacher.AddSetMultiValue(ctx, c.typ, pathPrefix, values)
+	addedValues, err := c.cacher.AddMultiSetValue(ctx, c.typ, pathPrefix, values)
 	if err != nil {
 		return nil, errors.Wrap(err, "add set multi")
 	}
@@ -132,6 +132,10 @@ func (c *SubscriptionCache) GetLockingScript(ctx context.Context,
 		return nil, errors.Wrap(err, "get set")
 	}
 
+	if value == nil {
+		return nil, nil
+	}
+
 	return value.(*Subscription), nil
 }
 
@@ -145,7 +149,7 @@ func (c *SubscriptionCache) GetLockingScriptMulti(ctx context.Context,
 		hashes[i] = LockingScriptHash(lockingScript)
 	}
 
-	values, err := c.cacher.GetSetMultiValue(ctx, c.typ, pathPrefix, hashes)
+	values, err := c.cacher.GetMultiSetValue(ctx, c.typ, pathPrefix, hashes)
 	if err != nil {
 		return nil, errors.Wrap(err, "get set multi")
 	}
@@ -195,7 +199,8 @@ func (c *SubscriptionCache) ReleaseMulti(ctx context.Context, contractLockingScr
 		subscription.Unlock()
 	}
 
-	if err := c.cacher.ReleaseSetMultiValue(ctx, c.typ, pathPrefix, hashes, isModified); err != nil {
+	if err := c.cacher.ReleaseMultiSetValue(ctx, c.typ, pathPrefix, hashes,
+		isModified); err != nil {
 		return errors.Wrap(err, "release set multi")
 	}
 
@@ -203,7 +208,7 @@ func (c *SubscriptionCache) ReleaseMulti(ctx context.Context, contractLockingScr
 }
 
 func subscriptionPathPrefix(contractLockingScript bitcoin.Script) string {
-	return fmt.Sprintf("%s/%s", subscriptionPath, CalculateContractID(contractLockingScript))
+	return fmt.Sprintf("%s/%s", subscriptionPath, CalculateContractHash(contractLockingScript))
 }
 
 func SubscriptionForType(typ SubscriptionType) SubscriptionValue {

@@ -3,16 +3,20 @@ package agents
 import (
 	"context"
 
-	"github.com/pkg/errors"
 	"github.com/tokenized/logger"
+	"github.com/tokenized/smart_contract_agent/internal/state"
 	"github.com/tokenized/specification/dist/golang/actions"
+
+	"github.com/pkg/errors"
 )
 
-func (a *Agent) processFreeze(ctx context.Context, transaction TransactionWithOutputs,
+func (a *Agent) processFreeze(ctx context.Context, transaction *state.Transaction,
 	freeze *actions.Freeze) error {
 
 	// First input must be the agent's locking script
+	transaction.Lock()
 	inputOutput, err := transaction.InputOutput(0)
+	transaction.Unlock()
 	if err != nil {
 		return errors.Wrapf(err, "input locking script %d", 0)
 	}
@@ -27,11 +31,13 @@ func (a *Agent) processFreeze(ctx context.Context, transaction TransactionWithOu
 	return nil
 }
 
-func (a *Agent) processThaw(ctx context.Context, transaction TransactionWithOutputs,
+func (a *Agent) processThaw(ctx context.Context, transaction *state.Transaction,
 	thaw *actions.Thaw) error {
 
 	// First input must be the agent's locking script
+	transaction.Lock()
 	inputOutput, err := transaction.InputOutput(0)
+	transaction.Unlock()
 	if err != nil {
 		return errors.Wrapf(err, "input locking script %d", 0)
 	}
@@ -46,11 +52,13 @@ func (a *Agent) processThaw(ctx context.Context, transaction TransactionWithOutp
 	return nil
 }
 
-func (a *Agent) processConfiscation(ctx context.Context, transaction TransactionWithOutputs,
+func (a *Agent) processConfiscation(ctx context.Context, transaction *state.Transaction,
 	confiscation *actions.Confiscation) error {
 
 	// First input must be the agent's locking script
+	transaction.Lock()
 	inputOutput, err := transaction.InputOutput(0)
+	transaction.Unlock()
 	if err != nil {
 		return errors.Wrapf(err, "input locking script %d", 0)
 	}
@@ -65,11 +73,13 @@ func (a *Agent) processConfiscation(ctx context.Context, transaction Transaction
 	return nil
 }
 
-func (a *Agent) processReconciliation(ctx context.Context, transaction TransactionWithOutputs,
+func (a *Agent) processReconciliation(ctx context.Context, transaction *state.Transaction,
 	reconciliation *actions.Reconciliation) error {
 
 	// First input must be the agent's locking script
+	transaction.Lock()
 	inputOutput, err := transaction.InputOutput(0)
+	transaction.Unlock()
 	if err != nil {
 		return errors.Wrapf(err, "input locking script %d", 0)
 	}

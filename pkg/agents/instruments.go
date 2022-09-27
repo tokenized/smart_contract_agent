@@ -14,11 +14,13 @@ import (
 	"github.com/pkg/errors"
 )
 
-func (a *Agent) processInstrumentCreation(ctx context.Context, transaction TransactionWithOutputs,
+func (a *Agent) processInstrumentCreation(ctx context.Context, transaction *state.Transaction,
 	creation *actions.InstrumentCreation) error {
 
 	// First input must be the agent's locking script
+	transaction.Lock()
 	inputOutput, err := transaction.InputOutput(0)
+	transaction.Unlock()
 	if err != nil {
 		return errors.Wrapf(err, "input locking script %d", 0)
 	}
@@ -69,11 +71,11 @@ func (a *Agent) processInstrumentCreation(ctx context.Context, transaction Trans
 		logger.Error(ctx, "Instrument id malformed: %s", err)
 	}
 
-	txid := transaction.TxID()
+	txid := transaction.GetTxID()
 	isFirst := existing == nil
 	if existing == nil {
 		newInstrument := &state.Instrument{
-			ContractID:   state.CalculateContractID(a.contract.LockingScript),
+			ContractID:   state.CalculateContractHash(a.contract.LockingScript),
 			Creation:     creation,
 			CreationTxID: &txid,
 		}
@@ -117,7 +119,7 @@ func (a *Agent) processInstrumentCreation(ctx context.Context, transaction Trans
 	return nil
 }
 
-func (a *Agent) updateAdminBalance(ctx context.Context, transaction TransactionWithOutputs,
+func (a *Agent) updateAdminBalance(ctx context.Context, transaction *state.Transaction,
 	instrumentID string, creation *actions.InstrumentCreation, txid bitcoin.Hash32,
 	previousAuthorizedTokenQty uint64) error {
 

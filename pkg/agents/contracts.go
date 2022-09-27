@@ -4,16 +4,19 @@ import (
 	"context"
 
 	"github.com/tokenized/logger"
+	"github.com/tokenized/smart_contract_agent/internal/state"
 	"github.com/tokenized/specification/dist/golang/actions"
 
 	"github.com/pkg/errors"
 )
 
-func (a *Agent) processContractFormation(ctx context.Context, transaction TransactionWithOutputs,
+func (a *Agent) processContractFormation(ctx context.Context, transaction *state.Transaction,
 	formation *actions.ContractFormation) error {
 
 	// First input must be the agent's locking script
+	transaction.Lock()
 	inputOutput, err := transaction.InputOutput(0)
+	transaction.Unlock()
 	if err != nil {
 		return errors.Wrapf(err, "input locking script %d", 0)
 	}
@@ -37,7 +40,7 @@ func (a *Agent) processContractFormation(ctx context.Context, transaction Transa
 	}
 
 	a.contract.Formation = formation
-	txid := transaction.TxID()
+	txid := transaction.GetTxID()
 	a.contract.FormationTxID = &txid
 	a.contract.MarkModified()
 

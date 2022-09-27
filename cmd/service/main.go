@@ -112,8 +112,11 @@ func main() {
 
 	var spyNodeWait, cacheWait sync.WaitGroup
 
-	cacheThread, cacheComplete := threads.NewInterruptableThreadComplete("Cache", cache.Run,
-		&cacheWait)
+	cacheShutdown := make(chan error)
+	cacheThread, cacheComplete := threads.NewInterruptableThreadComplete("Cache",
+		func(ctx context.Context, interrupt <-chan interface{}) error {
+			return cache.Run(ctx, interrupt, cacheShutdown)
+		}, &cacheWait)
 
 	spyNodeThread, spyNodeComplete := threads.NewInterruptableThreadComplete("SpyNode", spyNode.Run,
 		&spyNodeWait)
@@ -132,6 +135,9 @@ func main() {
 	//
 	// Blocking main and waiting for shutdown.
 	select {
+	case err := <-cacheShutdown:
+		logger.Error(ctx, "Cache shutting down : %s", err)
+
 	case err := <-cacheComplete:
 		logger.Error(ctx, "Cache completed : %s", err)
 

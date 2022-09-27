@@ -14,16 +14,18 @@ import (
 	"github.com/pkg/errors"
 )
 
-func (a *Agent) processTransfer(ctx context.Context, transaction TransactionWithOutputs,
+func (a *Agent) processTransfer(ctx context.Context, transaction *state.Transaction,
 	transfer *actions.Transfer) error {
 
 	// Verify appropriate output belongs to this contract.
 	found := false
 	agentLockingScript := a.LockingScript()
+	transaction.Lock()
 	for _, instrument := range transfer.Instruments {
 		if int(instrument.ContractIndex) >= transaction.OutputCount() {
 			logger.Error(ctx, "Invalid transfer contract index: %d >= %d", instrument.ContractIndex,
 				transaction.OutputCount())
+			transaction.Unlock()
 			return nil
 		}
 
@@ -43,6 +45,7 @@ func (a *Agent) processTransfer(ctx context.Context, transaction TransactionWith
 
 		logger.InfoWithFields(ctx, fields, "Processing transfer")
 	}
+	transaction.Unlock()
 
 	if !found {
 		return nil // Not for this contract
@@ -51,14 +54,16 @@ func (a *Agent) processTransfer(ctx context.Context, transaction TransactionWith
 	return nil
 }
 
-func (a *Agent) getSettlementSubscriptions(ctx context.Context, transaction TransactionWithOutputs,
+func (a *Agent) getSettlementSubscriptions(ctx context.Context, transaction *state.Transaction,
 	settlement *actions.Settlement) (state.Subscriptions, error) {
 
+	transaction.Lock()
 	outputCount := transaction.OutputCount()
 	var lockingScripts []bitcoin.Script
 	for _, instrument := range settlement.Instruments {
 		for _, settle := range instrument.Settlements {
 			if int(settle.Index) >= outputCount {
+				transaction.Unlock()
 				return nil, fmt.Errorf("Invalid settlement output index: %d >= %d", settle.Index,
 					outputCount)
 			}
@@ -67,15 +72,21 @@ func (a *Agent) getSettlementSubscriptions(ctx context.Context, transaction Tran
 			lockingScripts = append(lockingScripts, lockingScript)
 		}
 	}
+	transaction.Unlock()
 
 	return a.subscriptions.GetLockingScriptMulti(ctx, a.LockingScript(), lockingScripts)
 }
 
-func (a *Agent) processSettlement(ctx context.Context, transaction TransactionWithOutputs,
+func (a *Agent) processSettlement(ctx context.Context, transaction *state.Transaction,
 	settlement *actions.Settlement) error {
+	transaction.Lock()
+	defer transaction.Unlock()
 	txid := transaction.TxID()
 
 	agentLockingScript := a.LockingScript()
+
+	ctx = logger.ContextWithLogFields(ctx,
+		logger.Stringer("contract_locking_script", agentLockingScript))
 
 	outputCount := transaction.OutputCount()
 	var lockingScripts []bitcoin.Script
@@ -100,6 +111,14 @@ func (a *Agent) processSettlement(ctx context.Context, transaction TransactionWi
 		var instrumentCode state.InstrumentCode
 		copy(instrumentCode[:], instrument.InstrumentCode)
 
+		instrumentCtx := ctx
+
+		instrumentID, err := protocol.InstrumentIDForSettlement(instrument)
+		if err == nil {
+			instrumentCtx = logger.ContextWithLogFields(instrumentCtx,
+				logger.String("instrument_id", instrumentID))
+		}
+
 		a.contract.Lock()
 		stateInstrument := a.contract.GetInstrument(instrumentCode)
 		a.contract.Unlock()
@@ -109,23 +128,17 @@ func (a *Agent) processSettlement(ctx context.Context, transaction TransactionWi
 			return nil
 		}
 
-		fields := []logger.Field{
-			logger.Stringer("locking_script", agentLockingScript),
-		}
-
-		instrumentID, err := protocol.InstrumentIDForSettlement(instrument)
-		if err == nil {
-			fields = append(fields, logger.String("instrument_id", instrumentID))
-		}
-
-		logger.InfoWithFields(ctx, fields, "Processing settlement")
+		logger.Info(instrumentCtx, "Processing settlement")
 
 		// Build balances based on the instrument's settlement quantities.
 		balances := make([]*state.Balance, len(instrument.Settlements))
 		for i, settle := range instrument.Settlements {
 			if int(settle.Index) >= outputCount {
-				logger.Error(ctx, "Invalid settlement output index: %d >= %d", settle.Index,
-					outputCount)
+				logger.ErrorWithFields(instrumentCtx, []logger.Field{
+					logger.Int("settlement_index", i),
+					logger.Uint32("output_index", settle.Index),
+					logger.Int("output_count", outputCount),
+				}, "Invalid settlement output index")
 				return nil
 			}
 
@@ -141,7 +154,7 @@ func (a *Agent) processSettlement(ctx context.Context, transaction TransactionWi
 		}
 
 		// Add the balances to the cache.
-		addedBalances, err := a.balances.AddMulti(ctx, agentLockingScript, instrumentCode,
+		addedBalances, err := a.balances.AddMulti(instrumentCtx, agentLockingScript, instrumentCode,
 			balances)
 		if err != nil {
 			return errors.Wrap(err, "add balances")
@@ -153,11 +166,10 @@ func (a *Agent) processSettlement(ctx context.Context, transaction TransactionWi
 				continue // balance was new and already up to date from the add.
 			}
 
-			// If the balance doesn't match then it already existed and must be updated with a
-			// manual merge and save.
+			// If the balance doesn't match then it already existed and must be updated.
 			addedBalances[i].Lock()
 			if settlement.Timestamp < addedBalances[i].Timestamp {
-				logger.WarnWithFields(ctx, []logger.Field{
+				logger.WarnWithFields(instrumentCtx, []logger.Field{
 					logger.Timestamp("timestamp", int64(addedBalances[i].Timestamp)),
 					logger.Timestamp("existing_timestamp", int64(settlement.Timestamp)),
 					logger.Stringer("locking_script", balance.LockingScript),
@@ -174,7 +186,14 @@ func (a *Agent) processSettlement(ctx context.Context, transaction TransactionWi
 			addedBalances[i].Unlock()
 		}
 
-		a.balances.ReleaseMulti(ctx, agentLockingScript, instrumentCode, addedBalances)
+		for _, balance := range addedBalances {
+			logger.InfoWithFields(instrumentCtx, []logger.Field{
+				logger.Stringer("locking_script", balance.LockingScript),
+				logger.Uint64("quantity", balance.Quantity),
+			}, "Balance settled")
+		}
+
+		a.balances.ReleaseMulti(instrumentCtx, agentLockingScript, instrumentCode, addedBalances)
 	}
 
 	subscriptions, err := a.subscriptions.GetLockingScriptMulti(ctx, agentLockingScript,
@@ -189,7 +208,7 @@ func (a *Agent) processSettlement(ctx context.Context, transaction TransactionWi
 		return nil
 	}
 
-	expandedTx, err := a.transactions.GetExpandedTx(ctx, txid)
+	expandedTx, err := transaction.ExpandedTx(ctx)
 	if err != nil {
 		logger.Error(ctx, "Failed to get expanded tx : %s", err)
 		return nil
@@ -198,7 +217,6 @@ func (a *Agent) processSettlement(ctx context.Context, transaction TransactionWi
 		logger.Error(ctx, "Expanded tx not found")
 		return nil
 	}
-	defer a.transactions.Release(ctx, txid)
 
 	msg := channels_expanded_tx.ExpandedTxMessage(*expandedTx)
 

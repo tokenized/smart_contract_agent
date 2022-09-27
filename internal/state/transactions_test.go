@@ -24,10 +24,11 @@ func Test_FetchTxs(t *testing.T) {
 		t.Fatalf("Failed to create tx cache : %s", err)
 	}
 
+	shutdown := make(chan error, 1)
 	interrupt := make(chan interface{})
 	cacheComplete := make(chan interface{})
 	go func() {
-		cacher.Run(ctx, interrupt)
+		cacher.Run(ctx, interrupt, shutdown)
 		close(cacheComplete)
 	}()
 

@@ -3,7 +3,6 @@ package state
 import (
 	"bytes"
 	"context"
-	"crypto/sha256"
 	"encoding/binary"
 	"fmt"
 	"io"
@@ -15,6 +14,7 @@ import (
 	"github.com/tokenized/pkg/bsor"
 	"github.com/tokenized/pkg/storage"
 	"github.com/tokenized/specification/dist/golang/actions"
+	"github.com/tokenized/specification/dist/golang/protocol"
 
 	"github.com/pkg/errors"
 )
@@ -32,12 +32,19 @@ type ContractCache struct {
 type Contract struct {
 	KeyHash                      bitcoin.Hash32                    `bsor:"1" json:"key_hash"`
 	LockingScript                bitcoin.Script                    `bsor:"2" json:"locking_script"`
-	Formation                    *actions.ContractFormation        `bsor:"3" json:"formation"`
+	Formation                    *actions.ContractFormation        `bsor:"-" json:"formation"`
 	FormationTxID                *bitcoin.Hash32                   `bsor:"4" json:"formation_txid"`
-	BodyOfAgreementFormation     *actions.BodyOfAgreementFormation `bsor:"5" json:"body_of_agreement_formation"`
+	BodyOfAgreementFormation     *actions.BodyOfAgreementFormation `bsor:"-" json:"body_of_agreement_formation"`
 	BodyOfAgreementFormationTxID *bitcoin.Hash32                   `bsor:"6" json:"body_of_agreement_formation_txid"`
 
 	Instruments []*Instrument `bsor:"7" json:"instruments"`
+
+	// FormationScript is only used by Serialize to save the Formation value in BSOR.
+	FormationScript bitcoin.Script `bsor:"8" json:"formation_script"`
+
+	// BodyOfAgreementFormationScript is only used by Serialize to save the BodyOfAgreementFormation
+	// value in BSOR.
+	BodyOfAgreementFormationScript bitcoin.Script `bsor:"9" json:"body_of_agreement_formation_script"`
 
 	isModified bool
 	sync.Mutex `bsor:"-"`
@@ -47,8 +54,6 @@ type ContractLookup struct {
 	KeyHash       bitcoin.Hash32 `json:"key_hash"`
 	LockingScript bitcoin.Script `json:"locking_script"`
 }
-
-type ContractID bitcoin.Hash32
 
 func NewContractCache(cache *cacher.Cache) (*ContractCache, error) {
 	typ := reflect.TypeOf(&Contract{})
@@ -60,7 +65,7 @@ func NewContractCache(cache *cacher.Cache) (*ContractCache, error) {
 
 	itemValue := reflect.New(typ.Elem())
 	if !itemValue.CanInterface() {
-		return nil, errors.New("Type must be support interface")
+		return nil, errors.New("Type must support interface")
 	}
 
 	itemInterface := itemValue.Interface()
@@ -137,12 +142,8 @@ func (c *ContractCache) Release(ctx context.Context, lockingScript bitcoin.Scrip
 	c.cacher.Release(ctx, ContractPath(lockingScript))
 }
 
-func CalculateContractID(lockingScript bitcoin.Script) ContractID {
-	return ContractID(sha256.Sum256(lockingScript))
-}
-
 func ContractPath(lockingScript bitcoin.Script) string {
-	return fmt.Sprintf("%s/%s", contractPath, CalculateContractID(lockingScript))
+	return fmt.Sprintf("%s/%s", contractPath, CalculateContractHash(lockingScript))
 }
 
 func (c *Contract) GetInstrument(instrumentCode InstrumentCode) *Instrument {
@@ -172,6 +173,30 @@ func (c *Contract) IsModified() bool {
 }
 
 func (c *Contract) Serialize(w io.Writer) error {
+	if c.Formation != nil {
+		script, err := protocol.Serialize(c.Formation, IsTest())
+		if err != nil {
+			return errors.Wrap(err, "serialize contract formation")
+		}
+
+		c.FormationScript = script
+	}
+
+	if c.BodyOfAgreementFormation != nil {
+		script, err := protocol.Serialize(c.BodyOfAgreementFormation, IsTest())
+		if err != nil {
+			return errors.Wrap(err, "serialize body of agreement formation")
+		}
+
+		c.BodyOfAgreementFormationScript = script
+	}
+
+	for i, instrument := range c.Instruments {
+		if err := instrument.PrepareForMarshal(); err != nil {
+			return errors.Wrapf(err, "prepare instrument %d", i)
+		}
+	}
+
 	b, err := bsor.MarshalBinary(c)
 	if err != nil {
 		return errors.Wrap(err, "marshal")
@@ -216,6 +241,40 @@ func (c *Contract) Deserialize(r io.Reader) error {
 	defer c.Unlock()
 	if _, err := bsor.UnmarshalBinary(b, c); err != nil {
 		return errors.Wrap(err, "unmarshal")
+	}
+
+	if len(c.FormationScript) != 0 {
+		action, err := protocol.Deserialize(c.FormationScript, IsTest())
+		if err != nil {
+			return errors.Wrap(err, "deserialize contract formation")
+		}
+
+		formation, ok := action.(*actions.ContractFormation)
+		if !ok {
+			return errors.New("FormationScript is wrong type")
+		}
+
+		c.Formation = formation
+	}
+
+	if len(c.BodyOfAgreementFormationScript) != 0 {
+		action, err := protocol.Deserialize(c.BodyOfAgreementFormationScript, IsTest())
+		if err != nil {
+			return errors.Wrap(err, "deserialize body of agreement formation")
+		}
+
+		bodyOfAgreementFormation, ok := action.(*actions.BodyOfAgreementFormation)
+		if !ok {
+			return errors.New("BodyOfAgreementFormationScript is wrong type")
+		}
+
+		c.BodyOfAgreementFormation = bodyOfAgreementFormation
+	}
+
+	for i, instrument := range c.Instruments {
+		if err := instrument.CompleteUnmarshal(); err != nil {
+			return errors.Wrapf(err, "complete instrument %d", i)
+		}
 	}
 
 	return nil

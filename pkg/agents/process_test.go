@@ -23,7 +23,7 @@ import (
 )
 
 func Test_Process(t *testing.T) {
-	ctx := logger.ContextWithLogger(context.Background(), true, false, "")
+	ctx := logger.ContextWithLogger(context.Background(), true, true, "")
 	store := storage.NewMockStorage()
 
 	caches := state.StartTestCaches(ctx, t, store, cacher.DefaultConfig(), time.Second)
@@ -385,6 +385,31 @@ func Test_Process(t *testing.T) {
 			Timestamp: uint64(time.Now().UnixNano()),
 		}
 
+		randCount := mathRand.Intn(3)
+		for i := 0; i < randCount; i++ {
+			key, err := bitcoin.GenerateKey(bitcoin.MainNet)
+			if err != nil {
+				t.Fatalf("Failed to generate key : %s", err)
+			}
+
+			lockingScript, err := key.LockingScript()
+			if err != nil {
+				t.Fatalf("Failed to create locking script : %s", err)
+			}
+
+			quantity := uint64(mathRand.Intn(100000) + 1)
+
+			// recipient output
+			index := len(tx.TxOut)
+			tx.AddTxOut(wire.NewTxOut(50, lockingScript))
+
+			settlement.Instruments[0].Settlements = append(settlement.Instruments[0].Settlements,
+				&actions.QuantityIndexField{
+					Quantity: quantity,
+					Index:    uint32(index),
+				})
+		}
+
 		settlementScript, err := protocol.Serialize(settlement, true)
 		if err != nil {
 			t.Fatalf("Failed to serialize settlement : %s", err)
@@ -516,6 +541,31 @@ func Test_Process(t *testing.T) {
 				},
 			},
 			Timestamp: uint64(time.Now().UnixNano()),
+		}
+
+		randCount := mathRand.Intn(3)
+		for i := 0; i < randCount; i++ {
+			key, err := bitcoin.GenerateKey(bitcoin.MainNet)
+			if err != nil {
+				t.Fatalf("Failed to generate key : %s", err)
+			}
+
+			lockingScript, err := key.LockingScript()
+			if err != nil {
+				t.Fatalf("Failed to create locking script : %s", err)
+			}
+
+			quantity := uint64(mathRand.Intn(100000) + 1)
+
+			// recipient output
+			index := len(tx.TxOut)
+			tx.AddTxOut(wire.NewTxOut(50, lockingScript))
+
+			settlement.Instruments[0].Settlements = append(settlement.Instruments[0].Settlements,
+				&actions.QuantityIndexField{
+					Quantity: quantity,
+					Index:    uint32(index),
+				})
 		}
 
 		settlementScript, err := protocol.Serialize(settlement, true)

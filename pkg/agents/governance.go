@@ -3,16 +3,20 @@ package agents
 import (
 	"context"
 
-	"github.com/pkg/errors"
 	"github.com/tokenized/logger"
+	"github.com/tokenized/smart_contract_agent/internal/state"
 	"github.com/tokenized/specification/dist/golang/actions"
+
+	"github.com/pkg/errors"
 )
 
-func (a *Agent) processVote(ctx context.Context, transaction TransactionWithOutputs,
+func (a *Agent) processVote(ctx context.Context, transaction *state.Transaction,
 	vote *actions.Vote) error {
 
 	// First input must be the agent's locking script
+	transaction.Lock()
 	inputOutput, err := transaction.InputOutput(0)
+	transaction.Unlock()
 	if err != nil {
 		return errors.Wrapf(err, "input locking script %d", 0)
 	}
@@ -27,11 +31,13 @@ func (a *Agent) processVote(ctx context.Context, transaction TransactionWithOutp
 	return nil
 }
 
-func (a *Agent) processBallotCounted(ctx context.Context, transaction TransactionWithOutputs,
+func (a *Agent) processBallotCounted(ctx context.Context, transaction *state.Transaction,
 	ballotCounted *actions.BallotCounted) error {
 
 	// First input must be the agent's locking script
+	transaction.Lock()
 	inputOutput, err := transaction.InputOutput(0)
+	transaction.Unlock()
 	if err != nil {
 		return errors.Wrapf(err, "input locking script %d", 0)
 	}
@@ -46,11 +52,13 @@ func (a *Agent) processBallotCounted(ctx context.Context, transaction Transactio
 	return nil
 }
 
-func (a *Agent) processGovernanceResult(ctx context.Context, transaction TransactionWithOutputs,
+func (a *Agent) processGovernanceResult(ctx context.Context, transaction *state.Transaction,
 	result *actions.Result) error {
 
 	// First input must be the agent's locking script
+	transaction.Lock()
 	inputOutput, err := transaction.InputOutput(0)
+	transaction.Unlock()
 	if err != nil {
 		return errors.Wrapf(err, "input locking script %d", 0)
 	}

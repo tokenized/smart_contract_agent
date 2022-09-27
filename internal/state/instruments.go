@@ -7,29 +7,39 @@ import (
 	"github.com/tokenized/pkg/bitcoin"
 	"github.com/tokenized/specification/dist/golang/actions"
 	"github.com/tokenized/specification/dist/golang/instruments"
+	"github.com/tokenized/specification/dist/golang/protocol"
 
 	"github.com/pkg/errors"
 )
-
-type InstrumentCode bitcoin.Hash20
 
 // Instrument represents the intruments created under a contract and are stored with the contract.
 type Instrument struct {
 	InstrumentType [3]byte                     `bsor:"1" json:"instrument_type"`
 	InstrumentCode InstrumentCode              `bsor:"2" json:"instrument_id"`
 	ContractID     ContractID                  `bsor:"3" json:"contract_id"`
-	Creation       *actions.InstrumentCreation `bsor:"4" json:"creation`
+	Creation       *actions.InstrumentCreation `bsor:"-" json:"creation`
 	CreationTxID   *bitcoin.Hash32             `bsor:"5" json:"creation_txid"`
-	instrument     instruments.Instrument      `bsor:"-" json:"instrument"`
+
+	// CreationScript is only used by Serialize to save the Creation value in BSOR.
+	CreationScript bitcoin.Script `bsor:"6" json:"creation_script"`
+
+	// instrument is used to cache the deserialized value of the payload in Creation.
+	instrument instruments.Instrument `json:"instrument"`
 
 	sync.Mutex `bsor:"-"`
 }
 
 func (i *Instrument) ClearInstrument() {
+	i.Lock()
+	defer i.Unlock()
+
 	i.instrument = nil
 }
 
 func (i *Instrument) GetInstrument() (instruments.Instrument, error) {
+	i.Lock()
+	defer i.Unlock()
+
 	if i.instrument != nil {
 		return i.instrument, nil
 	}
@@ -43,6 +53,43 @@ func (i *Instrument) GetInstrument() (instruments.Instrument, error) {
 
 	i.instrument = inst
 	return i.instrument, nil
+}
+
+func (i *Instrument) PrepareForMarshal() error {
+	i.Lock()
+	defer i.Unlock()
+
+	if i.Creation != nil {
+		script, err := protocol.Serialize(i.Creation, IsTest())
+		if err != nil {
+			return errors.Wrap(err, "serialize instrument creation")
+		}
+
+		i.CreationScript = script
+	}
+
+	return nil
+}
+
+func (i *Instrument) CompleteUnmarshal() error {
+	i.Lock()
+	defer i.Unlock()
+
+	if len(i.CreationScript) != 0 {
+		action, err := protocol.Deserialize(i.CreationScript, IsTest())
+		if err != nil {
+			return errors.Wrap(err, "deserialize instrument creation")
+		}
+
+		creation, ok := action.(*actions.InstrumentCreation)
+		if !ok {
+			return errors.New("CreationScript is wrong type")
+		}
+
+		i.Creation = creation
+	}
+
+	return nil
 }
 
 func (id InstrumentCode) Equal(other InstrumentCode) bool {

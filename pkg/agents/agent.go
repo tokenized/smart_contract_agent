@@ -111,10 +111,10 @@ func (a *Agent) ActionIsSupported(action actions.Action) bool {
 	}
 }
 
-func (a *Agent) Process(ctx context.Context, transaction TransactionWithOutputs,
+func (a *Agent) Process(ctx context.Context, transaction *state.Transaction,
 	actions []actions.Action) error {
 
-	ctx = logger.ContextWithLogFields(ctx, logger.Stringer("txid", transaction.TxID()))
+	ctx = logger.ContextWithLogFields(ctx, logger.Stringer("txid", transaction.GetTxID()))
 	logger.Info(ctx, "Processing transaction")
 
 	for i, action := range actions {
@@ -126,7 +126,7 @@ func (a *Agent) Process(ctx context.Context, transaction TransactionWithOutputs,
 	return nil
 }
 
-func (a *Agent) processAction(ctx context.Context, transaction TransactionWithOutputs,
+func (a *Agent) processAction(ctx context.Context, transaction *state.Transaction,
 	action actions.Action) error {
 
 	switch act := action.(type) {

@@ -87,7 +87,7 @@ func (c *Conductor) Load(ctx context.Context, store storage.StreamStorage) error
 
 	c.lookup = make(map[state.ContractID]bitcoin.Hash32)
 	for _, lookup := range lookups {
-		contractID := state.CalculateContractID(lookup.LockingScript)
+		contractID := state.CalculateContractHash(lookup.LockingScript)
 		c.lookup[contractID] = lookup.KeyHash
 	}
 
@@ -139,7 +139,7 @@ func (c *Conductor) AddAgent(ctx context.Context,
 	if err != nil {
 		return nil, errors.Wrap(err, "locking script")
 	}
-	contractID := state.CalculateContractID(lockingScript)
+	contractID := state.CalculateContractHash(lockingScript)
 
 	ra, err := key.RawAddress()
 	if err != nil {
@@ -186,7 +186,7 @@ func (c *Conductor) AddAgent(ctx context.Context,
 func (c *Conductor) GetAgent(ctx context.Context,
 	lockingScript bitcoin.Script) (*agents.Agent, error) {
 
-	contractID := state.CalculateContractID(lockingScript)
+	contractID := state.CalculateContractHash(lockingScript)
 
 	c.lock.Lock()
 	deriviationHash, exists := c.lookup[contractID]
