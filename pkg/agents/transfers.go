@@ -18,36 +18,150 @@ func (a *Agent) processTransfer(ctx context.Context, transaction *state.Transact
 	transfer *actions.Transfer) error {
 
 	// Verify appropriate output belongs to this contract.
-	found := false
+	isRelevant := false
 	agentLockingScript := a.LockingScript()
+
+	ctx = logger.ContextWithLogFields(ctx,
+		logger.Stringer("contract_locking_script", agentLockingScript))
+
+	// TODO Verify there is not more than one transfer per instrument. --ce
+
 	transaction.Lock()
-	for _, instrument := range transfer.Instruments {
-		if int(instrument.ContractIndex) >= transaction.OutputCount() {
-			logger.Error(ctx, "Invalid transfer contract index: %d >= %d", instrument.ContractIndex,
-				transaction.OutputCount())
-			transaction.Unlock()
+	defer transaction.Unlock()
+
+	txid := transaction.TxID()
+
+	for _, instrumentTransfer := range transfer.Instruments {
+		if int(instrumentTransfer.ContractIndex) >= transaction.OutputCount() {
+			logger.Warn(ctx, "Invalid transfer contract index: %d >= %d",
+				instrumentTransfer.ContractIndex, transaction.OutputCount())
 			return nil
 		}
 
-		contractOutput := transaction.Output(int(instrument.ContractIndex))
-		if agentLockingScript.Equal(contractOutput.LockingScript) {
-			found = true
+		contractOutput := transaction.Output(int(instrumentTransfer.ContractIndex))
+		if !agentLockingScript.Equal(contractOutput.LockingScript) {
+			continue
 		}
 
-		fields := []logger.Field{
-			logger.Stringer("locking_script", agentLockingScript),
-		}
+		isRelevant = true
 
-		instrumentID, err := protocol.InstrumentIDForTransfer(instrument)
+		instrumentCtx := ctx
+		instrumentID, err := protocol.InstrumentIDForTransfer(instrumentTransfer)
 		if err == nil {
-			fields = append(fields, logger.String("instrument_id", instrumentID))
+			instrumentCtx = logger.ContextWithLogFields(ctx,
+				logger.String("instrument_id", instrumentID))
 		}
 
-		logger.InfoWithFields(ctx, fields, "Processing transfer")
-	}
-	transaction.Unlock()
+		var instrumentCode state.InstrumentCode
+		copy(instrumentCode[:], instrumentTransfer.InstrumentCode)
 
-	if !found {
+		a.contract.Lock()
+		stateInstrument := a.contract.GetInstrument(instrumentCode)
+		a.contract.Unlock()
+
+		if stateInstrument == nil {
+			logger.Warn(instrumentCtx, "Instrument not found: %s", instrumentCode)
+			return a.sendReject(ctx, transaction, int(instrumentTransfer.ContractIndex),
+				actions.RejectionsInstrumentNotFound, "")
+		}
+
+		if instrumentTransfer.InstrumentType != string(stateInstrument.InstrumentType[:]) {
+			logger.Warn(instrumentCtx, "Wrong instrument type: %s (should be %s)",
+				instrumentTransfer.InstrumentType, stateInstrument.InstrumentType)
+			return a.sendReject(ctx, transaction, int(instrumentTransfer.ContractIndex),
+				actions.RejectionsInstrumentNotFound, "wrong instrument type")
+		}
+
+		logger.Info(ctx, "Processing transfer")
+
+		// TODO Check instrument's transfer rules. --ce
+		// now := uint64(time.Now().UnixNano())
+
+		// Get relevant balances.
+		// TODO Locking scripts might need to be in order or something so when two different actions
+		// are running and getting mutexes they will not get deadlocks by having a locking script
+		// locked by another transfer while the other transfer already has a lock on a locking
+		// script needed by this transfer. --ce
+		var addBalances []*state.Balance
+		var senderLockingScripts []bitcoin.Script
+		for _, sender := range instrumentTransfer.InstrumentSenders {
+			inputOutput, err := transaction.InputOutput(int(sender.Index))
+			if err != nil {
+				logger.Warn(instrumentCtx, "Invalid sender index : %s", err)
+				return a.sendReject(ctx, transaction, int(instrumentTransfer.ContractIndex),
+					actions.RejectionsMsgMalformed, "invalid sender index")
+			}
+
+			senderLockingScripts = append(senderLockingScripts, inputOutput.LockingScript)
+			addBalances = appendZeroBalance(addBalances, inputOutput.LockingScript)
+		}
+
+		var receiverLockingScripts []bitcoin.Script
+		for _, receiver := range instrumentTransfer.InstrumentReceivers {
+			ra, err := bitcoin.DecodeRawAddress(receiver.Address)
+			if err != nil {
+				logger.Warn(instrumentCtx, "Invalid receiver address : %s", err)
+				return a.sendReject(ctx, transaction, int(instrumentTransfer.ContractIndex),
+					actions.RejectionsMsgMalformed, "invalid receiver address")
+			}
+
+			lockingScript, err := ra.LockingScript()
+			if err != nil {
+				logger.Warn(instrumentCtx, "Invalid receiver address script : %s", err)
+				return a.sendReject(ctx, transaction, int(instrumentTransfer.ContractIndex),
+					actions.RejectionsMsgMalformed, "invalid receiver address script")
+			}
+
+			receiverLockingScripts = append(receiverLockingScripts, lockingScript)
+			addBalances = appendZeroBalance(addBalances, lockingScript)
+		}
+
+		balances, err := a.balances.AddMulti(instrumentCtx, agentLockingScript, instrumentCode,
+			addBalances)
+		if err != nil {
+			return errors.Wrap(err, "add balances")
+		}
+		defer a.balances.ReleaseMulti(ctx, agentLockingScript, instrumentCode, balances)
+
+		lockBalances(balances)
+		// TODO If there is more than one lock on the same balance then defer won't work. There
+		// shouldn't be if there is only one transfer per instrument. --ce
+		defer unlockBalances(balances)
+		defer revertPendingBalances(balances)
+
+		for i, sender := range instrumentTransfer.InstrumentSenders {
+			lockingScript := senderLockingScripts[i]
+			balance := findBalance(balances, lockingScript)
+			if balance == nil {
+				return fmt.Errorf("Missing balance for sender %d : %s", i, lockingScript)
+			}
+
+			if err := balance.AddPendingDebit(sender.Quantity); err != nil {
+				return a.sendReject(ctx, transaction, int(instrumentTransfer.ContractIndex),
+					actions.RejectionsInsufficientQuantity, fmt.Sprintf("sender %d: %s", i, err))
+			}
+		}
+
+		for i, receiver := range instrumentTransfer.InstrumentReceivers {
+			lockingScript := receiverLockingScripts[i]
+			balance := findBalance(balances, lockingScript)
+			if balance == nil {
+				return fmt.Errorf("Missing balance for receiver %d : %s", i, lockingScript)
+			}
+
+			if err := balance.AddPendingCredit(receiver.Quantity); err != nil {
+				return a.sendReject(ctx, transaction, int(instrumentTransfer.ContractIndex),
+					actions.RejectionsInsufficientQuantity, err.Error())
+			}
+		}
+
+		finalizePendingBalances(balances, &txid)
+
+		// TODO Revert balance changes if any part of transfer fails after starting to update
+		// balances. --ce
+	}
+
+	if !isRelevant {
 		return nil // Not for this contract
 	}
 
@@ -108,9 +222,6 @@ func (a *Agent) processSettlement(ctx context.Context, transaction *state.Transa
 			continue
 		}
 
-		var instrumentCode state.InstrumentCode
-		copy(instrumentCode[:], instrument.InstrumentCode)
-
 		instrumentCtx := ctx
 
 		instrumentID, err := protocol.InstrumentIDForSettlement(instrument)
@@ -118,6 +229,9 @@ func (a *Agent) processSettlement(ctx context.Context, transaction *state.Transa
 			instrumentCtx = logger.ContextWithLogFields(instrumentCtx,
 				logger.String("instrument_id", instrumentID))
 		}
+
+		var instrumentCode state.InstrumentCode
+		copy(instrumentCode[:], instrument.InstrumentCode)
 
 		a.contract.Lock()
 		stateInstrument := a.contract.GetInstrument(instrumentCode)

@@ -17,11 +17,11 @@ import (
 )
 
 const (
-	FreezeCode               = BalanceHoldingCode('F')
-	DebitCode                = BalanceHoldingCode('D')
-	DepositCode              = BalanceHoldingCode('P')
-	MultiContractDebitCode   = BalanceHoldingCode('-')
-	MultiContractDepositCode = BalanceHoldingCode('+')
+	FreezeCode              = BalanceAdjustmentCode('F')
+	DebitCode               = BalanceAdjustmentCode('D')
+	CreditCode              = BalanceAdjustmentCode('C')
+	MultiContractDebitCode  = BalanceAdjustmentCode('-')
+	MultiContractCreditCode = BalanceAdjustmentCode('+')
 
 	balanceVersion = uint8(0)
 	balancePath    = "balances"
@@ -38,16 +38,19 @@ type Balance struct {
 	Timestamp     uint64          `bsor:"3" json:"timestamp"`
 	TxID          *bitcoin.Hash32 `bsor:"4" json:"txID,omitempty"`
 
-	Holdings []*BalanceHolding `bsor:"5" json:"holdings,omitempty"`
+	Adjustments []*BalanceAdjustment `bsor:"5" json:"adjustments,omitempty"`
+
+	pendingQuantity  uint64
+	pendingDirection bool // true=credit, false=debit
 
 	isModified bool
 	sync.Mutex `bsor:"-"`
 }
 
-type BalanceHoldingCode byte
+type BalanceAdjustmentCode byte
 
-type BalanceHolding struct {
-	Code BalanceHoldingCode `bsor:"1" json:"code,omitempty"`
+type BalanceAdjustment struct {
+	Code BalanceAdjustmentCode `bsor:"1" json:"code,omitempty"`
 
 	Expires  protocol.Timestamp `bsor:"2" json:"expires,omitempty"`
 	Quantity uint64             `bsor:"3" json:"quantity,omitempty"`
@@ -199,6 +202,92 @@ func (c *BalanceCache) ReleaseMulti(ctx context.Context, contractLockingScript b
 	return nil
 }
 
+func (b *Balance) PendingQuantity() uint64 {
+	if b.pendingDirection { // credit
+		return b.Quantity + b.pendingQuantity
+	} else { // debit
+		return b.Quantity - b.pendingQuantity
+	}
+}
+
+func (b *Balance) Available() uint64 {
+	available := b.PendingQuantity()
+	for _, adj := range b.Adjustments {
+		switch adj.Code {
+		case FreezeCode, DebitCode, MultiContractDebitCode:
+			if available > adj.Quantity {
+				available -= adj.Quantity
+			} else {
+				available = 0
+			}
+		case CreditCode, MultiContractCreditCode:
+			available += adj.Quantity
+		}
+	}
+
+	return available
+}
+
+func (b *Balance) AddPendingDebit(quantity uint64) error {
+	available := b.Available()
+	if available < quantity {
+		return fmt.Errorf("available %d, debit %d", available, quantity)
+	}
+
+	if b.pendingDirection { // credit
+		if b.pendingQuantity >= quantity {
+			b.pendingQuantity -= quantity
+		} else {
+			b.pendingDirection = false
+			b.pendingQuantity = quantity - b.pendingQuantity
+		}
+	} else { // debit
+		b.pendingQuantity += quantity
+	}
+
+	return nil
+}
+
+func (b *Balance) AddPendingCredit(quantity uint64) error {
+	if b.pendingDirection { // credit
+		b.pendingQuantity += quantity
+	} else { // debit
+		if b.pendingQuantity >= quantity {
+			b.pendingQuantity -= quantity
+		} else {
+			b.pendingDirection = true
+			b.pendingQuantity = quantity - b.pendingQuantity
+		}
+	}
+
+	return nil
+}
+
+func (b *Balance) RevertPending() {
+	b.pendingDirection = false
+	b.pendingQuantity = 0
+}
+
+func (b *Balance) FinalizePending(txid *bitcoin.Hash32) {
+	if b.pendingDirection { // credit
+		b.Adjustments = append(b.Adjustments, &BalanceAdjustment{
+			Code:     CreditCode,
+			Quantity: b.pendingQuantity,
+			TxID:     txid,
+		})
+	} else { // debit
+		b.Adjustments = append(b.Adjustments, &BalanceAdjustment{
+			Code:     DebitCode,
+			Quantity: b.pendingQuantity,
+			TxID:     txid,
+		})
+	}
+
+	b.pendingDirection = false
+	b.pendingQuantity = 0
+	b.isModified = true
+}
+
 func (b *Balance) MarkModified() {
 	b.isModified = true
 }
@@ -270,50 +359,50 @@ func balancePathPrefix(contractLockingScript bitcoin.Script, instrumentCode Inst
 		instrumentCode)
 }
 
-func (v BalanceHoldingCode) MarshalText() ([]byte, error) {
+func (v BalanceAdjustmentCode) MarshalText() ([]byte, error) {
 	s := v.String()
 	if len(s) == 0 {
-		return nil, fmt.Errorf("Unknown BalanceHoldingCode value \"%d\"", uint8(v))
+		return nil, fmt.Errorf("Unknown BalanceAdjustmentCode value \"%d\"", uint8(v))
 	}
 
 	return []byte(s), nil
 }
 
-func (v *BalanceHoldingCode) UnmarshalText(text []byte) error {
+func (v *BalanceAdjustmentCode) UnmarshalText(text []byte) error {
 	return v.SetString(string(text))
 }
 
-func (v *BalanceHoldingCode) SetString(s string) error {
+func (v *BalanceAdjustmentCode) SetString(s string) error {
 	switch s {
 	case "freeze":
 		*v = FreezeCode
 	case "debit":
 		*v = DebitCode
-	case "deposit":
-		*v = DepositCode
+	case "credit":
+		*v = CreditCode
 	case "multi_contract_debit":
 		*v = MultiContractDebitCode
-	case "multi_contract_deposit":
-		*v = MultiContractDepositCode
+	case "multi_contract_credit":
+		*v = MultiContractCreditCode
 	default:
-		return fmt.Errorf("Unknown BalanceHoldingCode value \"%s\"", s)
+		return fmt.Errorf("Unknown BalanceAdjustmentCode value \"%s\"", s)
 	}
 
 	return nil
 }
 
-func (v BalanceHoldingCode) String() string {
+func (v BalanceAdjustmentCode) String() string {
 	switch v {
 	case FreezeCode:
 		return "freeze"
 	case DebitCode:
 		return "debit"
-	case DepositCode:
-		return "deposit"
+	case CreditCode:
+		return "credit"
 	case MultiContractDebitCode:
 		return "multi_contract_debit"
-	case MultiContractDepositCode:
-		return "multi_contract_deposit"
+	case MultiContractCreditCode:
+		return "multi_contract_credit"
 	default:
 		return ""
 	}
