@@ -25,23 +25,12 @@ import (
 func Test_Process(t *testing.T) {
 	ctx := logger.ContextWithLogger(context.Background(), true, true, "")
 	store := storage.NewMockStorage()
+	broadcaster := state.NewMockTxBroadcaster()
 
 	caches := state.StartTestCaches(ctx, t, store, cacher.DefaultConfig(), time.Second)
 
-	contractKey, err := bitcoin.GenerateKey(bitcoin.MainNet)
-	if err != nil {
-		t.Fatalf("Failed to generate key : %s", err)
-	}
-
-	contractLockingScript, err := contractKey.LockingScript()
-	if err != nil {
-		t.Fatalf("Failed to create locking script : %s", err)
-	}
-
-	contractAddress, err := contractKey.RawAddress()
-	if err != nil {
-		t.Fatalf("Failed to create address : %s", err)
-	}
+	contractKey, contractLockingScript, contractAddress := state.MockKey()
+	_, feeLockingScript, _ := state.MockKey()
 
 	var keyHash bitcoin.Hash32
 	rand.Read(keyHash[:])
@@ -51,13 +40,14 @@ func Test_Process(t *testing.T) {
 		LockingScript: contractLockingScript,
 	}
 
+	var err error
 	contract, err = caches.Contracts.Add(ctx, contract)
 	if err != nil {
 		t.Fatalf("Failed to add contract : %s", err)
 	}
 
-	agent, err := NewAgent(contractKey, contract, caches.Contracts, caches.Balances,
-		caches.Transactions, caches.Subscriptions)
+	agent, err := NewAgent(contractKey, contract, feeLockingScript, caches.Contracts,
+		caches.Balances, caches.Transactions, caches.Subscriptions, broadcaster, 0.05, 0.0, true)
 	if err != nil {
 		t.Fatalf("Failed to create agent : %s", err)
 	}

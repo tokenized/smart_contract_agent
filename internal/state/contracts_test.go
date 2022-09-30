@@ -29,7 +29,7 @@ func Test_Contracts(t *testing.T) {
 		t.Fatalf("Failed to create locking script : %s", err)
 	}
 
-	contractID := CalculateContractHash(contractLockingScript)
+	contractHash := CalculateContractHash(contractLockingScript)
 
 	cacherConfig := cacher.DefaultConfig()
 	cacherConfig.Expiration = config.Duration{time.Millisecond * 50}
@@ -95,7 +95,7 @@ func Test_Contracts(t *testing.T) {
 
 		instrument := &Instrument{
 			InstrumentCode: code,
-			ContractID:     contractID,
+			ContractHash:   contractHash,
 			Creation: &actions.InstrumentCreation{
 				InstrumentCode:    []byte(code[:]),
 				InstrumentIndex:   uint64(i),

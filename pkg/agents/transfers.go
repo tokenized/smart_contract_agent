@@ -3,10 +3,12 @@ package agents
 import (
 	"context"
 	"fmt"
+	"time"
 
 	channels_expanded_tx "github.com/tokenized/channels/expanded_tx"
 	"github.com/tokenized/logger"
 	"github.com/tokenized/pkg/bitcoin"
+	"github.com/tokenized/pkg/txbuilder"
 	"github.com/tokenized/smart_contract_agent/internal/state"
 	"github.com/tokenized/specification/dist/golang/actions"
 	"github.com/tokenized/specification/dist/golang/protocol"
@@ -18,7 +20,6 @@ func (a *Agent) processTransfer(ctx context.Context, transaction *state.Transact
 	transfer *actions.Transfer) error {
 
 	// Verify appropriate output belongs to this contract.
-	isRelevant := false
 	agentLockingScript := a.LockingScript()
 
 	ctx = logger.ContextWithLogFields(ctx,
@@ -26,10 +27,51 @@ func (a *Agent) processTransfer(ctx context.Context, transaction *state.Transact
 
 	// TODO Verify there is not more than one transfer per instrument. --ce
 
+	// TODO Verify expiry. --ce
+	// transfer.OfferExpiry
+
 	transaction.Lock()
 	defer transaction.Unlock()
 
+	responseTx := txbuilder.NewTxBuilder(a.FeeRate(), a.DustFeeRate())
+
+	// TODO Check if this is a single contract settlement. --ce
+	isRelevant := false
+	isSingleContract := true
+	isMasterContract := false
+	for index, instrumentTransfer := range transfer.Instruments {
+		if int(instrumentTransfer.ContractIndex) >= transaction.OutputCount() {
+			logger.Warn(ctx, "Invalid transfer contract index: %d >= %d",
+				instrumentTransfer.ContractIndex, transaction.OutputCount())
+			return nil
+		}
+
+		contractOutput := transaction.Output(int(instrumentTransfer.ContractIndex))
+		if agentLockingScript.Equal(contractOutput.LockingScript) {
+			if index == 0 {
+				isMasterContract = true
+			}
+			isRelevant = true
+		} else {
+			isSingleContract = false
+		}
+	}
+
+	if !isRelevant {
+		logger.Warn(ctx, "Transfer not relevant to this contract agent")
+		return nil // Not for this contract
+	}
+
+	if !isMasterContract {
+		logger.Info(ctx, "Waiting for settlement request message to process transfer")
+		return nil // Wait for settlement request message
+	}
+
 	txid := transaction.TxID()
+	now := uint64(time.Now().UnixNano())
+	settlement := &actions.Settlement{
+		Timestamp: now,
+	}
 
 	for _, instrumentTransfer := range transfer.Instruments {
 		if int(instrumentTransfer.ContractIndex) >= transaction.OutputCount() {
@@ -41,6 +83,11 @@ func (a *Agent) processTransfer(ctx context.Context, transaction *state.Transact
 		contractOutput := transaction.Output(int(instrumentTransfer.ContractIndex))
 		if !agentLockingScript.Equal(contractOutput.LockingScript) {
 			continue
+		}
+
+		if err := addResponseInput(responseTx, transaction.GetMsgTx(),
+			int(instrumentTransfer.ContractIndex)); err != nil {
+			return errors.Wrap(err, "add response input")
 		}
 
 		isRelevant = true
@@ -56,26 +103,28 @@ func (a *Agent) processTransfer(ctx context.Context, transaction *state.Transact
 		copy(instrumentCode[:], instrumentTransfer.InstrumentCode)
 
 		a.contract.Lock()
-		stateInstrument := a.contract.GetInstrument(instrumentCode)
+		instrument := a.contract.GetInstrument(instrumentCode)
 		a.contract.Unlock()
 
-		if stateInstrument == nil {
+		if instrument == nil {
 			logger.Warn(instrumentCtx, "Instrument not found: %s", instrumentCode)
-			return a.sendReject(ctx, transaction, int(instrumentTransfer.ContractIndex),
-				actions.RejectionsInstrumentNotFound, "")
+			return errors.Wrap(a.sendReject(ctx, transaction, 0,
+				int(instrumentTransfer.ContractIndex), actions.RejectionsInstrumentNotFound, "",
+				now), "reject")
 		}
 
-		if instrumentTransfer.InstrumentType != string(stateInstrument.InstrumentType[:]) {
+		if instrumentTransfer.InstrumentType != string(instrument.InstrumentType[:]) {
 			logger.Warn(instrumentCtx, "Wrong instrument type: %s (should be %s)",
-				instrumentTransfer.InstrumentType, stateInstrument.InstrumentType)
-			return a.sendReject(ctx, transaction, int(instrumentTransfer.ContractIndex),
-				actions.RejectionsInstrumentNotFound, "wrong instrument type")
+				instrumentTransfer.InstrumentType, instrument.InstrumentType)
+			return errors.Wrap(a.sendReject(ctx, transaction, 0,
+				int(instrumentTransfer.ContractIndex), actions.RejectionsInstrumentNotFound,
+				"wrong instrument type", now), "reject")
 		}
 
 		logger.Info(ctx, "Processing transfer")
 
 		// TODO Check instrument's transfer rules. --ce
-		// now := uint64(time.Now().UnixNano())
+		// Verify receiver signatures if they are required.
 
 		// Get relevant balances.
 		// TODO Locking scripts might need to be in order or something so when two different actions
@@ -88,8 +137,9 @@ func (a *Agent) processTransfer(ctx context.Context, transaction *state.Transact
 			inputOutput, err := transaction.InputOutput(int(sender.Index))
 			if err != nil {
 				logger.Warn(instrumentCtx, "Invalid sender index : %s", err)
-				return a.sendReject(ctx, transaction, int(instrumentTransfer.ContractIndex),
-					actions.RejectionsMsgMalformed, "invalid sender index")
+				return errors.Wrap(a.sendReject(ctx, transaction, 0,
+					int(instrumentTransfer.ContractIndex), actions.RejectionsMsgMalformed,
+					"invalid sender index", now), "reject")
 			}
 
 			senderLockingScripts = append(senderLockingScripts, inputOutput.LockingScript)
@@ -101,15 +151,17 @@ func (a *Agent) processTransfer(ctx context.Context, transaction *state.Transact
 			ra, err := bitcoin.DecodeRawAddress(receiver.Address)
 			if err != nil {
 				logger.Warn(instrumentCtx, "Invalid receiver address : %s", err)
-				return a.sendReject(ctx, transaction, int(instrumentTransfer.ContractIndex),
-					actions.RejectionsMsgMalformed, "invalid receiver address")
+				return errors.Wrap(a.sendReject(ctx, transaction, 0,
+					int(instrumentTransfer.ContractIndex), actions.RejectionsMsgMalformed,
+					"invalid receiver address", now), "reject")
 			}
 
 			lockingScript, err := ra.LockingScript()
 			if err != nil {
 				logger.Warn(instrumentCtx, "Invalid receiver address script : %s", err)
-				return a.sendReject(ctx, transaction, int(instrumentTransfer.ContractIndex),
-					actions.RejectionsMsgMalformed, "invalid receiver address script")
+				return errors.Wrap(a.sendReject(ctx, transaction, 0,
+					int(instrumentTransfer.ContractIndex), actions.RejectionsMsgMalformed,
+					"invalid receiver address script", now), "reject")
 			}
 
 			receiverLockingScripts = append(receiverLockingScripts, lockingScript)
@@ -127,7 +179,7 @@ func (a *Agent) processTransfer(ctx context.Context, transaction *state.Transact
 		// TODO If there is more than one lock on the same balance then defer won't work. There
 		// shouldn't be if there is only one transfer per instrument. --ce
 		defer unlockBalances(balances)
-		defer revertPendingBalances(balances)
+		defer revertPendingBalances(balances, &txid)
 
 		for i, sender := range instrumentTransfer.InstrumentSenders {
 			lockingScript := senderLockingScripts[i]
@@ -137,8 +189,13 @@ func (a *Agent) processTransfer(ctx context.Context, transaction *state.Transact
 			}
 
 			if err := balance.AddPendingDebit(sender.Quantity); err != nil {
-				return a.sendReject(ctx, transaction, int(instrumentTransfer.ContractIndex),
-					actions.RejectionsInsufficientQuantity, fmt.Sprintf("sender %d: %s", i, err))
+				logger.WarnWithFields(instrumentCtx, []logger.Field{
+					logger.Stringer("locking_script", lockingScript),
+					logger.Uint64("quantity", sender.Quantity),
+				}, "Failed to add debit : %s", err)
+				return errors.Wrap(a.sendReject(ctx, transaction, int(sender.Index),
+					int(instrumentTransfer.ContractIndex), actions.RejectionsInsufficientQuantity,
+					fmt.Sprintf("sender %d: %s", i, err), now), "reject")
 			}
 		}
 
@@ -150,10 +207,32 @@ func (a *Agent) processTransfer(ctx context.Context, transaction *state.Transact
 			}
 
 			if err := balance.AddPendingCredit(receiver.Quantity); err != nil {
-				return a.sendReject(ctx, transaction, int(instrumentTransfer.ContractIndex),
-					actions.RejectionsInsufficientQuantity, err.Error())
+				logger.WarnWithFields(instrumentCtx, []logger.Field{
+					logger.Stringer("locking_script", lockingScript),
+					logger.Uint64("quantity", receiver.Quantity),
+				}, "Failed to add credit : %s", err)
+				return errors.Wrap(a.sendReject(ctx, transaction, 0,
+					int(instrumentTransfer.ContractIndex), actions.RejectionsInsufficientQuantity,
+					err.Error(), now), "reject")
 			}
 		}
+
+		contractIndex, err := addDustLockingScript(responseTx, agentLockingScript)
+		if err != nil {
+			return errors.Wrap(err, "add contract locking script")
+		}
+
+		transferSettlement := &actions.InstrumentSettlementField{
+			ContractIndex:  contractIndex,
+			InstrumentType: string(instrument.Creation.InstrumentType),
+			InstrumentCode: instrument.Creation.InstrumentCode,
+		}
+
+		if err := populateTransferSettlement(responseTx, transferSettlement, balances); err != nil {
+			return errors.Wrap(err, "populate settlement")
+		}
+
+		settlement.Instruments = append(settlement.Instruments, transferSettlement)
 
 		finalizePendingBalances(balances, &txid)
 
@@ -161,8 +240,57 @@ func (a *Agent) processTransfer(ctx context.Context, transaction *state.Transact
 		// balances. --ce
 	}
 
-	if !isRelevant {
-		return nil // Not for this contract
+	settlementScript, err := protocol.Serialize(settlement, a.IsTest())
+	if err != nil {
+		return errors.Wrap(err, "serialize settlement")
+	}
+
+	if err := responseTx.AddOutput(settlementScript, 0, false, false); err != nil {
+		return errors.Wrap(err, "add settlement output")
+	}
+
+	// TODO Verify the contract fee is paid on top of the response tx fee. --ce
+
+	// TODO Verify exchange fee is paid. --ce
+	// transfer.ExchangeFee          uint64                     `protobuf:"varint,3,opt,name=ExchangeFee,proto3" json:"ExchangeFee,omitempty"`
+	// transfer.ExchangeFeeAddress   []byte
+
+	if !isSingleContract {
+		// TODO Create a settlement request for the next contract. --ce
+
+		return nil
+	}
+
+	// Broadcast settlement tx.
+
+	// if _, err := tx.Sign([]bitcoin.Key{a.Key()}); err != nil {
+	// 	if errors.Cause(err) == txbuilder.ErrInsufficientValue {
+
+	// 	}
+
+	// 	return errors.Wrap(err, "sign")
+	// }
+
+	println("Settlement Tx :", responseTx.String(bitcoin.MainNet))
+
+	return nil
+}
+
+// populateTransferSettlement adds all the new balances to the transfer settlement.
+func populateTransferSettlement(tx *txbuilder.TxBuilder,
+	transferSettlement *actions.InstrumentSettlementField, balances []*state.Balance) error {
+
+	for i, balance := range balances {
+		index, err := addDustLockingScript(tx, balance.LockingScript)
+		if err != nil {
+			return errors.Wrapf(err, "add locking script %d", i)
+		}
+
+		transferSettlement.Settlements = append(transferSettlement.Settlements,
+			&actions.QuantityIndexField{
+				Quantity: balance.SettlePendingQuantity(),
+				Index:    index,
+			})
 	}
 
 	return nil

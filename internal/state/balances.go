@@ -210,6 +210,27 @@ func (b *Balance) PendingQuantity() uint64 {
 	}
 }
 
+// SettlePendingQuantity is the quantity to put in a settlement that is currently being built. It
+// doesn't subtract frozen amounts, but does include all pending adjustements.
+func (b *Balance) SettlePendingQuantity() uint64 {
+	quantity := b.PendingQuantity()
+	for _, adj := range b.Adjustments {
+		switch adj.Code {
+		case FreezeCode:
+		case DebitCode, MultiContractDebitCode:
+			if quantity > adj.Quantity {
+				quantity -= adj.Quantity
+			} else {
+				quantity = 0
+			}
+		case CreditCode, MultiContractCreditCode:
+			quantity += adj.Quantity
+		}
+	}
+
+	return quantity
+}
+
 func (b *Balance) Available() uint64 {
 	available := b.PendingQuantity()
 	for _, adj := range b.Adjustments {
@@ -263,7 +284,7 @@ func (b *Balance) AddPendingCredit(quantity uint64) error {
 	return nil
 }
 
-func (b *Balance) RevertPending() {
+func (b *Balance) RevertPending(txid *bitcoin.Hash32) {
 	b.pendingDirection = false
 	b.pendingQuantity = 0
 }

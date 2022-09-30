@@ -75,7 +75,7 @@ func (a *Agent) processInstrumentCreation(ctx context.Context, transaction *stat
 	isFirst := existing == nil
 	if existing == nil {
 		newInstrument := &state.Instrument{
-			ContractID:   state.CalculateContractHash(a.contract.LockingScript),
+			ContractHash: state.CalculateContractHash(a.contract.LockingScript),
 			Creation:     creation,
 			CreationTxID: &txid,
 		}

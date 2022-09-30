@@ -16,7 +16,7 @@ import (
 type Instrument struct {
 	InstrumentType [3]byte                     `bsor:"1" json:"instrument_type"`
 	InstrumentCode InstrumentCode              `bsor:"2" json:"instrument_id"`
-	ContractID     ContractID                  `bsor:"3" json:"contract_id"`
+	ContractHash   ContractHash                `bsor:"3" json:"contract_hash"`
 	Creation       *actions.InstrumentCreation `bsor:"-" json:"creation`
 	CreationTxID   *bitcoin.Hash32             `bsor:"5" json:"creation_txid"`
 

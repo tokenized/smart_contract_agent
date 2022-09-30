@@ -31,7 +31,7 @@ type Conductor struct {
 	transactions  *state.TransactionCache
 	subscriptions *state.SubscriptionCache
 
-	lookup map[state.ContractID]bitcoin.Hash32
+	lookup map[state.ContractHash]bitcoin.Hash32
 
 	nextSpyNodeMessageID uint64
 
@@ -50,7 +50,7 @@ func NewConductor(baseKey bitcoin.Key, isTest bool, spyNodeClient spynode.Client
 		balances:             balances,
 		transactions:         transactions,
 		subscriptions:        subscriptions,
-		lookup:               make(map[state.ContractID]bitcoin.Hash32),
+		lookup:               make(map[state.ContractHash]bitcoin.Hash32),
 		nextSpyNodeMessageID: 1,
 	}
 }
@@ -85,7 +85,7 @@ func (c *Conductor) Load(ctx context.Context, store storage.StreamStorage) error
 	c.lock.Lock()
 	defer c.lock.Unlock()
 
-	c.lookup = make(map[state.ContractID]bitcoin.Hash32)
+	c.lookup = make(map[state.ContractHash]bitcoin.Hash32)
 	for _, lookup := range lookups {
 		contractID := state.CalculateContractHash(lookup.LockingScript)
 		c.lookup[contractID] = lookup.KeyHash

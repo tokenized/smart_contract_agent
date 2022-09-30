@@ -15,7 +15,7 @@ var (
 	isTest     = true
 )
 
-type ContractID bitcoin.Hash32
+type ContractHash bitcoin.Hash32
 
 type InstrumentCode bitcoin.Hash20
 
@@ -32,8 +32,8 @@ func IsTest() bool {
 	return value
 }
 
-func CalculateContractHash(lockingScript bitcoin.Script) ContractID {
-	return ContractID(sha256.Sum256(lockingScript))
+func CalculateContractHash(lockingScript bitcoin.Script) ContractHash {
+	return ContractHash(sha256.Sum256(lockingScript))
 }
 
 func LockingScriptHash(lockingScript bitcoin.Script) bitcoin.Hash32 {

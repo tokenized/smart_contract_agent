@@ -30,6 +30,7 @@ type ContractCache struct {
 }
 
 type Contract struct {
+	// KeyHash is the hash that is added to the root key to derive the contract's key.
 	KeyHash                      bitcoin.Hash32                    `bsor:"1" json:"key_hash"`
 	LockingScript                bitcoin.Script                    `bsor:"2" json:"locking_script"`
 	Formation                    *actions.ContractFormation        `bsor:"-" json:"formation"`
@@ -280,20 +281,20 @@ func (c *Contract) Deserialize(r io.Reader) error {
 	return nil
 }
 
-func (id ContractID) String() string {
+func (id ContractHash) String() string {
 	return bitcoin.Hash32(id).String()
 }
 
-func (id ContractID) MarshalText() ([]byte, error) {
+func (id ContractHash) MarshalText() ([]byte, error) {
 	return []byte(id.String()), nil
 }
 
-func (id *ContractID) UnmarshalText(text []byte) error {
+func (id *ContractHash) UnmarshalText(text []byte) error {
 	h, err := bitcoin.NewHash32FromStr(string(text))
 	if err != nil {
 		return err
 	}
 
-	*id = ContractID(*h)
+	*id = ContractHash(*h)
 	return nil
 }

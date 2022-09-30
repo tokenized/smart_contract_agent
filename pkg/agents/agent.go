@@ -21,15 +21,25 @@ var (
 type Agent struct {
 	key bitcoin.Key
 
-	contract      *state.Contract
+	contract *state.Contract
+
+	feeLockingScript bitcoin.Script
+
 	contracts     *state.ContractCache
 	balances      *state.BalanceCache
 	transactions  *state.TransactionCache
 	subscriptions *state.SubscriptionCache
 
-	isTest bool
+	broadcaster Broadcaster
+
+	feeRate, dustFeeRate float32
+	isTest               bool
 
 	lock sync.Mutex
+}
+
+type Broadcaster interface {
+	BroadcastTx(context.Context, *wire.MsgTx) error
 }
 
 type TransactionWithOutputs interface {
@@ -44,17 +54,23 @@ type TransactionWithOutputs interface {
 	Output(index int) *wire.TxOut
 }
 
-func NewAgent(key bitcoin.Key, contract *state.Contract, contracts *state.ContractCache,
-	balances *state.BalanceCache, transactions *state.TransactionCache,
-	subscriptions *state.SubscriptionCache) (*Agent, error) {
+func NewAgent(key bitcoin.Key, contract *state.Contract, feeLockingScript bitcoin.Script,
+	contracts *state.ContractCache, balances *state.BalanceCache,
+	transactions *state.TransactionCache, subscriptions *state.SubscriptionCache,
+	broadcaster Broadcaster, feeRate, dustFeeRate float32, isTest bool) (*Agent, error) {
 
 	result := &Agent{
-		key:           key,
-		contract:      contract,
-		contracts:     contracts,
-		balances:      balances,
-		transactions:  transactions,
-		subscriptions: subscriptions,
+		key:              key,
+		contract:         contract,
+		feeLockingScript: feeLockingScript,
+		contracts:        contracts,
+		balances:         balances,
+		transactions:     transactions,
+		subscriptions:    subscriptions,
+		broadcaster:      broadcaster,
+		feeRate:          feeRate,
+		dustFeeRate:      dustFeeRate,
+		isTest:           isTest,
 	}
 
 	return result, nil
@@ -71,11 +87,47 @@ func (a *Agent) LockingScript() bitcoin.Script {
 	return a.contract.LockingScript
 }
 
+func (a *Agent) FeeLockingScript() bitcoin.Script {
+	a.lock.Lock()
+	defer a.lock.Unlock()
+
+	return a.feeLockingScript
+}
+
+func (a *Agent) Key() bitcoin.Key {
+	a.lock.Lock()
+	defer a.lock.Unlock()
+
+	return a.key
+}
+
+func (a *Agent) BroadcastTx(ctx context.Context, tx *wire.MsgTx) error {
+	a.lock.Lock()
+	broadcaster := a.broadcaster
+	a.lock.Unlock()
+
+	return broadcaster.BroadcastTx(ctx, tx)
+}
+
 func (a *Agent) IsTest() bool {
 	a.lock.Lock()
 	defer a.lock.Unlock()
 
 	return a.isTest
+}
+
+func (a *Agent) FeeRate() float32 {
+	a.lock.Lock()
+	defer a.lock.Unlock()
+
+	return a.feeRate
+}
+
+func (a *Agent) DustFeeRate() float32 {
+	a.lock.Lock()
+	defer a.lock.Unlock()
+
+	return a.dustFeeRate
 }
 
 func (a *Agent) ActionIsSupported(action actions.Action) bool {
