@@ -22,14 +22,17 @@ const (
 
 // Conductor is a factory and repository for smart contract agents.
 type Conductor struct {
-	baseKey       bitcoin.Key
-	isTest        bool
-	spyNodeClient spynode.Client
+	baseKey          bitcoin.Key
+	config           agents.Config
+	feeLockingScript bitcoin.Script
 
+	spyNodeClient spynode.Client
 	contracts     *state.ContractCache
 	balances      *state.BalanceCache
 	transactions  *state.TransactionCache
 	subscriptions *state.SubscriptionCache
+
+	broadcaster agents.Broadcaster
 
 	lookup map[state.ContractHash]bitcoin.Hash32
 
@@ -38,18 +41,21 @@ type Conductor struct {
 	lock sync.Mutex
 }
 
-func NewConductor(baseKey bitcoin.Key, isTest bool, spyNodeClient spynode.Client,
-	contracts *state.ContractCache, balances *state.BalanceCache,
-	transactions *state.TransactionCache, subscriptions *state.SubscriptionCache) *Conductor {
+func NewConductor(baseKey bitcoin.Key, config agents.Config, feeLockingScript bitcoin.Script,
+	spyNodeClient spynode.Client, contracts *state.ContractCache, balances *state.BalanceCache,
+	transactions *state.TransactionCache, subscriptions *state.SubscriptionCache,
+	broadcaster agents.Broadcaster) *Conductor {
 
 	return &Conductor{
 		baseKey:              baseKey,
-		isTest:               isTest,
+		config:               config,
+		feeLockingScript:     feeLockingScript,
 		spyNodeClient:        spyNodeClient,
 		contracts:            contracts,
 		balances:             balances,
 		transactions:         transactions,
 		subscriptions:        subscriptions,
+		broadcaster:          broadcaster,
 		lookup:               make(map[state.ContractHash]bitcoin.Hash32),
 		nextSpyNodeMessageID: 1,
 	}
@@ -59,7 +65,7 @@ func (c *Conductor) IsTest() bool {
 	c.lock.Lock()
 	defer c.lock.Unlock()
 
-	return c.isTest
+	return c.config.IsTest
 }
 
 func (c *Conductor) NextSpyNodeMessageID() uint64 {
@@ -174,8 +180,8 @@ func (c *Conductor) AddAgent(ctx context.Context,
 		}, "Already have contract")
 	}
 
-	agent, err := agents.NewAgent(key, addedContract, c.contracts, c.balances, c.transactions,
-		c.subscriptions)
+	agent, err := agents.NewAgent(key, c.config, addedContract, c.feeLockingScript, c.contracts,
+		c.balances, c.transactions, c.subscriptions, c.broadcaster)
 	if err != nil {
 		return nil, errors.Wrap(err, "new agent")
 	}
@@ -220,8 +226,8 @@ func (c *Conductor) GetAgent(ctx context.Context,
 		return nil, nil
 	}
 
-	agent, err := agents.NewAgent(key, contract, c.contracts, c.balances, c.transactions,
-		c.subscriptions)
+	agent, err := agents.NewAgent(key, c.config, contract, c.feeLockingScript, c.contracts,
+		c.balances, c.transactions, c.subscriptions, c.broadcaster)
 	if err != nil {
 		return nil, errors.Wrap(err, "new agent")
 	}

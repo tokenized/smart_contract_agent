@@ -2,6 +2,7 @@ package conductor
 
 import (
 	"context"
+	"time"
 
 	"github.com/tokenized/channels/wallet"
 	"github.com/tokenized/logger"
@@ -21,7 +22,7 @@ func (c *Conductor) HandleTx(ctx context.Context, spyNodeTx *spynode.Tx) {
 	}
 	defer c.transactions.Release(ctx, txid)
 
-	if err := c.UpdateTransaction(ctx, transaction); err != nil {
+	if err := c.UpdateTransaction(ctx, transaction, uint64(time.Now().UnixNano())); err != nil {
 		logger.Error(ctx, "Failed to update tx : %s", err)
 		return
 	}
@@ -75,7 +76,7 @@ func (c *Conductor) HandleTxUpdate(ctx context.Context, txUpdate *spynode.TxUpda
 
 	transaction.Unlock()
 
-	if err := c.UpdateTransaction(ctx, transaction); err != nil {
+	if err := c.UpdateTransaction(ctx, transaction, uint64(time.Now().UnixNano())); err != nil {
 		logger.Error(ctx, "Failed to update tx : %s", err)
 		return
 	}

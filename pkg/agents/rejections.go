@@ -3,6 +3,7 @@ package agents
 import (
 	"context"
 
+	"github.com/tokenized/logger"
 	"github.com/tokenized/pkg/bitcoin"
 	"github.com/tokenized/pkg/txbuilder"
 	"github.com/tokenized/pkg/wire"
@@ -18,16 +19,45 @@ import (
 func (a *Agent) sendReject(ctx context.Context, transaction *state.Transaction,
 	responseInput, responseOutput int, rejectCode int, message string, now uint64) error {
 
+	agentLockingScript := a.LockingScript()
 	tx := txbuilder.NewTxBuilder(a.FeeRate(), a.DustFeeRate())
 
+	// Add input spending output flagged for response.
 	outpoint := wire.OutPoint{
 		Hash:  transaction.TxID(),
 		Index: uint32(responseOutput),
 	}
 	output := transaction.Output(responseOutput)
 
-	if err := tx.AddInput(outpoint, output.LockingScript, output.Value); err != nil {
-		return errors.Wrap(err, "add input")
+	if output.LockingScript.Equal(agentLockingScript) {
+		if err := tx.AddInput(outpoint, output.LockingScript, output.Value); err != nil {
+			return errors.Wrap(err, "add response input")
+		}
+	}
+
+	// Find any other outputs with the contract locking script.
+	outputCount := transaction.OutputCount()
+	for i := 0; i < outputCount; i++ {
+		if i == responseOutput {
+			continue
+		}
+
+		output := transaction.Output(responseOutput)
+		if output.LockingScript.Equal(agentLockingScript) {
+			outpoint := wire.OutPoint{
+				Hash:  transaction.TxID(),
+				Index: uint32(responseOutput),
+			}
+
+			if err := tx.AddInput(outpoint, output.LockingScript, output.Value); err != nil {
+				return errors.Wrap(err, "add input")
+			}
+		}
+	}
+
+	if len(tx.MsgTx.TxIn) == 0 {
+		logger.Warn(ctx, "No contract outputs found for rejection")
+		return nil
 	}
 
 	// Add output with locking script that had the issue. This is referenced by the
@@ -83,9 +113,25 @@ func (a *Agent) sendReject(ctx context.Context, transaction *state.Transaction,
 	}
 
 	if _, err := tx.Sign([]bitcoin.Key{a.Key()}); err != nil {
+		if errors.Cause(err) == txbuilder.ErrInsufficientValue {
+			logger.Warn(ctx, "Insufficient tx funding for reject : %s", err)
+			return nil
+		}
+
 		return errors.Wrap(err, "sign")
 	}
 
+	rejectLabel := "Unknown"
+	rejectData := actions.RejectionsData(uint32(rejectCode))
+	if rejectData != nil {
+		rejectLabel = rejectData.Label
+	}
+
+	logger.InfoWithFields(ctx, []logger.Field{
+		logger.Stringer("response_txid", tx.MsgTx.TxHash()),
+		logger.Int("reject_code", rejectCode),
+		logger.String("reject_label", rejectLabel),
+	}, "Responding with rejection")
 	if err := a.BroadcastTx(ctx, tx.MsgTx); err != nil {
 		return errors.Wrap(err, "broadcast")
 	}

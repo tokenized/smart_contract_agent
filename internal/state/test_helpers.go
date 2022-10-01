@@ -151,6 +151,7 @@ func MockInstrument(ctx context.Context,
 		Formation: &actions.ContractFormation{
 			ContractName: "Test",
 			AdminAddress: adminAddress.Bytes(),
+			ContractFee:  100,
 			Timestamp:    uint64(time.Now().UnixNano()),
 		},
 		FormationTxID: &bitcoin.Hash32{},

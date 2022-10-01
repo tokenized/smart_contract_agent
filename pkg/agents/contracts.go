@@ -11,7 +11,7 @@ import (
 )
 
 func (a *Agent) processContractFormation(ctx context.Context, transaction *state.Transaction,
-	formation *actions.ContractFormation) error {
+	formation *actions.ContractFormation, now uint64) error {
 
 	// First input must be the agent's locking script
 	transaction.Lock()

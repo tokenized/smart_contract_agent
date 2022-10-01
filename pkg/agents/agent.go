@@ -18,8 +18,16 @@ var (
 	ErrNotRelevant = errors.New("Not Relevant")
 )
 
+type Config struct {
+	IsTest      bool    `default:"true" envconfig:"IS_TEST" json:"is_test"`
+	FeeRate     float32 `default:"0.05" envconfig:"FEE_RATE" json:"fee_rate"`
+	DustFeeRate float32 `default:"0.00" envconfig:"DUST_FEE_RATE" json:"dust_fee_rate"`
+	MinFeeRate  float32 `default:"0.05" envconfig:"MIN_FEE_RATE" json:"min_fee_rate"`
+}
+
 type Agent struct {
-	key bitcoin.Key
+	key    bitcoin.Key
+	config Config
 
 	contract *state.Contract
 
@@ -31,9 +39,6 @@ type Agent struct {
 	subscriptions *state.SubscriptionCache
 
 	broadcaster Broadcaster
-
-	feeRate, dustFeeRate float32
-	isTest               bool
 
 	lock sync.Mutex
 }
@@ -54,13 +59,14 @@ type TransactionWithOutputs interface {
 	Output(index int) *wire.TxOut
 }
 
-func NewAgent(key bitcoin.Key, contract *state.Contract, feeLockingScript bitcoin.Script,
-	contracts *state.ContractCache, balances *state.BalanceCache,
+func NewAgent(key bitcoin.Key, config Config, contract *state.Contract,
+	feeLockingScript bitcoin.Script, contracts *state.ContractCache, balances *state.BalanceCache,
 	transactions *state.TransactionCache, subscriptions *state.SubscriptionCache,
-	broadcaster Broadcaster, feeRate, dustFeeRate float32, isTest bool) (*Agent, error) {
+	broadcaster Broadcaster) (*Agent, error) {
 
 	result := &Agent{
 		key:              key,
+		config:           config,
 		contract:         contract,
 		feeLockingScript: feeLockingScript,
 		contracts:        contracts,
@@ -68,9 +74,6 @@ func NewAgent(key bitcoin.Key, contract *state.Contract, feeLockingScript bitcoi
 		transactions:     transactions,
 		subscriptions:    subscriptions,
 		broadcaster:      broadcaster,
-		feeRate:          feeRate,
-		dustFeeRate:      dustFeeRate,
-		isTest:           isTest,
 	}
 
 	return result, nil
@@ -85,6 +88,31 @@ func (a *Agent) LockingScript() bitcoin.Script {
 	defer a.contract.Unlock()
 
 	return a.contract.LockingScript
+}
+
+func (a *Agent) ContractFee() uint64 {
+	a.contract.Lock()
+	defer a.contract.Unlock()
+
+	return a.contract.Formation.ContractFee
+}
+
+func (a *Agent) AdminLockingScript() bitcoin.Script {
+	a.lock.Lock()
+	defer a.lock.Unlock()
+	a.contract.Lock()
+	defer a.contract.Unlock()
+
+	return a.contract.AdminLockingScript()
+}
+
+func (a *Agent) ContractIsExpired(now uint64) bool {
+	a.lock.Lock()
+	defer a.lock.Unlock()
+	a.contract.Lock()
+	defer a.contract.Unlock()
+
+	return a.contract.IsExpired(now)
 }
 
 func (a *Agent) FeeLockingScript() bitcoin.Script {
@@ -113,21 +141,28 @@ func (a *Agent) IsTest() bool {
 	a.lock.Lock()
 	defer a.lock.Unlock()
 
-	return a.isTest
+	return a.config.IsTest
 }
 
 func (a *Agent) FeeRate() float32 {
 	a.lock.Lock()
 	defer a.lock.Unlock()
 
-	return a.feeRate
+	return a.config.FeeRate
 }
 
 func (a *Agent) DustFeeRate() float32 {
 	a.lock.Lock()
 	defer a.lock.Unlock()
 
-	return a.dustFeeRate
+	return a.config.DustFeeRate
+}
+
+func (a *Agent) MinFeeRate() float32 {
+	a.lock.Lock()
+	defer a.lock.Unlock()
+
+	return a.config.MinFeeRate
 }
 
 func (a *Agent) ActionIsSupported(action actions.Action) bool {
@@ -164,13 +199,17 @@ func (a *Agent) ActionIsSupported(action actions.Action) bool {
 }
 
 func (a *Agent) Process(ctx context.Context, transaction *state.Transaction,
-	actions []actions.Action) error {
+	actions []actions.Action, now uint64) error {
 
 	ctx = logger.ContextWithLogFields(ctx, logger.Stringer("txid", transaction.GetTxID()))
 	logger.Info(ctx, "Processing transaction")
 
+	// TODO If the contract locking script has changed, then reject all actions. --ce
+
+	// TODO If the contract is expired, then reject all actions. --ce
+
 	for i, action := range actions {
-		if err := a.processAction(ctx, transaction, action); err != nil {
+		if err := a.processAction(ctx, transaction, action, now); err != nil {
 			return errors.Wrapf(err, "process action %d: %s", i, action.Code())
 		}
 	}
@@ -179,14 +218,14 @@ func (a *Agent) Process(ctx context.Context, transaction *state.Transaction,
 }
 
 func (a *Agent) processAction(ctx context.Context, transaction *state.Transaction,
-	action actions.Action) error {
+	action actions.Action, now uint64) error {
 
 	switch act := action.(type) {
 	case *actions.ContractOffer:
 	case *actions.ContractAmendment:
 
 	case *actions.ContractFormation:
-		return a.processContractFormation(ctx, transaction, act)
+		return a.processContractFormation(ctx, transaction, act, now)
 
 	case *actions.ContractAddressChange:
 
@@ -194,52 +233,52 @@ func (a *Agent) processAction(ctx context.Context, transaction *state.Transactio
 	case *actions.BodyOfAgreementAmendment:
 
 	case *actions.BodyOfAgreementFormation:
-		return a.processBodyOfAgreementFormation(ctx, transaction, act)
+		return a.processBodyOfAgreementFormation(ctx, transaction, act, now)
 
 	case *actions.InstrumentDefinition:
 	case *actions.InstrumentModification:
 
 	case *actions.InstrumentCreation:
-		return a.processInstrumentCreation(ctx, transaction, act)
+		return a.processInstrumentCreation(ctx, transaction, act, now)
 
 	case *actions.Transfer:
-		return a.processTransfer(ctx, transaction, act)
+		return a.processTransfer(ctx, transaction, act, now)
 
 	case *actions.Settlement:
-		return a.processSettlement(ctx, transaction, act)
+		return a.processSettlement(ctx, transaction, act, now)
 
 	case *actions.Proposal:
 
 	case *actions.Vote:
-		return a.processVote(ctx, transaction, act)
+		return a.processVote(ctx, transaction, act, now)
 
 	case *actions.BallotCast:
 
 	case *actions.BallotCounted:
-		return a.processBallotCounted(ctx, transaction, act)
+		return a.processBallotCounted(ctx, transaction, act, now)
 
 	case *actions.Result:
-		return a.processGovernanceResult(ctx, transaction, act)
+		return a.processGovernanceResult(ctx, transaction, act, now)
 
 	case *actions.Order:
 
 	case *actions.Freeze:
-		return a.processFreeze(ctx, transaction, act)
+		return a.processFreeze(ctx, transaction, act, now)
 
 	case *actions.Thaw:
-		return a.processThaw(ctx, transaction, act)
+		return a.processThaw(ctx, transaction, act, now)
 
 	case *actions.Confiscation:
-		return a.processConfiscation(ctx, transaction, act)
+		return a.processConfiscation(ctx, transaction, act, now)
 
 	case *actions.Reconciliation:
-		return a.processReconciliation(ctx, transaction, act)
+		return a.processReconciliation(ctx, transaction, act, now)
 
 	case *actions.Message:
-		return a.processMessage(ctx, transaction, act)
+		return a.processMessage(ctx, transaction, act, now)
 
 	case *actions.Rejection:
-		return a.processRejection(ctx, transaction, act)
+		return a.processRejection(ctx, transaction, act, now)
 
 	default:
 		return fmt.Errorf("Action not supported: %s", action.Code())

@@ -14,8 +14,10 @@ import (
 	"github.com/tokenized/pkg/bitcoin"
 	"github.com/tokenized/pkg/expanded_tx"
 	"github.com/tokenized/pkg/storage"
+	"github.com/tokenized/pkg/wire"
 	"github.com/tokenized/smart_contract_agent/internal/state"
 	"github.com/tokenized/smart_contract_agent/internal/whatsonchain"
+	"github.com/tokenized/smart_contract_agent/pkg/agents"
 	"github.com/tokenized/smart_contract_agent/pkg/conductor"
 	"github.com/tokenized/threads"
 
@@ -31,17 +33,20 @@ var (
 type Config struct {
 	BaseKey bitcoin.Key `envconfig:"BASE_KEY" json:"base_key" masked:"true"`
 
-	IsTest bool `default:"true" envconfig:"IS_TEST" json:"is_test"`
-
 	Cache cacher.Config `json:"cache"`
 
 	Wallet  wallet.Config      `json:"wallet"`
 	Storage storage.Config     `json:"storage"`
 	Logger  logger.SetupConfig `json:"logger"`
 
-	ContractKey        bitcoin.Key     `envconfig:"CONTRACT_KEY" json:"contract_key" masked:"true"`
-	WhatsOnChainAPIKey string          `envconfig:"WOC_API_KEY" json:"api_key" masked:"true"`
-	Network            bitcoin.Network `default:"mainnet" json:"network" envconfig:"NETWORK"`
+	ContractKey        bitcoin.Key `envconfig:"CONTRACT_KEY" json:"contract_key" masked:"true"`
+	WhatsOnChainAPIKey string      `envconfig:"WOC_API_KEY" json:"api_key" masked:"true"`
+
+	Network bitcoin.Network `default:"mainnet" json:"network" envconfig:"NETWORK"`
+
+	FeeAddress bitcoin.Address `envconfig:"FEE_ADDRESS" json:"fee_address"`
+
+	Agents agents.Config `json:"agents"`
 }
 
 func main() {
@@ -100,8 +105,10 @@ func main() {
 		logger.Fatal(ctx, "main : Failed to create subscription cache : %s", err)
 	}
 
-	conductor := conductor.NewConductor(cfg.BaseKey, cfg.IsTest, nil, contracts, balances,
-		transactions, subscriptions)
+	broadcaster := NewNoopBroadcaster()
+
+	conductor := conductor.NewConductor(cfg.BaseKey, cfg.Agents, nil, nil, contracts, balances,
+		transactions, subscriptions, broadcaster)
 
 	var cacheWait, loadWait sync.WaitGroup
 
@@ -226,7 +233,7 @@ func loadTx(ctx context.Context, conductor *conductor.Conductor,
 		return errors.Wrapf(err, "get inputs: %s", txid)
 	}
 
-	if err := conductor.UpdateTransaction(ctx, transaction); err != nil {
+	if err := conductor.UpdateTransaction(ctx, transaction, uint64(time.UnixNano())); err != nil {
 		return errors.Wrapf(err, "update transaction")
 	}
 
@@ -287,4 +294,14 @@ func load(ctx context.Context, interrupt <-chan interface{}, conductor *conducto
 
 		index++
 	}
+}
+
+type NoopBroadcaster struct{}
+
+func NewNoopBroadcaster() *NoopBroadcaster {
+	return &NoopBroadcaster{}
+}
+
+func (*NoopBroadcaster) BroadcastTx(context.Context, *wire.MsgTx) error {
+	return nil
 }

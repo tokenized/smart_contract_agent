@@ -2,7 +2,6 @@ package agents
 
 import (
 	"context"
-	"encoding/json"
 	mathRand "math/rand"
 	"testing"
 	"time"
@@ -11,6 +10,7 @@ import (
 	"github.com/tokenized/logger"
 	"github.com/tokenized/pkg/bitcoin"
 	"github.com/tokenized/pkg/expanded_tx"
+	"github.com/tokenized/pkg/json"
 	"github.com/tokenized/pkg/storage"
 	"github.com/tokenized/pkg/txbuilder"
 	"github.com/tokenized/smart_contract_agent/internal/state"
@@ -25,7 +25,8 @@ func Test_Transfers_Basic(t *testing.T) {
 
 	caches := state.StartTestCaches(ctx, t, store, cacher.DefaultConfig(), time.Second)
 
-	contractKey, contractLockingScript, adminKey, contract, instrument := state.MockInstrument(ctx, caches)
+	contractKey, contractLockingScript, adminKey, contract, instrument := state.MockInstrument(ctx,
+		caches)
 	_, feeLockingScript, _ := state.MockKey()
 
 	adminLockingScript, err := adminKey.LockingScript()
@@ -42,7 +43,7 @@ func Test_Transfers_Basic(t *testing.T) {
 	var receiverKeys []bitcoin.Key
 	var receiverLockingScripts []bitcoin.Script
 	var receiverQuantities []uint64
-	for i := 0; i < 10; i++ {
+	for i := 0; i < 100; i++ {
 		instrumentTransfer := &actions.InstrumentTransferField{
 			ContractIndex:  0,
 			InstrumentType: string(instrument.InstrumentType[:]),
@@ -90,7 +91,7 @@ func Test_Transfers_Basic(t *testing.T) {
 			})
 
 		// Add contract output
-		if err := tx.AddOutput(contractLockingScript, 100, false, false); err != nil {
+		if err := tx.AddOutput(contractLockingScript, 200, false, false); err != nil {
 			t.Fatalf("Failed to add contract output : %s", err)
 		}
 
@@ -106,13 +107,13 @@ func Test_Transfers_Basic(t *testing.T) {
 
 		// Add funding
 		fundingKey, fundingLockingScript, _ := state.MockKey()
-		fundingOutpoint := state.MockOutPoint(fundingLockingScript, 200)
+		fundingOutpoint := state.MockOutPoint(fundingLockingScript, 300)
 		spentOutputs = append(spentOutputs, &expanded_tx.Output{
 			LockingScript: fundingLockingScript,
-			Value:         200,
+			Value:         300,
 		})
 
-		if err := tx.AddInput(*fundingOutpoint, fundingLockingScript, 200); err != nil {
+		if err := tx.AddInput(*fundingOutpoint, fundingLockingScript, 300); err != nil {
 			t.Fatalf("Failed to add input : %s", err)
 		}
 
@@ -135,14 +136,45 @@ func Test_Transfers_Basic(t *testing.T) {
 			t.Fatalf("Failed to add transaction : %s", err)
 		}
 
-		if err := agent.Process(ctx, transaction, []actions.Action{transfer}); err != nil {
+		now := uint64(time.Now().UnixNano())
+		if err := agent.Process(ctx, transaction, []actions.Action{transfer}, now); err != nil {
 			t.Fatalf("Failed to process transaction : %s", err)
 		}
+
+		responseTx := broadcaster.GetLastTx()
+		if responseTx == nil {
+			t.Fatalf("No response tx")
+		}
+
+		t.Logf("Response Tx : %s", responseTx)
+
+		// Find settlement action
+		var settlement *actions.Settlement
+		for _, txout := range responseTx.TxOut {
+			action, err := protocol.Deserialize(txout.LockingScript, true)
+			if err != nil {
+				continue
+			}
+
+			s, ok := action.(*actions.Settlement)
+			if ok {
+				settlement = s
+			}
+		}
+
+		if settlement == nil {
+			t.Fatalf("Missing settlement action")
+		}
+
+		js, _ := json.MarshalIndent(settlement, "", "  ")
+		t.Logf("Settlement : %s", js)
 
 		caches.Transactions.Release(ctx, transaction.GetTxID())
 	}
 
 	receiverOffset := 0
+	var finalLockingScripts []bitcoin.Script
+	var finalQuantities []uint64
 	for {
 		instrumentTransfer := &actions.InstrumentTransferField{
 			ContractIndex:  0,
@@ -171,6 +203,7 @@ func Test_Transfers_Basic(t *testing.T) {
 			quantity := receiverQuantities[receiverOffset]
 			keys = append(keys, receiverKeys[receiverOffset])
 			receiverOffset++
+			senderQuantity += quantity
 
 			// Add sender
 			instrumentTransfer.InstrumentSenders = append(instrumentTransfer.InstrumentSenders,
@@ -197,8 +230,10 @@ func Test_Transfers_Basic(t *testing.T) {
 			if quantity > senderQuantity {
 				quantity = senderQuantity
 			}
+			finalQuantities = append(finalQuantities, quantity)
 
-			_, _, ra := state.MockKey()
+			_, lockingScript, ra := state.MockKey()
+			finalLockingScripts = append(finalLockingScripts, lockingScript)
 			instrumentTransfer.InstrumentReceivers = append(instrumentTransfer.InstrumentReceivers,
 				&actions.InstrumentReceiverField{
 					Address:  ra.Bytes(),
@@ -212,7 +247,7 @@ func Test_Transfers_Basic(t *testing.T) {
 		}
 
 		// Add contract output
-		if err := tx.AddOutput(contractLockingScript, 100, false, false); err != nil {
+		if err := tx.AddOutput(contractLockingScript, 200, false, false); err != nil {
 			t.Fatalf("Failed to add contract output : %s", err)
 		}
 
@@ -229,13 +264,13 @@ func Test_Transfers_Basic(t *testing.T) {
 		// Add funding
 		key, lockingScript, _ := state.MockKey()
 		keys = append(keys, key)
-		outpoint := state.MockOutPoint(lockingScript, 200)
+		outpoint := state.MockOutPoint(lockingScript, 300)
 		spentOutputs = append(spentOutputs, &expanded_tx.Output{
 			LockingScript: lockingScript,
-			Value:         200,
+			Value:         300,
 		})
 
-		if err := tx.AddInput(*outpoint, lockingScript, 200); err != nil {
+		if err := tx.AddInput(*outpoint, lockingScript, 300); err != nil {
 			t.Fatalf("Failed to add input : %s", err)
 		}
 
@@ -258,11 +293,68 @@ func Test_Transfers_Basic(t *testing.T) {
 			t.Fatalf("Failed to add transaction : %s", err)
 		}
 
-		if err := agent.Process(ctx, transaction, []actions.Action{transfer}); err != nil {
+		now := uint64(time.Now().UnixNano())
+		if err := agent.Process(ctx, transaction, []actions.Action{transfer}, now); err != nil {
 			t.Fatalf("Failed to process transaction : %s", err)
 		}
 
+		responseTx := broadcaster.GetLastTx()
+		if responseTx == nil {
+			t.Fatalf("No response tx")
+		}
+
+		t.Logf("Response Tx : %s", responseTx)
+
+		// Find settlement action
+		var settlement *actions.Settlement
+		for _, txout := range responseTx.TxOut {
+			action, err := protocol.Deserialize(txout.LockingScript, true)
+			if err != nil {
+				continue
+			}
+
+			s, ok := action.(*actions.Settlement)
+			if ok {
+				settlement = s
+			}
+		}
+
+		if settlement == nil {
+			t.Fatalf("Missing settlement action")
+		}
+
+		js, _ := json.MarshalIndent(settlement, "", "  ")
+		t.Logf("Settlement : %s", js)
+
 		caches.Transactions.Release(ctx, transaction.GetTxID())
+	}
+
+	// Check balances
+	for i, lockingScript := range finalLockingScripts {
+		balance, err := caches.Balances.Get(ctx, contractLockingScript, instrument.InstrumentCode,
+			lockingScript)
+		if err != nil {
+			t.Fatalf("Failed to get final balance : %s", err)
+		}
+
+		if balance == nil {
+			t.Fatalf("Missing final balance : %s", lockingScript)
+		}
+
+		balance.Lock()
+		if balance.Quantity != finalQuantities[i] {
+			t.Errorf("Wrong final balance : got %d, want %d : %s", balance.Quantity,
+				finalQuantities[i], lockingScript)
+		} else {
+			t.Logf("Verified balance : %d : %s", balance.Quantity, lockingScript)
+		}
+
+		if len(balance.Adjustments) != 0 {
+			t.Errorf("Remaining adjustements : %d : %s", len(balance.Adjustments), lockingScript)
+		}
+		balance.Unlock()
+
+		caches.Balances.Release(ctx, contractLockingScript, instrument.InstrumentCode, balance)
 	}
 
 	caches.Contracts.Release(ctx, contractLockingScript)
@@ -385,7 +477,8 @@ func Test_Transfers_InsufficientQuantity(t *testing.T) {
 		t.Fatalf("Failed to add transaction : %s", err)
 	}
 
-	if err := agent.Process(ctx, transaction, []actions.Action{transfer}); err != nil {
+	now := uint64(time.Now().UnixNano())
+	if err := agent.Process(ctx, transaction, []actions.Action{transfer}, now); err != nil {
 		t.Fatalf("Failed to process transaction : %s", err)
 	}
 

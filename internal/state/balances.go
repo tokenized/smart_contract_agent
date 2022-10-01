@@ -47,6 +47,8 @@ type Balance struct {
 	sync.Mutex `bsor:"-"`
 }
 
+type Balances []*Balance
+
 type BalanceAdjustmentCode byte
 
 type BalanceAdjustment struct {
@@ -95,7 +97,7 @@ func (c *BalanceCache) Add(ctx context.Context, contractLockingScript bitcoin.Sc
 }
 
 func (c *BalanceCache) AddMulti(ctx context.Context, contractLockingScript bitcoin.Script,
-	instrumentCode InstrumentCode, balances []*Balance) ([]*Balance, error) {
+	instrumentCode InstrumentCode, balances Balances) (Balances, error) {
 
 	pathPrefix := balancePathPrefix(contractLockingScript, instrumentCode)
 
@@ -109,7 +111,7 @@ func (c *BalanceCache) AddMulti(ctx context.Context, contractLockingScript bitco
 		return nil, errors.Wrap(err, "add set multi")
 	}
 
-	result := make([]*Balance, len(addedValues))
+	result := make(Balances, len(addedValues))
 	for i, value := range addedValues {
 		result[i] = value.(*Balance)
 	}
@@ -136,7 +138,7 @@ func (c *BalanceCache) Get(ctx context.Context, contractLockingScript bitcoin.Sc
 }
 
 func (c *BalanceCache) GetMulti(ctx context.Context, contractLockingScript bitcoin.Script,
-	instrumentCode InstrumentCode, lockingScripts []bitcoin.Script) ([]*Balance, error) {
+	instrumentCode InstrumentCode, lockingScripts []bitcoin.Script) (Balances, error) {
 
 	pathPrefix := balancePathPrefix(contractLockingScript, instrumentCode)
 	hashes := make([]bitcoin.Hash32, len(lockingScripts))
@@ -149,7 +151,7 @@ func (c *BalanceCache) GetMulti(ctx context.Context, contractLockingScript bitco
 		return nil, errors.Wrap(err, "get set multi")
 	}
 
-	result := make([]*Balance, len(values))
+	result := make(Balances, len(values))
 	for i, value := range values {
 		if value == nil {
 			continue
@@ -178,7 +180,7 @@ func (c *BalanceCache) Release(ctx context.Context, contractLockingScript bitcoi
 }
 
 func (c *BalanceCache) ReleaseMulti(ctx context.Context, contractLockingScript bitcoin.Script,
-	instrumentCode InstrumentCode, balances []*Balance) error {
+	instrumentCode InstrumentCode, balances Balances) error {
 
 	pathPrefix := balancePathPrefix(contractLockingScript, instrumentCode)
 	hashes := make([]bitcoin.Hash32, len(balances))
@@ -213,7 +215,7 @@ func (b *Balance) PendingQuantity() uint64 {
 // SettlePendingQuantity is the quantity to put in a settlement that is currently being built. It
 // doesn't subtract frozen amounts, but does include all pending adjustements.
 func (b *Balance) SettlePendingQuantity() uint64 {
-	quantity := b.PendingQuantity()
+	quantity := b.Quantity
 	for _, adj := range b.Adjustments {
 		switch adj.Code {
 		case FreezeCode:
@@ -226,6 +228,12 @@ func (b *Balance) SettlePendingQuantity() uint64 {
 		case CreditCode, MultiContractCreditCode:
 			quantity += adj.Quantity
 		}
+	}
+
+	if b.pendingDirection { // credit
+		quantity += b.pendingQuantity
+	} else { // debit
+		quantity -= b.pendingQuantity
 	}
 
 	return quantity
@@ -285,28 +293,67 @@ func (b *Balance) AddPendingCredit(quantity uint64) error {
 }
 
 func (b *Balance) RevertPending(txid *bitcoin.Hash32) {
+	var newAdjustments []*BalanceAdjustment
+	for _, adj := range b.Adjustments {
+		if txid.Equal(adj.TxID) {
+			continue
+		}
+
+		newAdjustments = append(newAdjustments, adj)
+	}
+	b.Adjustments = newAdjustments
+
 	b.pendingDirection = false
 	b.pendingQuantity = 0
 }
 
-func (b *Balance) FinalizePending(txid *bitcoin.Hash32) {
-	if b.pendingDirection { // credit
-		b.Adjustments = append(b.Adjustments, &BalanceAdjustment{
-			Code:     CreditCode,
-			Quantity: b.pendingQuantity,
-			TxID:     txid,
-		})
-	} else { // debit
-		b.Adjustments = append(b.Adjustments, &BalanceAdjustment{
-			Code:     DebitCode,
-			Quantity: b.pendingQuantity,
-			TxID:     txid,
-		})
+func (b *Balance) FinalizePending(txid *bitcoin.Hash32, isMultiContract bool) {
+	var code BalanceAdjustmentCode
+	if isMultiContract {
+		if b.pendingDirection { // credit
+			code = MultiContractCreditCode
+		} else { // debit
+			code = MultiContractDebitCode
+		}
+	} else {
+		if b.pendingDirection { // credit
+			code = CreditCode
+		} else { // debit
+			code = DebitCode
+		}
 	}
+
+	b.Adjustments = append(b.Adjustments, &BalanceAdjustment{
+		Code:     code,
+		Quantity: b.pendingQuantity,
+		TxID:     txid,
+	})
 
 	b.pendingDirection = false
 	b.pendingQuantity = 0
 	b.isModified = true
+}
+
+func (b *Balance) Settle(transferTxID, settlementTxID bitcoin.Hash32, now uint64) {
+	var newAdjustments []*BalanceAdjustment
+	for _, adj := range b.Adjustments {
+		if transferTxID.Equal(adj.TxID) {
+			switch adj.Code {
+			case DebitCode, MultiContractDebitCode:
+				b.Quantity -= adj.Quantity
+			case CreditCode, MultiContractCreditCode:
+				b.Quantity += adj.Quantity
+			}
+			b.TxID = &settlementTxID
+			b.Timestamp = now
+			b.isModified = true
+
+			continue
+		}
+
+		newAdjustments = append(newAdjustments, adj)
+	}
+	b.Adjustments = newAdjustments
 }
 
 func (b *Balance) MarkModified() {
@@ -426,5 +473,82 @@ func (v BalanceAdjustmentCode) String() string {
 		return "multi_contract_credit"
 	default:
 		return ""
+	}
+}
+
+// AppendBalances is an optimization on the builtin append function which I believe appends one item
+// at a time. This creates a new slice and copies the two slices into the new slice.
+func AppendBalances(left, right Balances) Balances {
+	llen := len(left)
+	if llen == 0 {
+		return right
+	}
+
+	rlen := len(right)
+	if rlen == 0 {
+		return left
+	}
+
+	result := make(Balances, llen+rlen, llen+rlen)
+	copy(result, left)
+	copy(result[llen:], right)
+	return result
+}
+
+// AppendZeroBalance adds a new zero balance to the set if there isn't already a balance with the
+// specified locking script.
+// TODO We might want to sort these to prevent deadlocks between transfers where one transfer could
+// lock a balance and be dependent on another balance locked by another transfer, but the other
+// transfer is dependent on this balance. --ce
+func AppendZeroBalance(balances Balances, lockingScript bitcoin.Script) Balances {
+	for _, balance := range balances {
+		if balance.LockingScript.Equal(lockingScript) {
+			return balances // already contains so no append
+		}
+	}
+
+	return append(balances, &Balance{
+		LockingScript: lockingScript,
+	})
+}
+
+// Find returns the balance with the specified locking script, or nil if there isn't a match.
+func (bs *Balances) Find(lockingScript bitcoin.Script) *Balance {
+	for _, b := range *bs {
+		if b.LockingScript.Equal(lockingScript) {
+			return b
+		}
+	}
+
+	return nil
+}
+
+func (bs *Balances) RevertPending(txid *bitcoin.Hash32) {
+	for _, b := range *bs {
+		b.RevertPending(txid)
+	}
+}
+
+func (bs *Balances) FinalizePending(txid *bitcoin.Hash32, isMultiContract bool) {
+	for _, b := range *bs {
+		b.FinalizePending(txid, isMultiContract)
+	}
+}
+
+func (bs *Balances) Settle(transferTxID, settlementTxID bitcoin.Hash32, now uint64) {
+	for _, b := range *bs {
+		b.Settle(transferTxID, settlementTxID, now)
+	}
+}
+
+func (bs *Balances) Lock() {
+	for _, b := range *bs {
+		b.Lock()
+	}
+}
+
+func (bs *Balances) Unlock() {
+	for _, b := range *bs {
+		b.Unlock()
 	}
 }

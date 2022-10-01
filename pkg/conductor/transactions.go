@@ -65,14 +65,16 @@ func (c *Conductor) addTx(ctx context.Context, txid bitcoin.Hash32,
 	return addedTx, nil
 }
 
-func (c *Conductor) UpdateTransaction(ctx context.Context, transaction *state.Transaction) error {
+func (c *Conductor) UpdateTransaction(ctx context.Context, transaction *state.Transaction,
+	now uint64) error {
+
 	transaction.Lock()
 	isProcessed := transaction.IsProcessed
 	txState := transaction.State
 	transaction.Unlock()
 
 	if !isProcessed && txState&wallet.TxStateSafe != 0 {
-		if err := c.processTransaction(ctx, transaction); err != nil {
+		if err := c.processTransaction(ctx, transaction, now); err != nil {
 			return errors.Wrap(err, "process")
 		}
 
@@ -92,7 +94,9 @@ func (c *Conductor) UpdateTransaction(ctx context.Context, transaction *state.Tr
 	return nil
 }
 
-func (c *Conductor) processTransaction(ctx context.Context, transaction *state.Transaction) error {
+func (c *Conductor) processTransaction(ctx context.Context, transaction *state.Transaction,
+	now uint64) error {
+
 	agentActionsList, err := c.compileTx(ctx, transaction)
 	if err != nil {
 		return errors.Wrap(err, "compile tx")
@@ -105,7 +109,8 @@ func (c *Conductor) processTransaction(ctx context.Context, transaction *state.T
 	defer c.releaseAgentActions(ctx, agentActionsList)
 
 	for _, agentActions := range agentActionsList {
-		if err := agentActions.agent.Process(ctx, transaction, agentActions.actions); err != nil {
+		if err := agentActions.agent.Process(ctx, transaction, agentActions.actions,
+			now); err != nil {
 			var codes []string
 			for _, action := range agentActions.actions {
 				codes = append(codes, action.Code())

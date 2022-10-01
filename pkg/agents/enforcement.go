@@ -11,7 +11,7 @@ import (
 )
 
 func (a *Agent) processFreeze(ctx context.Context, transaction *state.Transaction,
-	freeze *actions.Freeze) error {
+	freeze *actions.Freeze, now uint64) error {
 
 	// First input must be the agent's locking script
 	transaction.Lock()
@@ -32,7 +32,7 @@ func (a *Agent) processFreeze(ctx context.Context, transaction *state.Transactio
 }
 
 func (a *Agent) processThaw(ctx context.Context, transaction *state.Transaction,
-	thaw *actions.Thaw) error {
+	thaw *actions.Thaw, now uint64) error {
 
 	// First input must be the agent's locking script
 	transaction.Lock()
@@ -53,7 +53,7 @@ func (a *Agent) processThaw(ctx context.Context, transaction *state.Transaction,
 }
 
 func (a *Agent) processConfiscation(ctx context.Context, transaction *state.Transaction,
-	confiscation *actions.Confiscation) error {
+	confiscation *actions.Confiscation, now uint64) error {
 
 	// First input must be the agent's locking script
 	transaction.Lock()
@@ -74,7 +74,7 @@ func (a *Agent) processConfiscation(ctx context.Context, transaction *state.Tran
 }
 
 func (a *Agent) processReconciliation(ctx context.Context, transaction *state.Transaction,
-	reconciliation *actions.Reconciliation) error {
+	reconciliation *actions.Reconciliation, now uint64) error {
 
 	// First input must be the agent's locking script
 	transaction.Lock()

@@ -29,14 +29,16 @@ var (
 type Config struct {
 	BaseKey bitcoin.Key `envconfig:"BASE_KEY" json:"base_key" masked:"true"`
 
-	IsTest bool `default:"true" envconfig:"IS_TEST" json:"is_test"`
-
 	Cache cacher.Config `json:"cache"`
 
 	Wallet  wallet.Config        `json:"wallet"`
 	Storage storage.Config       `json:"storage"`
 	SpyNode spyNodeClient.Config `json:"spynode"`
 	Logger  logger.SetupConfig   `json:"logger"`
+
+	FeeAddress bitcoin.Address `envconfig:"FEE_ADDRESS" json:"fee_address"`
+
+	Agents agents.Config `json:"agents"`
 }
 
 func main() {
@@ -106,7 +108,7 @@ func main() {
 		logger.Fatal(ctx, "main : Failed to create subscription cache : %s", err)
 	}
 
-	conductor := conductor.NewConductor(cfg.BaseKey, cfg.IsTest, spyNode, contracts, balances,
+	conductor := conductor.NewConductor(cfg.BaseKey, cfg.Agents, spyNode, contracts, balances,
 		transactions, subscriptions)
 	spyNode.RegisterHandler(conductor)
 

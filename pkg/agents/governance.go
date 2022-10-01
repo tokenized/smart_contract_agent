@@ -11,7 +11,7 @@ import (
 )
 
 func (a *Agent) processVote(ctx context.Context, transaction *state.Transaction,
-	vote *actions.Vote) error {
+	vote *actions.Vote, now uint64) error {
 
 	// First input must be the agent's locking script
 	transaction.Lock()
@@ -32,7 +32,7 @@ func (a *Agent) processVote(ctx context.Context, transaction *state.Transaction,
 }
 
 func (a *Agent) processBallotCounted(ctx context.Context, transaction *state.Transaction,
-	ballotCounted *actions.BallotCounted) error {
+	ballotCounted *actions.BallotCounted, now uint64) error {
 
 	// First input must be the agent's locking script
 	transaction.Lock()
@@ -53,7 +53,7 @@ func (a *Agent) processBallotCounted(ctx context.Context, transaction *state.Tra
 }
 
 func (a *Agent) processGovernanceResult(ctx context.Context, transaction *state.Transaction,
-	result *actions.Result) error {
+	result *actions.Result, now uint64) error {
 
 	// First input must be the agent's locking script
 	transaction.Lock()

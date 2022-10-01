@@ -147,6 +147,29 @@ func ContractPath(lockingScript bitcoin.Script) string {
 	return fmt.Sprintf("%s/%s", contractPath, CalculateContractHash(lockingScript))
 }
 
+func (c *Contract) AdminLockingScript() bitcoin.Script {
+	if c.Formation == nil {
+		return nil
+	}
+
+	ra, err := bitcoin.DecodeRawAddress(c.Formation.AdminAddress)
+	if err != nil {
+		return nil
+	}
+
+	lockingScript, err := ra.LockingScript()
+	if err != nil {
+		return nil
+	}
+
+	return lockingScript
+}
+
+func (c *Contract) IsExpired(now uint64) bool {
+	return c.Formation != nil && c.Formation.ContractExpiration != 0 &&
+		c.Formation.ContractExpiration < now
+}
+
 func (c *Contract) GetInstrument(instrumentCode InstrumentCode) *Instrument {
 	for _, instrument := range c.Instruments {
 		if bytes.Equal(instrument.InstrumentCode[:], instrumentCode[:]) {

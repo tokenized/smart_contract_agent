@@ -15,7 +15,7 @@ import (
 )
 
 func (a *Agent) processInstrumentCreation(ctx context.Context, transaction *state.Transaction,
-	creation *actions.InstrumentCreation) error {
+	creation *actions.InstrumentCreation, now uint64) error {
 
 	// First input must be the agent's locking script
 	transaction.Lock()

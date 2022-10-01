@@ -9,7 +9,7 @@ import (
 )
 
 func (a *Agent) processMessage(ctx context.Context, transaction *state.Transaction,
-	message *actions.Message) error {
+	message *actions.Message, now uint64) error {
 
 	// TODO Verify appropriate input or output belongs to this contract.
 	// for _, senderIndex := range act.SenderIndexes {
@@ -46,7 +46,7 @@ func (a *Agent) processMessage(ctx context.Context, transaction *state.Transacti
 }
 
 func (a *Agent) processRejection(ctx context.Context, transaction *state.Transaction,
-	rejection *actions.Rejection) error {
+	rejection *actions.Rejection, now uint64) error {
 
 	// TODO Verify appropriate input or output belongs to this contract.
 	// inputCount := tx.InputCount()
