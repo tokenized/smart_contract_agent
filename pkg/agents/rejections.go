@@ -49,7 +49,8 @@ func (a *Agent) sendReject(ctx context.Context, transaction *state.Transaction,
 				Index: uint32(responseOutput),
 			}
 
-			if err := tx.AddInput(outpoint, output.LockingScript, output.Value); err != nil {
+			if err := tx.AddInput(outpoint, output.LockingScript, output.Value); err != nil &&
+				errors.Cause(err) != txbuilder.ErrDuplicateInput {
 				return errors.Wrap(err, "add input")
 			}
 		}

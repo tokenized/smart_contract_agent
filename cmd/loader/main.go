@@ -6,6 +6,7 @@ import (
 	"os/signal"
 	"sync"
 	"syscall"
+	"time"
 
 	"github.com/tokenized/cacher"
 	"github.com/tokenized/channels/wallet"
@@ -75,6 +76,11 @@ func main() {
 		logger.JSON("config", maskedConfig),
 	}, "Config")
 
+	feeLockingScript, err := bitcoin.NewRawAddressFromAddress(cfg.FeeAddress).LockingScript()
+	if err != nil {
+		logger.Fatal(ctx, "Invalid fee address : %s", err)
+	}
+
 	woc := whatsonchain.NewService(cfg.WhatsOnChainAPIKey, cfg.Network)
 
 	store, err := storage.CreateStreamStorage(cfg.Storage.Bucket, cfg.Storage.Root,
@@ -107,8 +113,8 @@ func main() {
 
 	broadcaster := NewNoopBroadcaster()
 
-	conductor := conductor.NewConductor(cfg.BaseKey, cfg.Agents, nil, nil, contracts, balances,
-		transactions, subscriptions, broadcaster)
+	conductor := conductor.NewConductor(cfg.BaseKey, cfg.Agents, feeLockingScript, nil, contracts,
+		balances, transactions, subscriptions, broadcaster)
 
 	var cacheWait, loadWait sync.WaitGroup
 
@@ -233,7 +239,8 @@ func loadTx(ctx context.Context, conductor *conductor.Conductor,
 		return errors.Wrapf(err, "get inputs: %s", txid)
 	}
 
-	if err := conductor.UpdateTransaction(ctx, transaction, uint64(time.UnixNano())); err != nil {
+	if err := conductor.UpdateTransaction(ctx, transaction,
+		uint64(time.Now().UnixNano())); err != nil {
 		return errors.Wrapf(err, "update transaction")
 	}
 
@@ -302,6 +309,9 @@ func NewNoopBroadcaster() *NoopBroadcaster {
 	return &NoopBroadcaster{}
 }
 
-func (*NoopBroadcaster) BroadcastTx(context.Context, *wire.MsgTx) error {
+func (*NoopBroadcaster) BroadcastTx(ctx context.Context, tx *wire.MsgTx) error {
+	logger.InfoWithFields(ctx, []logger.Field{
+		logger.Stringer("broadcast_txid", tx.TxHash()),
+	}, "No operation broadcaster received tx")
 	return nil
 }

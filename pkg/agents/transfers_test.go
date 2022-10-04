@@ -34,8 +34,8 @@ func Test_Transfers_Basic(t *testing.T) {
 		t.Fatalf("Failed to create admin locking script : %s", err)
 	}
 
-	agent, err := NewAgent(contractKey, contract, feeLockingScript, caches.Contracts,
-		caches.Balances, caches.Transactions, caches.Subscriptions, broadcaster, 0.05, 0.0, true)
+	agent, err := NewAgent(contractKey, DefaultConfig(), contract, feeLockingScript,
+		caches.Contracts, caches.Balances, caches.Transactions, caches.Subscriptions, broadcaster)
 	if err != nil {
 		t.Fatalf("Failed to create agent : %s", err)
 	}
@@ -373,8 +373,8 @@ func Test_Transfers_InsufficientQuantity(t *testing.T) {
 	contractKey, contractLockingScript, _, contract, instrument := state.MockInstrument(ctx, caches)
 	_, feeLockingScript, _ := state.MockKey()
 
-	agent, err := NewAgent(contractKey, contract, feeLockingScript, caches.Contracts,
-		caches.Balances, caches.Transactions, caches.Subscriptions, broadcaster, 0.05, 0.0, true)
+	agent, err := NewAgent(contractKey, DefaultConfig(), contract, feeLockingScript,
+		caches.Contracts, caches.Balances, caches.Transactions, caches.Subscriptions, broadcaster)
 	if err != nil {
 		t.Fatalf("Failed to create agent : %s", err)
 	}
@@ -396,11 +396,14 @@ func Test_Transfers_InsufficientQuantity(t *testing.T) {
 
 	// Add senders
 	senderCount := mathRand.Intn(5) + 1
+	senderQuantity := uint64(0)
 	for s := 0; s < senderCount; s++ {
+		quantity := uint64(mathRand.Intn(1000))
+		senderQuantity += quantity
 		// Add sender
 		instrumentTransfer.InstrumentSenders = append(instrumentTransfer.InstrumentSenders,
 			&actions.QuantityIndexField{
-				Quantity: uint64(mathRand.Intn(1000)),
+				Quantity: quantity,
 				Index:    uint32(len(tx.MsgTx.TxIn)),
 			})
 
@@ -420,20 +423,31 @@ func Test_Transfers_InsufficientQuantity(t *testing.T) {
 	}
 
 	// Add receivers
-	receiverCount := mathRand.Intn(5) + 1
-	for r := 0; r < receiverCount; r++ {
+	for {
 		_, _, ra := state.MockKey()
+		quantity := uint64(mathRand.Intn(1000)) + 1
+		if quantity > senderQuantity {
+			quantity = senderQuantity
+		}
+		senderQuantity -= quantity
 		instrumentTransfer.InstrumentReceivers = append(instrumentTransfer.InstrumentReceivers,
 			&actions.InstrumentReceiverField{
 				Address:  ra.Bytes(),
-				Quantity: uint64(mathRand.Intn(1000)),
+				Quantity: quantity,
 			})
+
+		if senderQuantity == 0 {
+			break
+		}
 	}
 
 	// Add contract output
 	if err := tx.AddOutput(contractLockingScript, 100, false, false); err != nil {
 		t.Fatalf("Failed to add contract output : %s", err)
 	}
+
+	js, _ := json.MarshalIndent(transfer, "", "  ")
+	t.Logf("Transfer : %s", js)
 
 	// Add action output
 	transferScript, err := protocol.Serialize(transfer, true)
@@ -517,7 +531,7 @@ func Test_Transfers_InsufficientQuantity(t *testing.T) {
 		t.Logf("Rejection Code : %s", rejectData.Label)
 	}
 
-	js, _ := json.MarshalIndent(rejection, "", "  ")
+	js, _ = json.MarshalIndent(rejection, "", "  ")
 	t.Logf("Rejection : %s", js)
 
 	if rejection.RejectionCode != actions.RejectionsInsufficientQuantity {

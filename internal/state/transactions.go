@@ -251,6 +251,15 @@ func (c *TransactionCache) Release(ctx context.Context, txid bitcoin.Hash32) {
 	c.cacher.Release(ctx, TransactionPath(txid))
 }
 
+func (tx *Transaction) SetProcessed() {
+	if tx.IsProcessed {
+		return
+	}
+
+	tx.IsProcessed = true
+	tx.isModified = true
+}
+
 func TransactionPath(txid bitcoin.Hash32) string {
 	return fmt.Sprintf("%s/%s", txPath, txid)
 }

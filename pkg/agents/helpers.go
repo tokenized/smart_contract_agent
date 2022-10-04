@@ -47,3 +47,14 @@ func addDustLockingScript(tx *txbuilder.TxBuilder, lockingScript bitcoin.Script)
 
 	return index, nil
 }
+
+func appendLockingScript(lockingScripts []bitcoin.Script,
+	lockingScript bitcoin.Script) []bitcoin.Script {
+	for _, ls := range lockingScripts {
+		if ls.Equal(lockingScript) {
+			return lockingScripts
+		}
+	}
+
+	return append(lockingScripts, lockingScript)
+}

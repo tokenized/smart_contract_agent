@@ -14,7 +14,9 @@ import (
 	"github.com/tokenized/logger"
 	"github.com/tokenized/pkg/bitcoin"
 	"github.com/tokenized/pkg/storage"
+	"github.com/tokenized/pkg/wire"
 	"github.com/tokenized/smart_contract_agent/internal/state"
+	"github.com/tokenized/smart_contract_agent/pkg/agents"
 	"github.com/tokenized/smart_contract_agent/pkg/conductor"
 	spyNodeClient "github.com/tokenized/spynode/pkg/client"
 	"github.com/tokenized/threads"
@@ -71,6 +73,11 @@ func main() {
 		logger.JSON("config", maskedConfig),
 	}, "Config")
 
+	feeLockingScript, err := bitcoin.NewRawAddressFromAddress(cfg.FeeAddress).LockingScript()
+	if err != nil {
+		logger.Fatal(ctx, "Invalid fee address : %s", err)
+	}
+
 	store, err := storage.CreateStreamStorage(cfg.Storage.Bucket, cfg.Storage.Root,
 		cfg.Storage.MaxRetries, cfg.Storage.RetryDelay)
 	if err != nil {
@@ -108,8 +115,8 @@ func main() {
 		logger.Fatal(ctx, "main : Failed to create subscription cache : %s", err)
 	}
 
-	conductor := conductor.NewConductor(cfg.BaseKey, cfg.Agents, spyNode, contracts, balances,
-		transactions, subscriptions)
+	conductor := conductor.NewConductor(cfg.BaseKey, cfg.Agents, feeLockingScript, spyNode,
+		contracts, balances, transactions, subscriptions, NewSpyNodeBroadcaster(spyNode))
 	spyNode.RegisterHandler(conductor)
 
 	var spyNodeWait, cacheWait sync.WaitGroup
@@ -159,4 +166,18 @@ func main() {
 
 	cacheThread.Stop(ctx)
 	cacheWait.Wait()
+}
+
+type SpyNodeBroadcaster struct {
+	client spyNodeClient.Client
+}
+
+func NewSpyNodeBroadcaster(client spyNodeClient.Client) *SpyNodeBroadcaster {
+	return &SpyNodeBroadcaster{
+		client: client,
+	}
+}
+
+func (b *SpyNodeBroadcaster) BroadcastTx(ctx context.Context, tx *wire.MsgTx) error {
+	return b.client.SendTxAndMarkOutputs(ctx, tx, nil)
 }

@@ -178,7 +178,7 @@ func Test_Contracts(t *testing.T) {
 				instrument.Creation.InstrumentIndex, uint64(i))
 		}
 
-		payload, err := instrument.GetInstrument()
+		payload, err := instrument.GetPayload()
 		if err != nil {
 			t.Fatalf("Failed to get instrument payload : %s", err)
 		}

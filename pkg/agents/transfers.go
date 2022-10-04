@@ -130,6 +130,7 @@ func (a *Agent) processTransfer(ctx context.Context, transaction *state.Transact
 	}
 
 	var allBalances state.Balances
+	var allLockingScripts []bitcoin.Script
 	for _, instrumentTransfer := range transfer.Instruments {
 		if instrumentTransfer.InstrumentType == protocol.BSVInstrumentID {
 			if len(instrumentTransfer.InstrumentCode) != 0 {
@@ -257,6 +258,7 @@ func (a *Agent) processTransfer(ctx context.Context, transaction *state.Transact
 			}
 
 			senderLockingScripts = append(senderLockingScripts, inputOutput.LockingScript)
+			allLockingScripts = appendLockingScript(allLockingScripts, inputOutput.LockingScript)
 			addBalances = state.AppendZeroBalance(addBalances, inputOutput.LockingScript)
 		}
 
@@ -293,6 +295,7 @@ func (a *Agent) processTransfer(ctx context.Context, transaction *state.Transact
 			}
 
 			receiverLockingScripts = append(receiverLockingScripts, lockingScript)
+			allLockingScripts = appendLockingScript(allLockingScripts, lockingScript)
 			addBalances = state.AppendZeroBalance(addBalances, lockingScript)
 		}
 
@@ -447,22 +450,33 @@ func (a *Agent) processTransfer(ctx context.Context, transaction *state.Transact
 		return errors.Wrap(err, "sign")
 	}
 
-	responseTxID := *responseTx.MsgTx.TxHash()
-	if _, err := a.transactions.AddRaw(ctx, responseTx.MsgTx, nil); err != nil {
+	settlementTxID := *responseTx.MsgTx.TxHash()
+	settlementTransaction, err := a.transactions.AddRaw(ctx, responseTx.MsgTx, nil)
+	if err != nil {
 		return errors.Wrap(err, "add response tx")
 	}
-	a.transactions.Release(ctx, responseTxID)
+	defer a.transactions.Release(ctx, settlementTxID)
 
 	// Settle balances regardless of tx acceptance by the network as the agent is the single source
 	// of truth.
-	allBalances.Settle(txid, responseTxID, now)
+	allBalances.Settle(txid, settlementTxID, now)
+
+	// Set settlement tx as processed since all the balances were just settled.
+	settlementTransaction.Lock()
+	settlementTransaction.SetProcessed()
+	settlementTransaction.Unlock()
 
 	// Broadcast settlement tx.
 	logger.InfoWithFields(ctx, []logger.Field{
-		logger.Stringer("response_txid", responseTxID),
+		logger.Stringer("response_txid", settlementTxID),
 	}, "Responding with settlement")
 	if err := a.BroadcastTx(ctx, responseTx.MsgTx); err != nil {
 		return errors.Wrap(err, "broadcast")
+	}
+
+	if err := a.postSettlementToSubscriptions(ctx, allLockingScripts,
+		settlementTransaction); err != nil {
+		return errors.Wrap(err, "post settlement")
 	}
 
 	return nil
@@ -486,29 +500,6 @@ func populateTransferSettlement(tx *txbuilder.TxBuilder,
 	}
 
 	return nil
-}
-
-func (a *Agent) getSettlementSubscriptions(ctx context.Context, transaction *state.Transaction,
-	settlement *actions.Settlement) (state.Subscriptions, error) {
-
-	transaction.Lock()
-	outputCount := transaction.OutputCount()
-	var lockingScripts []bitcoin.Script
-	for _, instrument := range settlement.Instruments {
-		for _, settle := range instrument.Settlements {
-			if int(settle.Index) >= outputCount {
-				transaction.Unlock()
-				return nil, fmt.Errorf("Invalid settlement output index: %d >= %d", settle.Index,
-					outputCount)
-			}
-
-			lockingScript := transaction.Output(int(settle.Index)).LockingScript
-			lockingScripts = append(lockingScripts, lockingScript)
-		}
-	}
-	transaction.Unlock()
-
-	return a.subscriptions.GetLockingScriptMulti(ctx, a.LockingScript(), lockingScripts)
 }
 
 func (a *Agent) processSettlement(ctx context.Context, transaction *state.Transaction,
@@ -630,11 +621,24 @@ func (a *Agent) processSettlement(ctx context.Context, transaction *state.Transa
 		a.balances.ReleaseMulti(instrumentCtx, agentLockingScript, instrumentCode, addedBalances)
 	}
 
+	if err := a.postSettlementToSubscriptions(ctx, lockingScripts, transaction); err != nil {
+		return errors.Wrap(err, "post settlement")
+	}
+
+	return nil
+}
+
+// postSettlementToSubscriptions posts the settlment transaction to any subscriptsions for the
+// relevant locking scripts.
+func (a *Agent) postSettlementToSubscriptions(ctx context.Context, lockingScripts []bitcoin.Script,
+	transaction *state.Transaction) error {
+
+	agentLockingScript := a.LockingScript()
+
 	subscriptions, err := a.subscriptions.GetLockingScriptMulti(ctx, agentLockingScript,
 		lockingScripts)
 	if err != nil {
-		logger.Error(ctx, "Failed to get locking script subscriptions : %s", err)
-		return nil
+		return errors.Wrap(err, "get subscriptions")
 	}
 	defer a.subscriptions.ReleaseMulti(ctx, agentLockingScript, subscriptions)
 
@@ -644,12 +648,7 @@ func (a *Agent) processSettlement(ctx context.Context, transaction *state.Transa
 
 	expandedTx, err := transaction.ExpandedTx(ctx)
 	if err != nil {
-		logger.Error(ctx, "Failed to get expanded tx : %s", err)
-		return nil
-	}
-	if expandedTx == nil {
-		logger.Error(ctx, "Expanded tx not found")
-		return nil
+		return errors.Wrap(err, "get expanded tx")
 	}
 
 	msg := channels_expanded_tx.ExpandedTxMessage(*expandedTx)
@@ -666,8 +665,7 @@ func (a *Agent) processSettlement(ctx context.Context, transaction *state.Transa
 		// Send settlement over channel
 		channel, err := a.GetChannel(ctx, channelHash)
 		if err != nil {
-			logger.Error(ctx, "Failed to get subscription channel : %s", err)
-			return nil
+			return errors.Wrapf(err, "get channel : %s", channelHash)
 		}
 		if channel == nil {
 			continue

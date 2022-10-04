@@ -25,6 +25,15 @@ type Config struct {
 	MinFeeRate  float32 `default:"0.05" envconfig:"MIN_FEE_RATE" json:"min_fee_rate"`
 }
 
+func DefaultConfig() Config {
+	return Config{
+		IsTest:      true,
+		FeeRate:     0.05,
+		DustFeeRate: 0.00,
+		MinFeeRate:  0.05,
+	}
+}
+
 type Agent struct {
 	key    bitcoin.Key
 	config Config

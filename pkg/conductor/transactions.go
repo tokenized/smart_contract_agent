@@ -79,8 +79,7 @@ func (c *Conductor) UpdateTransaction(ctx context.Context, transaction *state.Tr
 		}
 
 		transaction.Lock()
-		transaction.IsProcessed = true
-		transaction.MarkModified()
+		transaction.SetProcessed()
 		transaction.Unlock()
 		return nil
 	}
