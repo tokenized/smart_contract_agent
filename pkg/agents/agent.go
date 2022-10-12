@@ -229,6 +229,8 @@ func (a *Agent) Process(ctx context.Context, transaction *state.Transaction,
 func (a *Agent) processAction(ctx context.Context, transaction *state.Transaction,
 	action actions.Action, now uint64) error {
 
+	ctx = logger.ContextWithLogFields(ctx, logger.String("action", action.Code()))
+
 	switch act := action.(type) {
 	case *actions.ContractOffer:
 	case *actions.ContractAmendment:

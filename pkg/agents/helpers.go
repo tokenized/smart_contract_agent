@@ -10,25 +10,26 @@ import (
 
 // addResponseInput adds an input to the tx that spends the specified output of the inputTx, unless
 // it was already added.
-func addResponseInput(tx *txbuilder.TxBuilder, inputTx *wire.MsgTx, index int) error {
-	inputTxHash := inputTx.TxHash()
-	for _, txin := range tx.MsgTx.TxIn {
-		if txin.PreviousOutPoint.Hash.Equal(inputTxHash) &&
+func addResponseInput(tx *txbuilder.TxBuilder, inputTxID bitcoin.Hash32, output *wire.TxOut,
+	index int) (uint32, error) {
+
+	for i, txin := range tx.MsgTx.TxIn {
+		if txin.PreviousOutPoint.Hash.Equal(&inputTxID) &&
 			txin.PreviousOutPoint.Index == uint32(index) {
-			return nil // already have this input
+			return uint32(i), nil // already have this input
 		}
 	}
 
+	inputIndex := uint32(len(tx.MsgTx.TxIn))
 	outpoint := wire.OutPoint{
-		Hash:  *inputTxHash,
+		Hash:  inputTxID,
 		Index: uint32(index),
 	}
-	output := inputTx.TxOut[index]
 	if err := tx.AddInput(outpoint, output.LockingScript, output.Value); err != nil {
-		return errors.Wrap(err, "add input")
+		return 0, errors.Wrap(err, "add input")
 	}
 
-	return nil
+	return inputIndex, nil
 }
 
 // addDustLockingScript returns the index of an output with the specified locking script or adds a

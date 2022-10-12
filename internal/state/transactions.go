@@ -37,7 +37,8 @@ type Transaction struct {
 	MerkleProofs []*merkle_proof.MerkleProof `bsor:"3" json:"merkle_proofs,omitempty"`
 	SpentOutputs []*expanded_tx.Output       `bsor:"4" json:"spent_outputs,omitempty"` // outputs being spent by inputs in Tx
 
-	IsProcessed bool `bsor:"5" json:"is_processed"`
+	IsProcessed   bool             `bsor:"5" json:"is_processed"`
+	ResponseTxIDs []bitcoin.Hash32 `bsor:"6" json:"response_txids"`
 
 	Ancestors expanded_tx.AncestorTxs `bsor:"-" json:"ancestors,omitempty"`
 

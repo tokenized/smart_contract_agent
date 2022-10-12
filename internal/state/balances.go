@@ -541,6 +541,14 @@ func (bs *Balances) Settle(transferTxID, settlementTxID bitcoin.Hash32, now uint
 	}
 }
 
+func (bs *Balances) LockingScripts() []bitcoin.Script {
+	var result []bitcoin.Script
+	for _, b := range *bs {
+		result = appendLockingScript(result, b.LockingScript)
+	}
+	return result
+}
+
 func (bs *Balances) Lock() {
 	for _, b := range *bs {
 		b.Lock()
@@ -551,4 +559,15 @@ func (bs *Balances) Unlock() {
 	for _, b := range *bs {
 		b.Unlock()
 	}
+}
+
+func appendLockingScript(lockingScripts []bitcoin.Script,
+	lockingScript bitcoin.Script) []bitcoin.Script {
+	for _, ls := range lockingScripts {
+		if ls.Equal(lockingScript) {
+			return lockingScripts
+		}
+	}
+
+	return append(lockingScripts, lockingScript)
 }
