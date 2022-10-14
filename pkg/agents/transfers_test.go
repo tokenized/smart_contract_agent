@@ -1,6 +1,7 @@
 package agents
 
 import (
+	"bytes"
 	"context"
 	mathRand "math/rand"
 	"testing"
@@ -13,8 +14,10 @@ import (
 	"github.com/tokenized/pkg/json"
 	"github.com/tokenized/pkg/storage"
 	"github.com/tokenized/pkg/txbuilder"
+	"github.com/tokenized/pkg/wire"
 	"github.com/tokenized/smart_contract_agent/internal/state"
 	"github.com/tokenized/specification/dist/golang/actions"
+	"github.com/tokenized/specification/dist/golang/messages"
 	"github.com/tokenized/specification/dist/golang/protocol"
 )
 
@@ -538,4 +541,408 @@ func Test_Transfers_InsufficientQuantity(t *testing.T) {
 		t.Errorf("Wrong rejection code : got %d, want %d", rejection.RejectionCode,
 			actions.RejectionsInsufficientQuantity)
 	}
+}
+
+func Test_Transfers_Multi_Basic(t *testing.T) {
+	ctx := logger.ContextWithLogger(context.Background(), true, true, "")
+	store := storage.NewMockStorage()
+	broadcaster1 := state.NewMockTxBroadcaster()
+	broadcaster2 := state.NewMockTxBroadcaster()
+
+	caches := state.StartTestCaches(ctx, t, store, cacher.DefaultConfig(), time.Second)
+
+	contractKey1, contractLockingScript1, adminKey1, contract1, instrument1 := state.MockInstrument(ctx,
+		caches)
+	_, feeLockingScript1, _ := state.MockKey()
+
+	adminLockingScript1, err := adminKey1.LockingScript()
+	if err != nil {
+		t.Fatalf("Failed to create admin locking script : %s", err)
+	}
+
+	agent1, err := NewAgent(contractKey1, DefaultConfig(), contract1, feeLockingScript1,
+		caches.Contracts, caches.Balances, caches.Transactions, caches.Subscriptions, broadcaster1)
+	if err != nil {
+		t.Fatalf("Failed to create agent : %s", err)
+	}
+
+	contractKey2, contractLockingScript2, adminKey2, contract2, instrument2 := state.MockInstrument(ctx,
+		caches)
+	_, feeLockingScript2, _ := state.MockKey()
+
+	adminLockingScript2, err := adminKey2.LockingScript()
+	if err != nil {
+		t.Fatalf("Failed to create admin locking script : %s", err)
+	}
+
+	agent2, err := NewAgent(contractKey2, DefaultConfig(), contract2, feeLockingScript2,
+		caches.Contracts, caches.Balances, caches.Transactions, caches.Subscriptions, broadcaster2)
+	if err != nil {
+		t.Fatalf("Failed to create agent : %s", err)
+	}
+
+	var receiver1Keys, receiver2Keys []bitcoin.Key
+	var receiver1LockingScripts, receiver2LockingScripts []bitcoin.Script
+	var receiver1Quantities, receiver2Quantities []uint64
+	for i := 0; i < 100; i++ {
+		instrumentTransfer1 := &actions.InstrumentTransferField{
+			ContractIndex:  0,
+			InstrumentType: string(instrument1.InstrumentType[:]),
+			InstrumentCode: instrument1.InstrumentCode[:],
+		}
+
+		instrumentTransfer2 := &actions.InstrumentTransferField{
+			ContractIndex:  1,
+			InstrumentType: string(instrument2.InstrumentType[:]),
+			InstrumentCode: instrument2.InstrumentCode[:],
+		}
+
+		transfer := &actions.Transfer{
+			Instruments: []*actions.InstrumentTransferField{
+				instrumentTransfer1,
+				instrumentTransfer2,
+			},
+		}
+
+		tx := txbuilder.NewTxBuilder(0.05, 0.0)
+
+		var spentOutputs []*expanded_tx.Output
+
+		// Add admin as sender
+		quantity1 := uint64(mathRand.Intn(1000)) + 1
+		receiver1Quantities = append(receiver1Quantities, quantity1)
+
+		instrumentTransfer1.InstrumentSenders = append(instrumentTransfer1.InstrumentSenders,
+			&actions.QuantityIndexField{
+				Quantity: quantity1,
+				Index:    uint32(len(tx.MsgTx.TxIn)),
+			})
+
+		// Add input
+		outpoint1 := state.MockOutPoint(adminLockingScript1, 1)
+		spentOutputs = append(spentOutputs, &expanded_tx.Output{
+			LockingScript: adminLockingScript1,
+			Value:         1,
+		})
+
+		if err := tx.AddInput(*outpoint1, adminLockingScript1, 1); err != nil {
+			t.Fatalf("Failed to add input : %s", err)
+		}
+
+		quantity2 := uint64(mathRand.Intn(1000)) + 1
+		receiver2Quantities = append(receiver2Quantities, quantity2)
+
+		instrumentTransfer2.InstrumentSenders = append(instrumentTransfer2.InstrumentSenders,
+			&actions.QuantityIndexField{
+				Quantity: quantity2,
+				Index:    uint32(len(tx.MsgTx.TxIn)),
+			})
+
+		outpoint2 := state.MockOutPoint(adminLockingScript2, 1)
+		spentOutputs = append(spentOutputs, &expanded_tx.Output{
+			LockingScript: adminLockingScript2,
+			Value:         1,
+		})
+
+		if err := tx.AddInput(*outpoint2, adminLockingScript2, 1); err != nil {
+			t.Fatalf("Failed to add input : %s", err)
+		}
+
+		// Add receivers
+		key, lockingScript, ra := state.MockKey()
+		receiver1Keys = append(receiver1Keys, key)
+		receiver1LockingScripts = append(receiver1LockingScripts, lockingScript)
+
+		instrumentTransfer1.InstrumentReceivers = append(instrumentTransfer1.InstrumentReceivers,
+			&actions.InstrumentReceiverField{
+				Address:  ra.Bytes(),
+				Quantity: quantity1,
+			})
+
+		key, lockingScript, ra = state.MockKey()
+		receiver2Keys = append(receiver2Keys, key)
+		receiver2LockingScripts = append(receiver2LockingScripts, lockingScript)
+
+		instrumentTransfer2.InstrumentReceivers = append(instrumentTransfer2.InstrumentReceivers,
+			&actions.InstrumentReceiverField{
+				Address:  ra.Bytes(),
+				Quantity: quantity2,
+			})
+
+		// Add contract outputs
+		if err := tx.AddOutput(contractLockingScript1, 240, false, false); err != nil {
+			t.Fatalf("Failed to add contract output : %s", err)
+		}
+		if err := tx.AddOutput(contractLockingScript2, 200, false, false); err != nil {
+			t.Fatalf("Failed to add contract output : %s", err)
+		}
+
+		// Add boomerang output
+		if err := tx.AddOutput(contractLockingScript1, 200, false, false); err != nil {
+			t.Fatalf("Failed to add boomerang output : %s", err)
+		}
+
+		// Add action output
+		transferScript, err := protocol.Serialize(transfer, true)
+		if err != nil {
+			t.Fatalf("Failed to serialize transfer action : %s", err)
+		}
+
+		if err := tx.AddOutput(transferScript, 0, false, false); err != nil {
+			t.Fatalf("Failed to add transfer action output : %s", err)
+		}
+
+		// Add funding
+		fundingKey, fundingLockingScript, _ := state.MockKey()
+		fundingOutpoint := state.MockOutPoint(fundingLockingScript, 1000)
+		spentOutputs = append(spentOutputs, &expanded_tx.Output{
+			LockingScript: fundingLockingScript,
+			Value:         1000,
+		})
+
+		if err := tx.AddInput(*fundingOutpoint, fundingLockingScript, 1000); err != nil {
+			t.Fatalf("Failed to add input : %s", err)
+		}
+
+		_, changeLockingScript, _ := state.MockKey()
+		tx.SetChangeLockingScript(changeLockingScript, "")
+
+		if _, err := tx.Sign([]bitcoin.Key{adminKey1, adminKey2, fundingKey}); err != nil {
+			t.Fatalf("Failed to sign tx : %s", err)
+		}
+
+		t.Logf("Created tx : %s", tx.String(bitcoin.MainNet))
+
+		addTransaction := &state.Transaction{
+			Tx:           tx.MsgTx,
+			SpentOutputs: spentOutputs,
+		}
+
+		transaction, err := caches.Transactions.Add(ctx, addTransaction)
+		if err != nil {
+			t.Fatalf("Failed to add transaction : %s", err)
+		}
+
+		now := uint64(time.Now().UnixNano())
+		if err := agent1.Process(ctx, transaction, []actions.Action{transfer}, now); err != nil {
+			t.Fatalf("Failed to process transfer transaction : %s", err)
+		}
+
+		agent1ResponseTx := broadcaster1.GetLastTx()
+		broadcaster1.ClearTxs()
+		if agent1ResponseTx == nil {
+			t.Fatalf("No agent 1 response tx 1")
+		}
+
+		t.Logf("Agent 1 response tx 1 : %s", agent1ResponseTx)
+
+		// Find settlement request action
+		var message *actions.Message
+		for _, txout := range agent1ResponseTx.TxOut {
+			action, err := protocol.Deserialize(txout.LockingScript, true)
+			if err != nil {
+				continue
+			}
+
+			if a, ok := action.(*actions.Message); ok {
+				message = a
+			}
+		}
+
+		if message == nil {
+			t.Fatalf("Missing message action")
+		}
+
+		if message.MessageCode != messages.CodeSettlementRequest {
+			t.Fatalf("Wrong response message code : got %d, want %d", message.MessageCode,
+				messages.CodeSettlementRequest)
+		} else {
+			t.Logf("Response 1 message is settlement request")
+		}
+
+		js, _ := json.MarshalIndent(message, "", "  ")
+		t.Logf("Message : %s", js)
+
+		if err := agent2.Process(ctx, transaction, []actions.Action{transfer}, now); err != nil {
+			t.Fatalf("Failed to process transfer transaction : %s", err)
+		}
+
+		caches.Transactions.Release(ctx, transaction.GetTxID())
+
+		agent2ResponseTx := broadcaster2.GetLastTx()
+		broadcaster2.ClearTxs()
+		if agent2ResponseTx != nil {
+			t.Fatalf("Should be no response tx 1 from agent 2 : %s", agent2ResponseTx)
+		}
+
+		t.Logf("Agent 2 no response tx 1")
+
+		messageSpentOutputs := []*expanded_tx.Output{
+			{
+				LockingScript: tx.MsgTx.TxOut[2].LockingScript,
+				Value:         tx.MsgTx.TxOut[2].Value,
+			},
+		}
+
+		addMessageTransaction := &state.Transaction{
+			Tx:           agent1ResponseTx,
+			SpentOutputs: messageSpentOutputs,
+		}
+
+		messageTransaction, err := caches.Transactions.Add(ctx, addMessageTransaction)
+		if err != nil {
+			t.Fatalf("Failed to add transaction : %s", err)
+		}
+
+		if err := agent1.Process(ctx, messageTransaction, []actions.Action{message},
+			now); err != nil {
+			t.Fatalf("Failed to process message transaction : %s", err)
+		}
+
+		agent1ResponseTx2 := broadcaster1.GetLastTx()
+		broadcaster1.ClearTxs()
+		if agent1ResponseTx2 != nil {
+			t.Fatalf("Agent 1 response tx 2 should be nil : %s", agent1ResponseTx2)
+		}
+
+		if err := agent2.Process(ctx, messageTransaction, []actions.Action{message},
+			now); err != nil {
+			t.Fatalf("Failed to process message transaction : %s", err)
+		}
+
+		agent2ResponseTx2 := broadcaster2.GetLastTx()
+		broadcaster2.ClearTxs()
+		if agent2ResponseTx2 == nil {
+			t.Fatalf("No agent 2 response tx 2")
+		}
+
+		t.Logf("Agent 2 response tx 2 : %s", agent2ResponseTx2)
+
+		// Find signature request action
+		var message2 *actions.Message
+		for _, txout := range agent2ResponseTx2.TxOut {
+			action, err := protocol.Deserialize(txout.LockingScript, true)
+			if err != nil {
+				continue
+			}
+
+			if a, ok := action.(*actions.Message); ok {
+				message2 = a
+			}
+		}
+
+		if message2 == nil {
+			t.Fatalf("Missing message action")
+		}
+
+		if message2.MessageCode != messages.CodeSignatureRequest {
+			t.Fatalf("Wrong response message code : got %d, want %d", message2.MessageCode,
+				messages.CodeSignatureRequest)
+		} else {
+			t.Logf("Response 2 message is signature request")
+		}
+
+		t.Logf("Message payload : %x", message2.MessagePayload)
+
+		messagePayload, err := messages.Deserialize(message2.MessageCode, message2.MessagePayload)
+		if err != nil {
+			t.Fatalf("Failed to deserialize message payload : %s", err)
+		}
+
+		sigRequestPayload, ok := messagePayload.(*messages.SignatureRequest)
+		if !ok {
+			t.Fatalf("Message payload not a sig request")
+		}
+
+		sigRequestTx := &wire.MsgTx{}
+		if err := sigRequestTx.Deserialize(bytes.NewReader(sigRequestPayload.Payload)); err != nil {
+			t.Fatalf("Failed to decode sig request tx : %s", err)
+		}
+
+		t.Logf("Sig request tx : %s", sigRequestTx)
+
+		var sigSettlement *actions.Settlement
+		for _, txout := range sigRequestTx.TxOut {
+			action, err := protocol.Deserialize(txout.LockingScript, true)
+			if err != nil {
+				continue
+			}
+
+			if a, ok := action.(*actions.Settlement); ok {
+				sigSettlement = a
+			}
+		}
+
+		if sigSettlement == nil {
+			t.Fatalf("Missing settlement in sig request")
+		}
+
+		caches.Transactions.Release(ctx, messageTransaction.GetTxID())
+
+		message2SpentOutputs := []*expanded_tx.Output{
+			{
+				LockingScript: agent1ResponseTx.TxOut[0].LockingScript,
+				Value:         agent1ResponseTx.TxOut[0].Value,
+			},
+		}
+
+		addMessage2Transaction := &state.Transaction{
+			Tx:           agent2ResponseTx2,
+			SpentOutputs: message2SpentOutputs,
+		}
+
+		message2Transaction, err := caches.Transactions.Add(ctx, addMessage2Transaction)
+		if err != nil {
+			t.Fatalf("Failed to add transaction : %s", err)
+		}
+
+		if err := agent2.Process(ctx, message2Transaction, []actions.Action{message2},
+			now); err != nil {
+			t.Fatalf("Failed to process message 2 transaction : %s", err)
+		}
+
+		agent2ResponseTx3 := broadcaster1.GetLastTx()
+		broadcaster2.ClearTxs()
+		if agent2ResponseTx3 != nil {
+			t.Fatalf("Agent 2 response tx 3 should be nil : %s", agent2ResponseTx3)
+		}
+
+		if err := agent1.Process(ctx, message2Transaction, []actions.Action{message2},
+			now); err != nil {
+			t.Fatalf("Failed to process message 2 transaction : %s", err)
+		}
+
+		agent1ResponseTx3 := broadcaster1.GetLastTx()
+		broadcaster1.ClearTxs()
+		if agent1ResponseTx3 == nil {
+			t.Fatalf("No agent 1 response tx 3")
+		}
+
+		t.Logf("Agent 1 response tx 3 : %s", agent1ResponseTx3)
+
+		var settlement *actions.Settlement
+		for _, txout := range agent1ResponseTx3.TxOut {
+			action, err := protocol.Deserialize(txout.LockingScript, true)
+			if err != nil {
+				continue
+			}
+
+			if a, ok := action.(*actions.Settlement); ok {
+				settlement = a
+			}
+		}
+
+		if settlement == nil {
+			t.Fatalf("Missing settlement action")
+		}
+
+		js, _ = json.MarshalIndent(settlement, "", "  ")
+		t.Logf("Settlement : %s", js)
+
+		caches.Transactions.Release(ctx, message2Transaction.GetTxID())
+	}
+
+	caches.Contracts.Release(ctx, contractLockingScript1)
+	caches.Contracts.Release(ctx, contractLockingScript2)
+	caches.StopTestCaches()
 }

@@ -3,11 +3,12 @@ package agents
 import (
 	"context"
 
-	"github.com/pkg/errors"
 	"github.com/tokenized/logger"
 	"github.com/tokenized/smart_contract_agent/internal/state"
 	"github.com/tokenized/specification/dist/golang/actions"
 	"github.com/tokenized/specification/dist/golang/messages"
+
+	"github.com/pkg/errors"
 )
 
 func (a *Agent) processMessage(ctx context.Context, transaction *state.Transaction,

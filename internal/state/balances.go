@@ -11,6 +11,8 @@ import (
 	"github.com/tokenized/cacher"
 	"github.com/tokenized/pkg/bitcoin"
 	"github.com/tokenized/pkg/bsor"
+	"github.com/tokenized/smart_contract_agent/internal/platform"
+	"github.com/tokenized/specification/dist/golang/actions"
 	"github.com/tokenized/specification/dist/golang/protocol"
 
 	"github.com/pkg/errors"
@@ -54,9 +56,10 @@ type BalanceAdjustmentCode byte
 type BalanceAdjustment struct {
 	Code BalanceAdjustmentCode `bsor:"1" json:"code,omitempty"`
 
-	Expires  protocol.Timestamp `bsor:"2" json:"expires,omitempty"`
-	Quantity uint64             `bsor:"3" json:"quantity,omitempty"`
-	TxID     *bitcoin.Hash32    `bsor:"4" json:"txID,omitempty"`
+	Expires         protocol.Timestamp `bsor:"2" json:"expires,omitempty"`
+	Quantity        uint64             `bsor:"3" json:"quantity,omitempty"`
+	TxID            *bitcoin.Hash32    `bsor:"4" json:"txID,omitempty"`
+	SettledQuantity uint64             `bsor:"5" json:"settled_quantity,omitempty"`
 }
 
 func NewBalanceCache(cache *cacher.Cache) (*BalanceCache, error) {
@@ -257,10 +260,26 @@ func (b *Balance) Available() uint64 {
 	return available
 }
 
-func (b *Balance) AddPendingDebit(quantity uint64) error {
+func (b *Balance) HasFrozen() bool {
+	for _, adj := range b.Adjustments {
+		if adj.Code == FreezeCode {
+			return true
+		}
+	}
+
+	return false
+}
+
+func (b *Balance) AddPendingDebit(quantity uint64, now uint64) error {
 	available := b.Available()
 	if available < quantity {
-		return fmt.Errorf("available %d, debit %d", available, quantity)
+		if b.HasFrozen() {
+			return platform.NewRejectError(actions.RejectionsHoldingsFrozen,
+				fmt.Sprintf("available %d, debit %d", available, quantity), now)
+		} else {
+			return platform.NewRejectError(actions.RejectionsInsufficientQuantity,
+				fmt.Sprintf("available %d, debit %d", available, quantity), now)
+		}
 	}
 
 	if b.pendingDirection { // credit
@@ -277,7 +296,7 @@ func (b *Balance) AddPendingDebit(quantity uint64) error {
 	return nil
 }
 
-func (b *Balance) AddPendingCredit(quantity uint64) error {
+func (b *Balance) AddPendingCredit(quantity uint64, now uint64) error {
 	if b.pendingDirection { // credit
 		b.pendingQuantity += quantity
 	} else { // debit
@@ -323,15 +342,28 @@ func (b *Balance) FinalizePending(txid *bitcoin.Hash32, isMultiContract bool) {
 		}
 	}
 
+	settledQuantity := b.SettlePendingQuantity()
+
 	b.Adjustments = append(b.Adjustments, &BalanceAdjustment{
-		Code:     code,
-		Quantity: b.pendingQuantity,
-		TxID:     txid,
+		Code:            code,
+		Quantity:        b.pendingQuantity,
+		TxID:            txid,
+		SettledQuantity: settledQuantity,
 	})
 
 	b.pendingDirection = false
 	b.pendingQuantity = 0
 	b.isModified = true
+}
+
+func (b *Balance) VerifySettlement(transferTxID bitcoin.Hash32) *BalanceAdjustment {
+	for _, adj := range b.Adjustments {
+		if transferTxID.Equal(adj.TxID) {
+			return adj
+		}
+	}
+
+	return nil
 }
 
 func (b *Balance) Settle(transferTxID, settlementTxID bitcoin.Hash32, now uint64) {

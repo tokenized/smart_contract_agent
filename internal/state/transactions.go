@@ -42,8 +42,9 @@ type Transaction struct {
 
 	Ancestors expanded_tx.AncestorTxs `bsor:"-" json:"ancestors,omitempty"`
 
-	isModified bool
-	sync.Mutex `bsor:"-"`
+	isProcessing bool
+	isModified   bool
+	sync.Mutex   `bsor:"-"`
 }
 
 func NewTransactionCache(cache *cacher.Cache) (*TransactionCache, error) {
@@ -80,7 +81,22 @@ func (c *TransactionCache) Add(ctx context.Context, tx *Transaction) (*Transacti
 		return nil, errors.Wrap(err, "add")
 	}
 
-	return item.(*Transaction), nil
+	addedTx := item.(*Transaction)
+	if addedTx != tx {
+		// Merge tx into addedTx
+		addedTx.Lock()
+
+		if len(addedTx.SpentOutputs) == 0 {
+			addedTx.SpentOutputs = tx.SpentOutputs
+			addedTx.MarkModified()
+		}
+
+		addedTx.AddMerkleProofs(tx.MerkleProofs)
+
+		addedTx.Unlock()
+	}
+
+	return addedTx, nil
 }
 
 func (c *TransactionCache) AddExpandedTx(ctx context.Context,
@@ -250,6 +266,19 @@ func (c *TransactionCache) Get(ctx context.Context, txid bitcoin.Hash32) (*Trans
 
 func (c *TransactionCache) Release(ctx context.Context, txid bitcoin.Hash32) {
 	c.cacher.Release(ctx, TransactionPath(txid))
+}
+
+func (tx *Transaction) SetIsProcessing() bool {
+	if tx.isProcessing {
+		return false
+	}
+
+	tx.isProcessing = true
+	return true
+}
+
+func (tx *Transaction) ClearIsProcessing() {
+	tx.isProcessing = false
 }
 
 func (tx *Transaction) SetProcessed() {

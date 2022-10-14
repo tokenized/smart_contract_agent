@@ -93,8 +93,22 @@ func (c *Conductor) UpdateTransaction(ctx context.Context, transaction *state.Tr
 	return nil
 }
 
+func clearIsProcessing(transaction *state.Transaction) {
+	transaction.Lock()
+	transaction.ClearIsProcessing()
+	transaction.Unlock()
+}
+
 func (c *Conductor) processTransaction(ctx context.Context, transaction *state.Transaction,
 	now uint64) error {
+
+	transaction.Lock()
+	if !transaction.SetIsProcessing() {
+		transaction.Unlock()
+		return nil
+	}
+	transaction.Unlock()
+	defer clearIsProcessing(transaction)
 
 	agentActionsList, err := c.compileTx(ctx, transaction)
 	if err != nil {

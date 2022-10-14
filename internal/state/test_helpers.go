@@ -265,6 +265,13 @@ func (b *MockTxBroadcaster) BroadcastTx(ctx context.Context, tx *wire.MsgTx) err
 	return nil
 }
 
+func (b *MockTxBroadcaster) ClearTxs() {
+	b.lock.Lock()
+	defer b.lock.Unlock()
+
+	b.txs = nil
+}
+
 func (b *MockTxBroadcaster) GetLastTx() *wire.MsgTx {
 	b.lock.Lock()
 	defer b.lock.Unlock()
