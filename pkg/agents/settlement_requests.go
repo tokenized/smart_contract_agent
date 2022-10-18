@@ -33,7 +33,8 @@ func (a *Agent) processSettlementRequest(ctx context.Context, transaction *state
 	if err != nil {
 		logger.Warn(ctx, "Invalid transfer txid in settlement request : %s", err)
 		return errors.Wrap(a.sendRejection(ctx, transaction,
-			platform.NewRejectError(actions.RejectionsMsgMalformed, "transfer txid invalid", now)), "reject")
+			platform.NewRejectError(actions.RejectionsMsgMalformed, "transfer txid invalid", now)),
+			"reject")
 	}
 	transferTxID := *newTransferTxID
 
@@ -41,14 +42,16 @@ func (a *Agent) processSettlementRequest(ctx context.Context, transaction *state
 	if err != nil {
 		logger.Warn(ctx, "Failed to decode settlement from settlement request : %s", err)
 		return errors.Wrap(a.sendRejection(ctx, transaction,
-			platform.NewRejectError(actions.RejectionsMsgMalformed, "settlement invalid", now)), "reject")
+			platform.NewRejectError(actions.RejectionsMsgMalformed, "settlement invalid", now)),
+			"reject")
 	}
 
 	settlement, ok := settlementAction.(*actions.Settlement)
 	if !ok {
 		logger.Warn(ctx, "Settlement request settlement is not a settlement : %s", err)
 		return errors.Wrap(a.sendRejection(ctx, transaction,
-			platform.NewRejectError(actions.RejectionsMsgMalformed, "settlement wrong", now)), "reject")
+			platform.NewRejectError(actions.RejectionsMsgMalformed, "settlement wrong", now)),
+			"reject")
 	}
 
 	ctx = logger.ContextWithLogFields(ctx, logger.Stringer("transfer_txid", transferTxID))
@@ -90,8 +93,8 @@ func (a *Agent) processSettlementRequest(ctx context.Context, transaction *state
 			logger.Stringer("transfer_txid", transferTxID),
 		}, "Transfer action not found in transfer transaction")
 		return errors.Wrap(a.sendRejection(ctx, transaction,
-			platform.NewRejectError(actions.RejectionsMsgMalformed, "transfer tx missing transfer", now)),
-			"reject")
+			platform.NewRejectError(actions.RejectionsMsgMalformed, "transfer tx missing transfer",
+				now)), "reject")
 	}
 
 	transferContracts, err := parseTransferContracts(transferTransaction, transfer,
@@ -251,8 +254,9 @@ func (a *Agent) processSettlementRequest(ctx context.Context, transaction *state
 			}
 		}
 
-		// Add the contract fee
+		// Add the contract fee for this agent.
 		if a.ContractFee() > 0 {
+			println("adding contract fee output")
 			if err := settlementTx.AddOutput(a.FeeLockingScript(), a.ContractFee(), true,
 				false); err != nil {
 				return errors.Wrap(err, "add contract fee")
@@ -271,8 +275,8 @@ func (a *Agent) processSettlementRequest(ctx context.Context, transaction *state
 			if errors.Cause(err) == txbuilder.ErrInsufficientValue {
 				logger.Warn(ctx, "Insufficient tx funding : %s", err)
 				return errors.Wrap(a.sendRejection(ctx, transaction,
-					platform.NewRejectError(actions.RejectionsInsufficientTxFeeFunding, err.Error(), now)),
-					"reject")
+					platform.NewRejectError(actions.RejectionsInsufficientTxFeeFunding, err.Error(),
+						now)), "reject")
 			}
 
 			return errors.Wrap(err, "sign")
@@ -427,21 +431,25 @@ func (a *Agent) sendSettlementRequest(ctx context.Context,
 		return errors.Wrap(err, "serialize settlement")
 	}
 
-	ra, err := bitcoin.RawAddressFromLockingScript(agentLockingScript)
-	if err != nil {
-		return errors.Wrap(err, "agent raw address")
-	}
-
 	settlementRequest := &messages.SettlementRequest{
 		Timestamp:    now,
 		TransferTxId: transferTransaction.GetTxID().Bytes(),
-		ContractFees: []*messages.TargetAddressField{
+		Settlement:   settlementScript,
+	}
+
+	contractFee := a.ContractFee()
+	if contractFee != 0 {
+		ra, err := bitcoin.RawAddressFromLockingScript(a.FeeLockingScript())
+		if err != nil {
+			return errors.Wrap(err, "agent raw address")
+		}
+
+		settlementRequest.ContractFees = []*messages.TargetAddressField{
 			{
 				Address:  ra.Bytes(),
-				Quantity: a.ContractFee(),
+				Quantity: contractFee,
 			},
-		},
-		Settlement: settlementScript,
+		}
 	}
 
 	payloadBuffer := &bytes.Buffer{}
@@ -468,8 +476,8 @@ func (a *Agent) sendSettlementRequest(ctx context.Context,
 		if errors.Cause(err) == txbuilder.ErrInsufficientValue {
 			logger.Warn(ctx, "Insufficient tx funding : %s", err)
 			return errors.Wrap(a.sendRejection(ctx, currentTransaction,
-				platform.NewRejectError(actions.RejectionsInsufficientTxFeeFunding, err.Error(), now)),
-				"reject")
+				platform.NewRejectError(actions.RejectionsInsufficientTxFeeFunding, err.Error(),
+					now)), "reject")
 		}
 
 		return errors.Wrap(err, "sign")

@@ -36,7 +36,13 @@ func (a *Agent) processTransfer(ctx context.Context, transaction *state.Transact
 		}
 
 		if rejectError, ok := errors.Cause(err).(platform.RejectError); ok {
-			return errors.Wrap(a.sendRejection(ctx, transaction, rejectError), "reject")
+			if transferContracts.FirstContractOutputIndex != -1 {
+				rejectError.OutputIndex = transferContracts.FirstContractOutputIndex
+			}
+			if transferContracts.IsFirstContract() {
+				return errors.Wrap(a.sendRejection(ctx, transaction, rejectError), "reject")
+			}
+			return nil // Only first contract can reject at this point
 		}
 
 		return errors.Wrap(err, "parse contracts")
@@ -47,8 +53,6 @@ func (a *Agent) processTransfer(ctx context.Context, transaction *state.Transact
 		return nil // Wait for settlement request message
 	}
 
-	firstContractIndex := transferContracts.OutputIndexes[0]
-
 	// Check if contract is frozen.
 	if a.ContractIsExpired(now) {
 		logger.WarnWithFields(ctx, []logger.Field{
@@ -56,7 +60,7 @@ func (a *Agent) processTransfer(ctx context.Context, transaction *state.Transact
 		}, "Contract is expired")
 		return errors.Wrap(a.sendRejection(ctx, transaction,
 			platform.NewRejectErrorWithOutputIndex(actions.RejectionsContractExpired, "", now,
-				firstContractIndex)), "reject")
+				transferContracts.FirstContractOutputIndex)), "reject")
 	}
 
 	// Verify expiry.
@@ -67,44 +71,7 @@ func (a *Agent) processTransfer(ctx context.Context, transaction *state.Transact
 		}, "Transfer offer expired")
 		return errors.Wrap(a.sendRejection(ctx, transaction,
 			platform.NewRejectErrorWithOutputIndex(actions.RejectionsTransferExpired, "", now,
-				firstContractIndex)), "reject")
-	}
-
-	// Verify there are no duplicate instruments.
-	var instrumentCodes [][]byte
-	for _, instrumentTransfer := range transfer.Instruments {
-		if len(instrumentTransfer.InstrumentSenders) == 0 {
-			logger.Warn(ctx, "Transfer is missing senders")
-			return errors.Wrap(a.sendRejection(ctx, transaction,
-				platform.NewRejectErrorWithOutputIndex(actions.RejectionsMsgMalformed, "missing senders",
-					now, firstContractIndex)), "reject")
-		}
-
-		if len(instrumentTransfer.InstrumentReceivers) == 0 {
-			logger.Warn(ctx, "Transfer is missing receivers")
-			return errors.Wrap(a.sendRejection(ctx, transaction,
-				platform.NewRejectErrorWithOutputIndex(actions.RejectionsMsgMalformed, "missing receivers",
-					now, firstContractIndex)), "reject")
-		}
-
-		instrumentCode := instrumentTransfer.InstrumentCode
-		if instrumentTransfer.InstrumentType == protocol.BSVInstrumentID {
-			instrumentCode = nil
-		}
-
-		for _, instrument := range instrumentCodes {
-			if bytes.Equal(instrument, instrumentCode) {
-				instrumentID, _ := protocol.InstrumentIDForTransfer(instrumentTransfer)
-				logger.WarnWithFields(ctx, []logger.Field{
-					logger.String("instrument_id", instrumentID),
-				}, "Duplicate instrument in transfer")
-				return errors.Wrap(a.sendRejection(ctx, transaction,
-					platform.NewRejectErrorWithOutputIndex(actions.RejectionsMsgMalformed,
-						"duplicate instrument", now, firstContractIndex)), "reject")
-			}
-		}
-
-		instrumentCodes = append(instrumentCodes, instrumentCode)
+				transferContracts.FirstContractOutputIndex)), "reject")
 	}
 
 	// Process transfers.
@@ -120,12 +87,24 @@ func (a *Agent) processTransfer(ctx context.Context, transaction *state.Transact
 				logger.Warn(ctx, "Bitcoin instrument with instrument code")
 				return errors.Wrap(a.sendRejection(ctx, transaction,
 					platform.NewRejectErrorWithOutputIndex(actions.RejectionsMsgMalformed,
-						"bitcoin transfer with instrument code", now, firstContractIndex)),
+						"bitcoin transfer with instrument code", now,
+						transferContracts.FirstContractOutputIndex)),
 					"reject")
 			}
 
-			// TODO Handle bitcoin transfers. --ce
-			logger.Info(ctx, "Bitcoin transfer")
+			instrumentCtx := logger.ContextWithLogFields(ctx,
+				logger.String("instrument_id", protocol.BSVInstrumentID))
+
+			if err := a.buildBitcoinTransfer(instrumentCtx, transaction, settlementTx,
+				instrumentTransfer, now); err != nil {
+				if rejectError, ok := errors.Cause(err).(platform.RejectError); ok {
+					rejectError.OutputIndex = transferContracts.FirstContractOutputIndex
+					return errors.Wrap(a.sendRejection(instrumentCtx, transaction, rejectError),
+						"reject")
+				}
+				return errors.Wrap(err, "build bitcoin transfer")
+			}
+
 			continue
 		}
 
@@ -133,12 +112,9 @@ func (a *Agent) processTransfer(ctx context.Context, transaction *state.Transact
 			continue
 		}
 
-		instrumentCtx := ctx
-		instrumentID, err := protocol.InstrumentIDForTransfer(instrumentTransfer)
-		if err == nil {
-			instrumentCtx = logger.ContextWithLogFields(ctx,
-				logger.String("instrument_id", instrumentID))
-		}
+		instrumentID, _ := protocol.InstrumentIDForTransfer(instrumentTransfer)
+		instrumentCtx := logger.ContextWithLogFields(ctx,
+			logger.String("instrument_id", instrumentID))
 		var instrumentCode state.InstrumentCode
 		copy(instrumentCode[:], instrumentTransfer.InstrumentCode)
 
@@ -173,16 +149,16 @@ func (a *Agent) processTransfer(ctx context.Context, transaction *state.Transact
 		if err != nil {
 			logger.Warn(ctx, "Invalid exchange fee address : %s", err)
 			return errors.Wrap(a.sendRejection(ctx, transaction,
-				platform.NewRejectErrorWithOutputIndex(actions.RejectionsMsgMalformed, err.Error(), now,
-					firstContractIndex)), "reject")
+				platform.NewRejectErrorWithOutputIndex(actions.RejectionsMsgMalformed, err.Error(),
+					now, transferContracts.FirstContractOutputIndex)), "reject")
 		}
 
 		lockingScript, err := ra.LockingScript()
 		if err != nil {
 			logger.Warn(ctx, "Invalid exchange fee locking script : %s", err)
 			return errors.Wrap(a.sendRejection(ctx, transaction,
-				platform.NewRejectErrorWithOutputIndex(actions.RejectionsMsgMalformed, err.Error(), now,
-					firstContractIndex)), "reject")
+				platform.NewRejectErrorWithOutputIndex(actions.RejectionsMsgMalformed, err.Error(),
+					now, transferContracts.FirstContractOutputIndex)), "reject")
 		}
 
 		if err := settlementTx.AddOutput(lockingScript, transfer.ExchangeFee, false,
@@ -219,7 +195,7 @@ func (a *Agent) processTransfer(ctx context.Context, transaction *state.Transact
 			logger.Warn(ctx, "Insufficient tx funding : %s", err)
 			return errors.Wrap(a.sendRejection(ctx, transaction,
 				platform.NewRejectErrorWithOutputIndex(actions.RejectionsInsufficientTxFeeFunding,
-					err.Error(), now, firstContractIndex)), "reject")
+					err.Error(), now, transferContracts.FirstContractOutputIndex)), "reject")
 		}
 
 		return errors.Wrap(err, "sign")
@@ -231,6 +207,69 @@ func (a *Agent) processTransfer(ctx context.Context, transaction *state.Transact
 
 	balances.Unlock()
 	return nil
+}
+
+func (a *Agent) buildBitcoinTransfer(ctx context.Context, transferTransaction *state.Transaction,
+	settlementTx *txbuilder.TxBuilder, instrumentTransfer *actions.InstrumentTransferField,
+	now uint64) error {
+
+	transferTransaction.Lock()
+	defer transferTransaction.Unlock()
+
+	quantity := uint64(0)
+	var usedInputs []uint32
+	for _, sender := range instrumentTransfer.InstrumentSenders {
+		for _, used := range usedInputs {
+			if used == sender.Index {
+				return platform.NewRejectError(actions.RejectionsMsgMalformed,
+					"input used as bitcoin sender more than once", now)
+			}
+		}
+		usedInputs = append(usedInputs, sender.Index)
+
+		output, err := transferTransaction.InputOutput(int(sender.Index))
+		if err != nil {
+			return platform.NewRejectError(actions.RejectionsMsgMalformed, err.Error(), now)
+		}
+
+		if sender.Quantity >= output.Value {
+			return platform.NewRejectError(actions.RejectionsInsufficientValue,
+				"sender input value less than quantity", now)
+		}
+
+		quantity += output.Value
+	}
+
+	for i, receiver := range instrumentTransfer.InstrumentReceivers {
+		ra, err := bitcoin.DecodeRawAddress(receiver.Address)
+		if err != nil {
+			return platform.NewRejectError(actions.RejectionsMsgMalformed, err.Error(), now)
+		}
+
+		lockingScript, err := ra.LockingScript()
+		if err != nil {
+			return errors.Wrapf(err, "locking script %d", i)
+		}
+
+		if err := settlementTx.AddOutput(lockingScript, receiver.Quantity, false,
+			false); err != nil {
+			return platform.NewRejectError(actions.RejectionsMsgMalformed, err.Error(), now)
+		}
+
+		if receiver.Quantity > quantity {
+			return platform.NewRejectError(actions.RejectionsInsufficientValue,
+				"sender quantity less than receiver", now)
+		}
+
+		quantity -= receiver.Quantity
+	}
+
+	if quantity != 0 {
+		return platform.NewRejectError(actions.RejectionsInsufficientValue,
+			"sender quantity more than receiver", now)
+	}
+
+	return errors.New("Not Implemented")
 }
 
 func (a *Agent) completeSettlement(ctx context.Context, transferTxID bitcoin.Hash32,
@@ -281,6 +320,7 @@ func (a *Agent) processSettlement(ctx context.Context, transaction *state.Transa
 
 	outputCount := transaction.OutputCount()
 	var lockingScripts []bitcoin.Script
+	var transferTxID bitcoin.Hash32
 
 	// Update one instrument at a time.
 	for _, instrument := range settlement.Instruments {
@@ -289,6 +329,8 @@ func (a *Agent) processSettlement(ctx context.Context, transaction *state.Transa
 				instrument.ContractIndex, transaction.InputCount())
 			return nil
 		}
+
+		transferTxID = transaction.Input(int(instrument.ContractIndex)).PreviousOutPoint.Hash
 
 		contractInputOutput, err := transaction.InputOutput(int(instrument.ContractIndex))
 		if err != nil {
@@ -353,35 +395,58 @@ func (a *Agent) processSettlement(ctx context.Context, transaction *state.Transa
 
 		// Update any balances that weren't new and therefore weren't updated by the "add".
 		for i, balance := range balances {
-			if balance == addedBalances[i] {
-				continue // balance was new and already up to date from the add.
+			addedBalance := addedBalances[i]
+			addedBalance.Lock()
+			if balance == addedBalance {
+				logger.WarnWithFields(instrumentCtx, []logger.Field{
+					logger.Timestamp("timestamp", int64(addedBalance.Timestamp)),
+					logger.Timestamp("existing_timestamp", int64(settlement.Timestamp)),
+					logger.Stringer("locking_script", balance.LockingScript),
+					logger.Uint64("quantity", balance.Quantity),
+				}, "New hard balance settlement")
+				addedBalance.Unlock()
+				continue // balance was new and is already up to date from the add.
 			}
 
 			// If the balance doesn't match then it already existed and must be updated.
-			addedBalances[i].Lock()
-			if settlement.Timestamp < addedBalances[i].Timestamp {
+			if settlement.Timestamp < addedBalance.Timestamp {
 				logger.WarnWithFields(instrumentCtx, []logger.Field{
-					logger.Timestamp("timestamp", int64(addedBalances[i].Timestamp)),
-					logger.Timestamp("existing_timestamp", int64(settlement.Timestamp)),
+					logger.Timestamp("timestamp", int64(addedBalance.Timestamp)),
+					logger.Timestamp("old_timestamp", int64(settlement.Timestamp)),
 					logger.Stringer("locking_script", balance.LockingScript),
-				}, "Older settlement")
-				addedBalances[i].Unlock()
+					logger.Uint64("quantity", addedBalance.Quantity),
+					logger.Uint64("old_quantity", balance.Quantity),
+				}, "Older settlement ignored")
+				addedBalance.Unlock()
 				continue
 			}
 
 			// Update balance
-			addedBalances[i].Quantity = balance.Quantity
-			addedBalances[i].Timestamp = settlement.Timestamp
-			addedBalances[i].TxID = &txid
-			addedBalances[i].MarkModified()
-			addedBalances[i].Unlock()
-		}
+			if addedBalance.Settle(transferTxID, txid, settlement.Timestamp) {
+				logger.WarnWithFields(instrumentCtx, []logger.Field{
+					logger.Timestamp("timestamp", int64(addedBalance.Timestamp)),
+					logger.Timestamp("existing_timestamp", int64(settlement.Timestamp)),
+					logger.Stringer("locking_script", balance.LockingScript),
+					logger.Uint64("settlement_quantity", balance.Quantity),
+					logger.Uint64("quantity", addedBalance.Quantity),
+				}, "Applied prior balance adjustment settlement")
+				addedBalance.Unlock()
+				continue
+			}
 
-		for _, balance := range addedBalances {
-			logger.InfoWithFields(instrumentCtx, []logger.Field{
+			logger.WarnWithFields(instrumentCtx, []logger.Field{
+				logger.Timestamp("timestamp", int64(addedBalance.Timestamp)),
+				logger.Timestamp("existing_timestamp", int64(settlement.Timestamp)),
 				logger.Stringer("locking_script", balance.LockingScript),
+				logger.Uint64("previous_quantity", addedBalance.Quantity),
 				logger.Uint64("quantity", balance.Quantity),
-			}, "Balance settled")
+			}, "Applying hard balance settlement")
+
+			addedBalance.Quantity = balance.Quantity
+			addedBalance.Timestamp = settlement.Timestamp
+			addedBalance.TxID = &txid
+			addedBalance.MarkModified()
+			addedBalance.Unlock()
 		}
 
 		a.balances.ReleaseMulti(instrumentCtx, agentLockingScript, instrumentCode, addedBalances)
@@ -473,6 +538,10 @@ type TransferContracts struct {
 	LockingScripts []bitcoin.Script
 	CurrentIndex   int // Index of LockingScripts that matches current contract agent
 
+	// FirstContractOutputIndex is the index of the output of the first contract. It will be zero
+	// unless bitcoin is the first transfer.
+	FirstContractOutputIndex int
+
 	PreviousLockingScript bitcoin.Script // Contract agent locking script before current agent.
 	NextLockingScript     bitcoin.Script // Contract agent locking script after current agent.
 
@@ -528,18 +597,50 @@ func parseTransferContracts(transferTransaction *state.Transaction, transfer *ac
 	}
 
 	result := &TransferContracts{
-		CurrentIndex:  -1,
-		Outputs:       make([]*wire.TxOut, count),
-		OutputIndexes: make([]int, count),
+		CurrentIndex:             -1,
+		FirstContractOutputIndex: -1,
+		Outputs:                  make([]*wire.TxOut, count),
+		OutputIndexes:            make([]int, count),
 	}
 
 	transferTransaction.Lock()
 	defer transferTransaction.Unlock()
 
 	outputCount := transferTransaction.OutputCount()
+	var instrumentCodes [][]byte
 	for i, instrumentTransfer := range transfer.Instruments {
+		if len(instrumentTransfer.InstrumentSenders) == 0 {
+			return nil, platform.NewRejectError(actions.RejectionsMsgMalformed, "missing senders",
+				now)
+		}
+
+		if len(instrumentTransfer.InstrumentReceivers) == 0 {
+			return nil, platform.NewRejectError(actions.RejectionsMsgMalformed, "missing receivers",
+				now)
+		}
+
+		var instrumentCode []byte
+		if instrumentTransfer.InstrumentType == protocol.BSVInstrumentID {
+			instrumentCode = nil
+		} else {
+			instrumentCode = instrumentTransfer.InstrumentCode
+		}
+
+		for _, instrument := range instrumentCodes {
+			if bytes.Equal(instrument, instrumentCode) {
+				return nil, platform.NewRejectError(actions.RejectionsMsgMalformed,
+					"duplicate instrument", now)
+			}
+		}
+
+		instrumentCodes = append(instrumentCodes, instrumentCode)
+
 		if instrumentTransfer.InstrumentType == protocol.BSVInstrumentID {
 			continue
+		}
+
+		if result.FirstContractOutputIndex == -1 {
+			result.FirstContractOutputIndex = i
 		}
 
 		if int(instrumentTransfer.ContractIndex) >= outputCount {

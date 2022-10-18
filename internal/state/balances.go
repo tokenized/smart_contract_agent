@@ -366,8 +366,9 @@ func (b *Balance) VerifySettlement(transferTxID bitcoin.Hash32) *BalanceAdjustme
 	return nil
 }
 
-func (b *Balance) Settle(transferTxID, settlementTxID bitcoin.Hash32, now uint64) {
+func (b *Balance) Settle(transferTxID, settlementTxID bitcoin.Hash32, now uint64) bool {
 	var newAdjustments []*BalanceAdjustment
+	found := false
 	for _, adj := range b.Adjustments {
 		if transferTxID.Equal(adj.TxID) {
 			switch adj.Code {
@@ -379,6 +380,7 @@ func (b *Balance) Settle(transferTxID, settlementTxID bitcoin.Hash32, now uint64
 			b.TxID = &settlementTxID
 			b.Timestamp = now
 			b.isModified = true
+			found = true
 
 			continue
 		}
@@ -386,6 +388,8 @@ func (b *Balance) Settle(transferTxID, settlementTxID bitcoin.Hash32, now uint64
 		newAdjustments = append(newAdjustments, adj)
 	}
 	b.Adjustments = newAdjustments
+
+	return found
 }
 
 func (b *Balance) MarkModified() {

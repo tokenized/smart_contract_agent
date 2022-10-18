@@ -930,6 +930,11 @@ func Test_Transfers_Multi_Basic(t *testing.T) {
 			if a, ok := action.(*actions.Settlement); ok {
 				settlement = a
 			}
+
+			if m, ok := action.(*actions.Rejection); ok {
+				js, _ = json.MarshalIndent(m, "", "  ")
+				t.Logf("Rejection : %s", js)
+			}
 		}
 
 		if settlement == nil {

@@ -59,3 +59,13 @@ func appendLockingScript(lockingScripts []bitcoin.Script,
 
 	return append(lockingScripts, lockingScript)
 }
+
+func findBitcoinOutput(tx *wire.MsgTx, lockingScript bitcoin.Script, value uint64) bool {
+	for _, txout := range tx.TxOut {
+		if txout.LockingScript.Equal(lockingScript) && txout.Value == value {
+			return true
+		}
+	}
+
+	return false
+}

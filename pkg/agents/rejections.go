@@ -15,6 +15,48 @@ import (
 	"github.com/pkg/errors"
 )
 
+func (a *Agent) processRejection(ctx context.Context, transaction *state.Transaction,
+	rejection *actions.Rejection, now uint64) error {
+
+	transaction.Lock()
+
+	receiverIndex := int(rejection.RejectAddressIndex)
+	outputCount := transaction.OutputCount()
+	if outputCount <= receiverIndex {
+		logger.InfoWithFields(ctx, []logger.Field{
+			logger.Int("receiver_index", receiverIndex),
+			logger.Int("output_count", outputCount),
+		}, "Invalid rejection receiver index")
+
+		transaction.Unlock()
+		return nil
+	}
+
+	output := transaction.Output(receiverIndex)
+
+	transaction.Unlock()
+
+	agentLockingScript := a.LockingScript()
+	if !output.LockingScript.Equal(agentLockingScript) {
+		logger.InfoWithFields(ctx, []logger.Field{
+			logger.Stringer("receiver_locking_script", output.LockingScript),
+		}, "Agent is not the message receiver")
+		return nil
+	}
+
+	logger.Info(ctx, "Processing rejection")
+
+	// TODO Check if this is a reject to a settlement request or signature request from another
+	// contract in a multi-contract transfer. --ce
+
+	// TODO Verify this is from the next contract in the transfer. --ce
+
+	// TODO Send reject to previous contract in the transfer, or if this is the first contract then
+	// create a reject for the transfer itself. --ce
+
+	return nil
+}
+
 // sendRejection creates a reject message transaction that spends the specified output and contains
 // the specified reject code.
 func (a *Agent) sendRejection(ctx context.Context, transaction *state.Transaction,
