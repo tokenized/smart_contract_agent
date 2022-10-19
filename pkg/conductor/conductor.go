@@ -31,9 +31,11 @@ type Conductor struct {
 	balances      *state.BalanceCache
 	transactions  *state.TransactionCache
 	subscriptions *state.SubscriptionCache
+	services      *state.ContractServicesCache
 
 	broadcaster agents.Broadcaster
 	fetcher     agents.Fetcher
+	headers     agents.BlockHeaders
 
 	lookup map[state.ContractHash]bitcoin.Hash32
 
@@ -45,7 +47,8 @@ type Conductor struct {
 func NewConductor(baseKey bitcoin.Key, config agents.Config, feeLockingScript bitcoin.Script,
 	spyNodeClient spynode.Client, contracts *state.ContractCache, balances *state.BalanceCache,
 	transactions *state.TransactionCache, subscriptions *state.SubscriptionCache,
-	broadcaster agents.Broadcaster, fetcher agents.Fetcher) *Conductor {
+	services *state.ContractServicesCache, broadcaster agents.Broadcaster, fetcher agents.Fetcher,
+	headers agents.BlockHeaders) *Conductor {
 
 	return &Conductor{
 		baseKey:              baseKey,
@@ -56,8 +59,10 @@ func NewConductor(baseKey bitcoin.Key, config agents.Config, feeLockingScript bi
 		balances:             balances,
 		transactions:         transactions,
 		subscriptions:        subscriptions,
+		services:             services,
 		broadcaster:          broadcaster,
 		fetcher:              fetcher,
+		headers:              headers,
 		lookup:               make(map[state.ContractHash]bitcoin.Hash32),
 		nextSpyNodeMessageID: 1,
 	}
@@ -183,7 +188,8 @@ func (c *Conductor) AddAgent(ctx context.Context,
 	}
 
 	agent, err := agents.NewAgent(key, c.config, addedContract, c.feeLockingScript, c.contracts,
-		c.balances, c.transactions, c.subscriptions, c.broadcaster, c.fetcher)
+		c.balances, c.transactions, c.subscriptions, c.services, c.broadcaster, c.fetcher,
+		c.headers)
 	if err != nil {
 		return nil, errors.Wrap(err, "new agent")
 	}
@@ -229,7 +235,8 @@ func (c *Conductor) GetAgent(ctx context.Context,
 	}
 
 	agent, err := agents.NewAgent(key, c.config, contract, c.feeLockingScript, c.contracts,
-		c.balances, c.transactions, c.subscriptions, c.broadcaster, c.fetcher)
+		c.balances, c.transactions, c.subscriptions, c.services, c.broadcaster, c.fetcher,
+		c.headers)
 	if err != nil {
 		return nil, errors.Wrap(err, "new agent")
 	}

@@ -24,6 +24,7 @@ const (
 	URLGetAddressHistory = "https://api.whatsonchain.com/v1/bsv/%s/address/%s/history"
 	URLGetRawTx          = "https://api.whatsonchain.com/v1/bsv/%s/tx/%s/hex"
 	URLGetRawTxs         = "https://api.whatsonchain.com/v1/bsv/%s/txs/hex"
+	URLGetHeader         = "https://api.whatsonchain.com/v1/bsv/%s/block/height/%d"
 )
 
 var (
@@ -50,6 +51,10 @@ type HistoryItem struct {
 }
 
 type History []*HistoryItem
+
+type BlockHashOnly struct {
+	Hash *bitcoin.Hash32 `json:"hash"`
+}
 
 func (err HTTPError) Error() string {
 	if len(err.Message) > 0 {
@@ -120,6 +125,17 @@ func (s *Service) GetTx(ctx context.Context, txid bitcoin.Hash32) (*wire.MsgTx, 
 	}
 
 	return tx, nil
+}
+
+func (s *Service) BlockHash(ctx context.Context, height int) (*bitcoin.Hash32, error) {
+	url := fmt.Sprintf(URLGetHeader, s.NetworkName(), height)
+
+	response := &BlockHashOnly{}
+	if err := getWithToken(ctx, url, s.apiKey, response); err != nil {
+		return nil, errors.Wrap(err, "get")
+	}
+
+	return response.Hash, nil
 }
 
 // postWithToken sends a request to the HTTP server using the POST method with an authentication

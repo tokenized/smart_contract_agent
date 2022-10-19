@@ -122,6 +122,8 @@ func (a *Agent) processSettlementRequest(ctx context.Context, transaction *state
 
 	isFinalContract := transferContracts.IsFinalContract()
 
+	headers := platform.NewHeadersCache(a.headers)
+
 	var balances state.Balances
 	for _, contractLockingScript := range transferContracts.LockingScripts {
 		for instrumentIndex, contractOutput := range transferContracts.Outputs {
@@ -151,7 +153,8 @@ func (a *Agent) processSettlementRequest(ctx context.Context, transaction *state
 
 				instrumentSettlement, instrumentBalances, err := a.buildInstrumentSettlement(instrumentCtx,
 					settlementTx, settlement, transferTransaction, instrumentCode,
-					instrumentTransfer, transferContracts.Outputs[instrumentIndex], true, now)
+					instrumentTransfer, transferContracts.Outputs[instrumentIndex], true, headers,
+					now)
 				if err != nil {
 					balances.RevertPending(&transferTxID)
 					balances.Unlock()

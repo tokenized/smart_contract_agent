@@ -111,10 +111,15 @@ func main() {
 		logger.Fatal(ctx, "main : Failed to create subscription cache : %s", err)
 	}
 
+	services, err := state.NewContractServicesCache(cache)
+	if err != nil {
+		logger.Fatal(ctx, "main : Failed to create services cache : %s", err)
+	}
+
 	broadcaster := NewNoopBroadcaster()
 
 	conductor := conductor.NewConductor(cfg.BaseKey, cfg.Agents, feeLockingScript, nil, contracts,
-		balances, transactions, subscriptions, broadcaster, woc)
+		balances, transactions, subscriptions, services, broadcaster, woc, woc)
 
 	var cacheWait, loadWait sync.WaitGroup
 

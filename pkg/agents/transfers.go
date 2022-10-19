@@ -80,6 +80,8 @@ func (a *Agent) processTransfer(ctx context.Context, transaction *state.Transact
 		Timestamp: now,
 	}
 
+	headers := platform.NewHeadersCache(a.headers)
+
 	var balances state.Balances
 	for index, instrumentTransfer := range transfer.Instruments {
 		if instrumentTransfer.InstrumentType == protocol.BSVInstrumentID {
@@ -120,7 +122,7 @@ func (a *Agent) processTransfer(ctx context.Context, transaction *state.Transact
 
 		instrumentSettlement, instrumentBalances, err := a.buildInstrumentSettlement(instrumentCtx,
 			settlementTx, settlement, transaction, instrumentCode, instrumentTransfer,
-			transferContracts.Outputs[index], transferContracts.IsMultiContract(), now)
+			transferContracts.Outputs[index], transferContracts.IsMultiContract(), headers, now)
 		if err != nil {
 			if rejectError, ok := errors.Cause(err).(platform.RejectError); ok {
 				return errors.Wrap(a.sendRejection(instrumentCtx, transaction, rejectError),
@@ -191,6 +193,7 @@ func (a *Agent) processTransfer(ctx context.Context, transaction *state.Transact
 
 	// Sign settlement tx.
 	if _, err := settlementTx.Sign([]bitcoin.Key{a.Key()}); err != nil {
+		balances.Unlock()
 		if errors.Cause(err) == txbuilder.ErrInsufficientValue {
 			logger.Warn(ctx, "Insufficient tx funding : %s", err)
 			return errors.Wrap(a.sendRejection(ctx, transaction,
@@ -202,6 +205,7 @@ func (a *Agent) processTransfer(ctx context.Context, transaction *state.Transact
 	}
 
 	if err := a.completeSettlement(ctx, txid, settlementTx, balances, now); err != nil {
+		balances.Unlock()
 		return errors.Wrap(err, "complete settlement")
 	}
 
@@ -716,11 +720,16 @@ func parseTransferContracts(transferTransaction *state.Transaction, transfer *ac
 func (a *Agent) buildInstrumentSettlement(ctx context.Context, settlementTx *txbuilder.TxBuilder,
 	settlement *actions.Settlement, transferTransaction *state.Transaction,
 	instrumentCode state.InstrumentCode, instrumentTransfer *actions.InstrumentTransferField,
-	contractOutput *wire.TxOut, isMultiContract bool,
+	contractOutput *wire.TxOut, isMultiContract bool, headers BlockHeaders,
 	now uint64) (*actions.InstrumentSettlementField, state.Balances, error) {
 
 	agentLockingScript := a.LockingScript()
 	adminLockingScript := a.AdminLockingScript()
+
+	agentAddress, err := bitcoin.RawAddressFromLockingScript(agentLockingScript)
+	if err != nil {
+		return nil, nil, errors.Wrap(err, "agent address")
+	}
 
 	transferTxID := transferTransaction.GetTxID()
 	contractInputIndex, err := addResponseInput(settlementTx, transferTxID, contractOutput,
@@ -773,7 +782,10 @@ func (a *Agent) buildInstrumentSettlement(ctx context.Context, settlementTx *txb
 			"expired", now, int(instrumentTransfer.ContractIndex))
 	}
 
-	// TODO Verify receiver signatures if they are required. --ce
+	identityOracles, err := a.GetIdentityOracles(ctx)
+	if err != nil {
+		return nil, nil, errors.Wrap(err, "get identity oracles")
+	}
 
 	// Get relevant balances.
 	// TODO Locking scripts might need to be in order or something so when two different
@@ -823,7 +835,7 @@ func (a *Agent) buildInstrumentSettlement(ctx context.Context, settlementTx *txb
 
 		receiverQuantity += receiver.Quantity
 
-		ra, err := bitcoin.DecodeRawAddress(receiver.Address)
+		receiverAddress, err := bitcoin.DecodeRawAddress(receiver.Address)
 		if err != nil {
 			logger.Warn(ctx, "Invalid receiver address : %s", err)
 			return nil, nil, platform.NewRejectErrorWithOutputIndex(actions.RejectionsMsgMalformed,
@@ -831,12 +843,21 @@ func (a *Agent) buildInstrumentSettlement(ctx context.Context, settlementTx *txb
 				int(instrumentTransfer.ContractIndex))
 		}
 
-		lockingScript, err := ra.LockingScript()
+		lockingScript, err := receiverAddress.LockingScript()
 		if err != nil {
 			logger.Warn(ctx, "Invalid receiver address script : %s", err)
 			return nil, nil, platform.NewRejectErrorWithOutputIndex(actions.RejectionsMsgMalformed,
 				fmt.Sprintf("invalid receiver address script: %s", err), now,
 				int(instrumentTransfer.ContractIndex))
+		}
+
+		if len(identityOracles) > 0 {
+			// Verify receiver identity oracle signatures.
+			if err := verifyIdentityOracleReceiverSignature(ctx, agentAddress,
+				instrumentTransfer.InstrumentCode, identityOracles, receiver, receiverAddress,
+				headers, now); err != nil {
+				return nil, nil, errors.Wrap(err, "identity oracle signature")
+			}
 		}
 
 		if !adminLockingScript.Equal(lockingScript) {
@@ -941,6 +962,64 @@ func (a *Agent) buildInstrumentSettlement(ctx context.Context, settlementTx *txb
 	}
 
 	balances.FinalizePending(&transferTxID, isMultiContract)
-
 	return instrumentSettlement, balances, nil
+}
+
+func verifyIdentityOracleReceiverSignature(ctx context.Context,
+	contractAddress bitcoin.RawAddress, instrumentCode []byte, identityOracles []*IdentityOracle,
+	receiver *actions.InstrumentReceiverField, receiverAddress bitcoin.RawAddress,
+	headers BlockHeaders, now uint64) error {
+
+	if receiver.OracleSigAlgorithm == 0 {
+		return platform.NewRejectError(actions.RejectionsInvalidSignature,
+			"missing identity oracle signature", now)
+	}
+
+	var oraclePublicKey *bitcoin.PublicKey
+	for _, oracle := range identityOracles {
+		if oracle.Index == int(receiver.OracleIndex) {
+			oraclePublicKey = &oracle.PublicKey
+			break
+		}
+	}
+
+	if oraclePublicKey == nil {
+		return platform.NewRejectError(actions.RejectionsMsgMalformed,
+			"invalid identity oracle index", now)
+	}
+
+	signature, err := bitcoin.SignatureFromBytes(receiver.OracleConfirmationSig)
+	if err != nil {
+		return platform.NewRejectError(actions.RejectionsInvalidSignature,
+			fmt.Sprintf("invalid identity oracle signature encoding: %s", err), now)
+	}
+
+	hash, err := headers.BlockHash(ctx, int(receiver.OracleSigBlockHeight))
+	if err != nil {
+		return errors.Wrap(err, "get block hash")
+	}
+
+	if receiver.OracleSigExpiry != 0 && now > receiver.OracleSigExpiry {
+		return platform.NewRejectError(actions.RejectionsTransferExpired,
+			"identity oracle signature expired", now)
+	}
+
+	logger.InfoWithFields(ctx, []logger.Field{
+		logger.Stringer("oracle_public_key", oraclePublicKey),
+		logger.Int("block_height", int(receiver.OracleSigBlockHeight)),
+		logger.Stringer("block_hash", hash),
+	}, "Verifying identity oracle receiver signature")
+
+	sigHash, err := protocol.TransferOracleSigHash(ctx, contractAddress, instrumentCode,
+		receiverAddress, *hash, receiver.OracleSigExpiry, 1)
+	if err != nil {
+		return errors.Wrap(err, "sig hash")
+	}
+
+	if !signature.Verify(*sigHash, *oraclePublicKey) {
+		return platform.NewRejectError(actions.RejectionsInvalidSignature,
+			"invalid identity oracle signature", now)
+	}
+
+	return nil
 }

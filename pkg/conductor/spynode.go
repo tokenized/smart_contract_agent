@@ -95,6 +95,10 @@ func (c *Conductor) HandleMessage(ctx context.Context, payload spynode.MessagePa
 	case *spynode.AcceptRegister:
 		logger.Info(ctx, "Spynode registration accepted")
 
+		if err := c.spyNodeClient.SubscribeContracts(ctx); err != nil {
+			logger.Error(ctx, "Failed to subscribe to contracts : %s", err)
+		}
+
 		nextMessageID := c.NextSpyNodeMessageID()
 		if err := c.spyNodeClient.Ready(ctx, nextMessageID); err != nil {
 			logger.Error(ctx, "Failed to notify spynode ready : %s", err)

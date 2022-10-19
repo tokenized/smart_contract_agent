@@ -115,8 +115,14 @@ func main() {
 		logger.Fatal(ctx, "main : Failed to create subscription cache : %s", err)
 	}
 
+	services, err := state.NewContractServicesCache(cache)
+	if err != nil {
+		logger.Fatal(ctx, "main : Failed to create services cache : %s", err)
+	}
+
 	conductor := conductor.NewConductor(cfg.BaseKey, cfg.Agents, feeLockingScript, spyNode,
-		contracts, balances, transactions, subscriptions, NewSpyNodeBroadcaster(spyNode), spyNode)
+		contracts, balances, transactions, subscriptions, services, NewSpyNodeBroadcaster(spyNode),
+		spyNode, spyNode)
 	spyNode.RegisterHandler(conductor)
 
 	var spyNodeWait, cacheWait sync.WaitGroup

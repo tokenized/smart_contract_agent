@@ -46,9 +46,11 @@ type Agent struct {
 	balances      *state.BalanceCache
 	transactions  *state.TransactionCache
 	subscriptions *state.SubscriptionCache
+	services      *state.ContractServicesCache
 
 	broadcaster Broadcaster
 	fetcher     Fetcher
+	headers     BlockHeaders
 
 	lock sync.Mutex
 }
@@ -59,6 +61,10 @@ type Fetcher interface {
 
 type Broadcaster interface {
 	BroadcastTx(context.Context, *wire.MsgTx, []uint32) error
+}
+
+type BlockHeaders interface {
+	BlockHash(context.Context, int) (*bitcoin.Hash32, error)
 }
 
 type TransactionWithOutputs interface {
@@ -76,7 +82,8 @@ type TransactionWithOutputs interface {
 func NewAgent(key bitcoin.Key, config Config, contract *state.Contract,
 	feeLockingScript bitcoin.Script, contracts *state.ContractCache, balances *state.BalanceCache,
 	transactions *state.TransactionCache, subscriptions *state.SubscriptionCache,
-	broadcaster Broadcaster, fetcher Fetcher) (*Agent, error) {
+	services *state.ContractServicesCache, broadcaster Broadcaster,
+	fetcher Fetcher, headers BlockHeaders) (*Agent, error) {
 
 	result := &Agent{
 		key:              key,
@@ -87,8 +94,10 @@ func NewAgent(key bitcoin.Key, config Config, contract *state.Contract,
 		balances:         balances,
 		transactions:     transactions,
 		subscriptions:    subscriptions,
+		services:         services,
 		broadcaster:      broadcaster,
 		fetcher:          fetcher,
+		headers:          headers,
 	}
 
 	return result, nil
@@ -128,6 +137,93 @@ func (a *Agent) ContractIsExpired(now uint64) bool {
 	defer a.contract.Unlock()
 
 	return a.contract.IsExpired(now)
+}
+
+type IdentityOracle struct {
+	Index     int
+	PublicKey bitcoin.PublicKey
+}
+
+func (a *Agent) GetIdentityOracles(ctx context.Context) ([]*IdentityOracle, error) {
+	a.lock.Lock()
+	contract := a.contract
+	a.lock.Unlock()
+
+	contract.Lock()
+	defer contract.Unlock()
+
+	if contract.Formation == nil {
+		logger.WarnWithFields(ctx, []logger.Field{
+			logger.Stringer("contract_locking_script", contract.LockingScript),
+		}, "Missing contract formation")
+		return nil, errors.New("Missing contract formation")
+	}
+
+	var result []*IdentityOracle
+	for i, oracle := range contract.Formation.Oracles {
+		if len(oracle.OracleTypes) != 0 {
+			isIdentity := false
+			for _, typ := range oracle.OracleTypes {
+				if typ == actions.ServiceTypeIdentityOracle {
+					isIdentity = true
+					break
+				}
+			}
+
+			if !isIdentity {
+				continue
+			}
+		}
+
+		ra, err := bitcoin.DecodeRawAddress(oracle.EntityContract)
+		if err != nil {
+			logger.WarnWithFields(ctx, []logger.Field{
+				logger.Stringer("contract_locking_script", contract.LockingScript),
+			}, "Invalid oracle entity contract address %d : %s", i, err)
+			continue
+		}
+
+		lockingScript, err := ra.LockingScript()
+		if err != nil {
+			logger.WarnWithFields(ctx, []logger.Field{
+				logger.Stringer("contract_locking_script", contract.LockingScript),
+			}, "Failed to create oracle entity contract locking script %d : %s", i, err)
+			continue
+		}
+
+		services, err := a.services.Get(ctx, lockingScript)
+		if err != nil {
+			logger.WarnWithFields(ctx, []logger.Field{
+				logger.Stringer("contract_locking_script", contract.LockingScript),
+				logger.Stringer("service_locking_script", lockingScript),
+			}, "Failed to get oracle entity contract service %d : %s", i, err)
+			continue
+		}
+
+		if services == nil {
+			logger.WarnWithFields(ctx, []logger.Field{
+				logger.Stringer("contract_locking_script", contract.LockingScript),
+				logger.Stringer("service_locking_script", lockingScript),
+			}, "Oracle entity contract service not found %d : %s", i, err)
+			continue
+		}
+
+		for _, service := range services.Services {
+			if service.Type != actions.ServiceTypeIdentityOracle {
+				continue
+			}
+
+			result = append(result, &IdentityOracle{
+				Index:     i,
+				PublicKey: service.PublicKey,
+			})
+			break
+		}
+
+		a.services.Release(ctx, lockingScript)
+	}
+
+	return result, nil
 }
 
 func (a *Agent) FeeLockingScript() bitcoin.Script {

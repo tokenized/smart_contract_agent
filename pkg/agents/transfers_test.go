@@ -3,6 +3,7 @@ package agents
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	mathRand "math/rand"
 	"testing"
 	"time"
@@ -38,8 +39,8 @@ func Test_Transfers_Basic(t *testing.T) {
 	}
 
 	agent, err := NewAgent(contractKey, DefaultConfig(), contract, feeLockingScript,
-		caches.Contracts, caches.Balances, caches.Transactions, caches.Subscriptions, broadcaster,
-		nil)
+		caches.Contracts, caches.Balances, caches.Transactions, caches.Subscriptions,
+		caches.Services, broadcaster, nil, nil)
 	if err != nil {
 		t.Fatalf("Failed to create agent : %s", err)
 	}
@@ -378,8 +379,8 @@ func Test_Transfers_InsufficientQuantity(t *testing.T) {
 	_, feeLockingScript, _ := state.MockKey()
 
 	agent, err := NewAgent(contractKey, DefaultConfig(), contract, feeLockingScript,
-		caches.Contracts, caches.Balances, caches.Transactions, caches.Subscriptions, broadcaster,
-		nil)
+		caches.Contracts, caches.Balances, caches.Transactions, caches.Subscriptions,
+		caches.Services, broadcaster, nil, nil)
 	if err != nil {
 		t.Fatalf("Failed to create agent : %s", err)
 	}
@@ -545,6 +546,577 @@ func Test_Transfers_InsufficientQuantity(t *testing.T) {
 	}
 }
 
+func Test_Transfers_IdentityOracle_MissingSignature(t *testing.T) {
+	ctx := logger.ContextWithLogger(context.Background(), true, true, "")
+	store := storage.NewMockStorage()
+	broadcaster := state.NewMockTxBroadcaster()
+
+	caches := state.StartTestCaches(ctx, t, store, cacher.DefaultConfig(), time.Second)
+
+	contractKey, contractLockingScript, adminKey, contract, instrument, _ := state.MockInstrumentWithOracle(ctx, caches)
+	_, feeLockingScript, _ := state.MockKey()
+
+	adminLockingScript, err := adminKey.LockingScript()
+	if err != nil {
+		t.Fatalf("Failed to create admin locking script : %s", err)
+	}
+
+	agent, err := NewAgent(contractKey, DefaultConfig(), contract, feeLockingScript,
+		caches.Contracts, caches.Balances, caches.Transactions, caches.Subscriptions,
+		caches.Services, broadcaster, nil, nil)
+	if err != nil {
+		t.Fatalf("Failed to create agent : %s", err)
+	}
+
+	instrumentTransfer := &actions.InstrumentTransferField{
+		ContractIndex:  0,
+		InstrumentType: string(instrument.InstrumentType[:]),
+		InstrumentCode: instrument.InstrumentCode[:],
+	}
+
+	transfer := &actions.Transfer{
+		Instruments: []*actions.InstrumentTransferField{instrumentTransfer},
+	}
+
+	tx := txbuilder.NewTxBuilder(0.05, 0.0)
+
+	keys := []bitcoin.Key{adminKey}
+	var spentOutputs []*expanded_tx.Output
+
+	// Add senders
+	senderQuantity := uint64(mathRand.Intn(5000)) + 1
+	instrumentTransfer.InstrumentSenders = append(instrumentTransfer.InstrumentSenders,
+		&actions.QuantityIndexField{
+			Quantity: senderQuantity,
+			Index:    uint32(len(tx.MsgTx.TxIn)),
+		})
+
+	// Add input
+	outpoint := state.MockOutPoint(adminLockingScript, 1)
+	spentOutputs = append(spentOutputs, &expanded_tx.Output{
+		LockingScript: adminLockingScript,
+		Value:         1,
+	})
+
+	if err := tx.AddInput(*outpoint, adminLockingScript, 1); err != nil {
+		t.Fatalf("Failed to add input : %s", err)
+	}
+
+	// Add receivers
+	for {
+		_, _, ra := state.MockKey()
+		quantity := uint64(mathRand.Intn(1000)) + 1
+		if quantity > senderQuantity {
+			quantity = senderQuantity
+		}
+		senderQuantity -= quantity
+		instrumentTransfer.InstrumentReceivers = append(instrumentTransfer.InstrumentReceivers,
+			&actions.InstrumentReceiverField{
+				Address:  ra.Bytes(),
+				Quantity: quantity,
+			})
+
+		if senderQuantity == 0 {
+			break
+		}
+	}
+
+	// Add contract output
+	if err := tx.AddOutput(contractLockingScript, 100, false, false); err != nil {
+		t.Fatalf("Failed to add contract output : %s", err)
+	}
+
+	js, _ := json.MarshalIndent(transfer, "", "  ")
+	t.Logf("Transfer : %s", js)
+
+	// Add action output
+	transferScript, err := protocol.Serialize(transfer, true)
+	if err != nil {
+		t.Fatalf("Failed to serialize transfer action : %s", err)
+	}
+
+	if err := tx.AddOutput(transferScript, 0, false, false); err != nil {
+		t.Fatalf("Failed to add transfer action output : %s", err)
+	}
+
+	// Add funding
+	key, lockingScript, _ := state.MockKey()
+	keys = append(keys, key)
+	outpoint = state.MockOutPoint(lockingScript, 200)
+	spentOutputs = append(spentOutputs, &expanded_tx.Output{
+		LockingScript: lockingScript,
+		Value:         200,
+	})
+
+	if err := tx.AddInput(*outpoint, lockingScript, 200); err != nil {
+		t.Fatalf("Failed to add input : %s", err)
+	}
+
+	_, changeLockingScript, _ := state.MockKey()
+	tx.SetChangeLockingScript(changeLockingScript, "")
+
+	if _, err := tx.Sign(keys); err != nil {
+		t.Fatalf("Failed to sign tx : %s", err)
+	}
+
+	t.Logf("Created tx : %s", tx.String(bitcoin.MainNet))
+
+	addTransaction := &state.Transaction{
+		Tx:           tx.MsgTx,
+		SpentOutputs: spentOutputs,
+	}
+
+	transaction, err := caches.Transactions.Add(ctx, addTransaction)
+	if err != nil {
+		t.Fatalf("Failed to add transaction : %s", err)
+	}
+
+	now := uint64(time.Now().UnixNano())
+	if err := agent.Process(ctx, transaction, []actions.Action{transfer}, now); err != nil {
+		t.Fatalf("Failed to process transaction : %s", err)
+	}
+
+	caches.Transactions.Release(ctx, transaction.GetTxID())
+
+	caches.Contracts.Release(ctx, contractLockingScript)
+	caches.StopTestCaches()
+
+	responseTx := broadcaster.GetLastTx()
+	if responseTx == nil {
+		t.Fatalf("No response tx")
+	}
+
+	t.Logf("Response Tx : %s", responseTx)
+
+	// Find rejection action
+	var rejection *actions.Rejection
+	for _, txout := range responseTx.TxOut {
+		action, err := protocol.Deserialize(txout.LockingScript, true)
+		if err != nil {
+			continue
+		}
+
+		r, ok := action.(*actions.Rejection)
+		if ok {
+			rejection = r
+		}
+	}
+
+	if rejection == nil {
+		t.Fatalf("Missing rejection action")
+	}
+
+	rejectData := actions.RejectionsData(rejection.RejectionCode)
+	if rejectData != nil {
+		t.Logf("Rejection Code : %s", rejectData.Label)
+	}
+
+	js, _ = json.MarshalIndent(rejection, "", "  ")
+	t.Logf("Rejection : %s", js)
+
+	if rejection.RejectionCode != actions.RejectionsInvalidSignature {
+		t.Errorf("Wrong rejection code : got %d, want %d", rejection.RejectionCode,
+			actions.RejectionsInvalidSignature)
+	}
+}
+
+func Test_Transfers_IdentityOracle_Valid(t *testing.T) {
+	ctx := logger.ContextWithLogger(context.Background(), true, true, "")
+	store := storage.NewMockStorage()
+	broadcaster := state.NewMockTxBroadcaster()
+
+	caches := state.StartTestCaches(ctx, t, store, cacher.DefaultConfig(), time.Second)
+
+	contractKey, contractLockingScript, adminKey, contract, instrument, identityKey := state.MockInstrumentWithOracle(ctx, caches)
+	_, feeLockingScript, _ := state.MockKey()
+
+	adminLockingScript, err := adminKey.LockingScript()
+	if err != nil {
+		t.Fatalf("Failed to create admin locking script : %s", err)
+	}
+
+	contractAddress, err := bitcoin.RawAddressFromLockingScript(contractLockingScript)
+	if err != nil {
+		t.Fatalf("Failed to create contract address : %s", err)
+	}
+
+	headers := state.NewMockHeaders()
+
+	headerHeight := 100045
+	var headerHash bitcoin.Hash32
+	rand.Read(headerHash[:])
+	headers.AddHeader(headerHeight, headerHash)
+
+	agent, err := NewAgent(contractKey, DefaultConfig(), contract, feeLockingScript,
+		caches.Contracts, caches.Balances, caches.Transactions, caches.Subscriptions,
+		caches.Services, broadcaster, nil, headers)
+	if err != nil {
+		t.Fatalf("Failed to create agent : %s", err)
+	}
+
+	instrumentTransfer := &actions.InstrumentTransferField{
+		ContractIndex:  0,
+		InstrumentType: string(instrument.InstrumentType[:]),
+		InstrumentCode: instrument.InstrumentCode[:],
+	}
+
+	transfer := &actions.Transfer{
+		Instruments: []*actions.InstrumentTransferField{instrumentTransfer},
+	}
+
+	tx := txbuilder.NewTxBuilder(0.05, 0.0)
+
+	keys := []bitcoin.Key{adminKey}
+	var spentOutputs []*expanded_tx.Output
+
+	// Add senders
+	senderQuantity := uint64(mathRand.Intn(5000)) + 1000
+	instrumentTransfer.InstrumentSenders = append(instrumentTransfer.InstrumentSenders,
+		&actions.QuantityIndexField{
+			Quantity: senderQuantity,
+			Index:    uint32(len(tx.MsgTx.TxIn)),
+		})
+
+	// Add input
+	outpoint := state.MockOutPoint(adminLockingScript, 1)
+	spentOutputs = append(spentOutputs, &expanded_tx.Output{
+		LockingScript: adminLockingScript,
+		Value:         1,
+	})
+
+	if err := tx.AddInput(*outpoint, adminLockingScript, 1); err != nil {
+		t.Fatalf("Failed to add input : %s", err)
+	}
+
+	// Add receivers
+	for {
+		_, _, receiverAddress := state.MockKey()
+
+		sigHash, err := protocol.TransferOracleSigHash(ctx, contractAddress,
+			instrument.InstrumentCode[:], receiverAddress, headerHash, 0, 1)
+		if err != nil {
+			t.Fatalf("Failed to create identity sig hash : %s", err)
+		}
+
+		identitySignature, err := identityKey.Sign(*sigHash)
+		if err != nil {
+			t.Fatalf("Failed to sign identity certificate : %s", err)
+		}
+
+		quantity := uint64(mathRand.Intn(1000)) + 1
+		if quantity > senderQuantity {
+			quantity = senderQuantity
+		}
+		senderQuantity -= quantity
+		instrumentTransfer.InstrumentReceivers = append(instrumentTransfer.InstrumentReceivers,
+			&actions.InstrumentReceiverField{
+				Address:               receiverAddress.Bytes(),
+				Quantity:              quantity,
+				OracleSigAlgorithm:    1,
+				OracleIndex:           0,
+				OracleConfirmationSig: identitySignature.Bytes(),
+				OracleSigBlockHeight:  uint32(headerHeight),
+				OracleSigExpiry:       0,
+			})
+
+		if senderQuantity == 0 {
+			break
+		}
+	}
+
+	// Add contract output
+	if err := tx.AddOutput(contractLockingScript, 150, false, false); err != nil {
+		t.Fatalf("Failed to add contract output : %s", err)
+	}
+
+	js, _ := json.MarshalIndent(transfer, "", "  ")
+	t.Logf("Transfer : %s", js)
+
+	// Add action output
+	transferScript, err := protocol.Serialize(transfer, true)
+	if err != nil {
+		t.Fatalf("Failed to serialize transfer action : %s", err)
+	}
+
+	if err := tx.AddOutput(transferScript, 0, false, false); err != nil {
+		t.Fatalf("Failed to add transfer action output : %s", err)
+	}
+
+	// Add funding
+	key, lockingScript, _ := state.MockKey()
+	keys = append(keys, key)
+	outpoint = state.MockOutPoint(lockingScript, 250)
+	spentOutputs = append(spentOutputs, &expanded_tx.Output{
+		LockingScript: lockingScript,
+		Value:         250,
+	})
+
+	if err := tx.AddInput(*outpoint, lockingScript, 250); err != nil {
+		t.Fatalf("Failed to add input : %s", err)
+	}
+
+	_, changeLockingScript, _ := state.MockKey()
+	tx.SetChangeLockingScript(changeLockingScript, "")
+
+	if _, err := tx.Sign(keys); err != nil {
+		t.Fatalf("Failed to sign tx : %s", err)
+	}
+
+	t.Logf("Created tx : %s", tx.String(bitcoin.MainNet))
+
+	addTransaction := &state.Transaction{
+		Tx:           tx.MsgTx,
+		SpentOutputs: spentOutputs,
+	}
+
+	transaction, err := caches.Transactions.Add(ctx, addTransaction)
+	if err != nil {
+		t.Fatalf("Failed to add transaction : %s", err)
+	}
+
+	now := uint64(time.Now().UnixNano())
+	if err := agent.Process(ctx, transaction, []actions.Action{transfer}, now); err != nil {
+		t.Fatalf("Failed to process transaction : %s", err)
+	}
+
+	caches.Transactions.Release(ctx, transaction.GetTxID())
+
+	caches.Contracts.Release(ctx, contractLockingScript)
+	caches.StopTestCaches()
+
+	responseTx := broadcaster.GetLastTx()
+	if responseTx == nil {
+		t.Fatalf("No response tx")
+	}
+
+	t.Logf("Response Tx : %s", responseTx)
+
+	// Find settlement action
+	var settlement *actions.Settlement
+	for _, txout := range responseTx.TxOut {
+		action, err := protocol.Deserialize(txout.LockingScript, true)
+		if err != nil {
+			continue
+		}
+
+		if s, ok := action.(*actions.Settlement); ok {
+			settlement = s
+		}
+	}
+
+	if settlement == nil {
+		t.Fatalf("Missing settlement action")
+	}
+
+	js, _ = json.MarshalIndent(settlement, "", "  ")
+	t.Logf("Settlement : %s", js)
+}
+
+func Test_Transfers_IdentityOracle_BadSignature(t *testing.T) {
+	ctx := logger.ContextWithLogger(context.Background(), true, true, "")
+	store := storage.NewMockStorage()
+	broadcaster := state.NewMockTxBroadcaster()
+
+	caches := state.StartTestCaches(ctx, t, store, cacher.DefaultConfig(), time.Second)
+
+	contractKey, contractLockingScript, adminKey, contract, instrument, _ := state.MockInstrumentWithOracle(ctx, caches)
+	_, feeLockingScript, _ := state.MockKey()
+
+	adminLockingScript, err := adminKey.LockingScript()
+	if err != nil {
+		t.Fatalf("Failed to create admin locking script : %s", err)
+	}
+
+	badIdentityKey, _, _ := state.MockKey()
+
+	contractAddress, err := bitcoin.RawAddressFromLockingScript(contractLockingScript)
+	if err != nil {
+		t.Fatalf("Failed to create contract address : %s", err)
+	}
+
+	headers := state.NewMockHeaders()
+
+	headerHeight := 100045
+	var headerHash bitcoin.Hash32
+	rand.Read(headerHash[:])
+	headers.AddHeader(headerHeight, headerHash)
+
+	agent, err := NewAgent(contractKey, DefaultConfig(), contract, feeLockingScript,
+		caches.Contracts, caches.Balances, caches.Transactions, caches.Subscriptions,
+		caches.Services, broadcaster, nil, headers)
+	if err != nil {
+		t.Fatalf("Failed to create agent : %s", err)
+	}
+
+	instrumentTransfer := &actions.InstrumentTransferField{
+		ContractIndex:  0,
+		InstrumentType: string(instrument.InstrumentType[:]),
+		InstrumentCode: instrument.InstrumentCode[:],
+	}
+
+	transfer := &actions.Transfer{
+		Instruments: []*actions.InstrumentTransferField{instrumentTransfer},
+	}
+
+	tx := txbuilder.NewTxBuilder(0.05, 0.0)
+
+	keys := []bitcoin.Key{adminKey}
+	var spentOutputs []*expanded_tx.Output
+
+	// Add senders
+	senderQuantity := uint64(mathRand.Intn(5000)) + 1000
+	instrumentTransfer.InstrumentSenders = append(instrumentTransfer.InstrumentSenders,
+		&actions.QuantityIndexField{
+			Quantity: senderQuantity,
+			Index:    uint32(len(tx.MsgTx.TxIn)),
+		})
+
+	// Add input
+	outpoint := state.MockOutPoint(adminLockingScript, 1)
+	spentOutputs = append(spentOutputs, &expanded_tx.Output{
+		LockingScript: adminLockingScript,
+		Value:         1,
+	})
+
+	if err := tx.AddInput(*outpoint, adminLockingScript, 1); err != nil {
+		t.Fatalf("Failed to add input : %s", err)
+	}
+
+	// Add receivers
+	for {
+		_, _, receiverAddress := state.MockKey()
+
+		sigHash, err := protocol.TransferOracleSigHash(ctx, contractAddress,
+			instrument.InstrumentCode[:], receiverAddress, headerHash, 0, 1)
+		if err != nil {
+			t.Fatalf("Failed to create identity sig hash : %s", err)
+		}
+
+		identitySignature, err := badIdentityKey.Sign(*sigHash)
+		if err != nil {
+			t.Fatalf("Failed to sign identity certificate : %s", err)
+		}
+
+		quantity := uint64(mathRand.Intn(1000)) + 1
+		if quantity > senderQuantity {
+			quantity = senderQuantity
+		}
+		senderQuantity -= quantity
+		instrumentTransfer.InstrumentReceivers = append(instrumentTransfer.InstrumentReceivers,
+			&actions.InstrumentReceiverField{
+				Address:               receiverAddress.Bytes(),
+				Quantity:              quantity,
+				OracleSigAlgorithm:    1,
+				OracleIndex:           0,
+				OracleConfirmationSig: identitySignature.Bytes(),
+				OracleSigBlockHeight:  uint32(headerHeight),
+				OracleSigExpiry:       0,
+			})
+
+		if senderQuantity == 0 {
+			break
+		}
+	}
+
+	// Add contract output
+	if err := tx.AddOutput(contractLockingScript, 150, false, false); err != nil {
+		t.Fatalf("Failed to add contract output : %s", err)
+	}
+
+	js, _ := json.MarshalIndent(transfer, "", "  ")
+	t.Logf("Transfer : %s", js)
+
+	// Add action output
+	transferScript, err := protocol.Serialize(transfer, true)
+	if err != nil {
+		t.Fatalf("Failed to serialize transfer action : %s", err)
+	}
+
+	if err := tx.AddOutput(transferScript, 0, false, false); err != nil {
+		t.Fatalf("Failed to add transfer action output : %s", err)
+	}
+
+	// Add funding
+	key, lockingScript, _ := state.MockKey()
+	keys = append(keys, key)
+	outpoint = state.MockOutPoint(lockingScript, 300)
+	spentOutputs = append(spentOutputs, &expanded_tx.Output{
+		LockingScript: lockingScript,
+		Value:         300,
+	})
+
+	if err := tx.AddInput(*outpoint, lockingScript, 300); err != nil {
+		t.Fatalf("Failed to add input : %s", err)
+	}
+
+	_, changeLockingScript, _ := state.MockKey()
+	tx.SetChangeLockingScript(changeLockingScript, "")
+
+	if _, err := tx.Sign(keys); err != nil {
+		t.Fatalf("Failed to sign tx : %s", err)
+	}
+
+	t.Logf("Created tx : %s", tx.String(bitcoin.MainNet))
+
+	addTransaction := &state.Transaction{
+		Tx:           tx.MsgTx,
+		SpentOutputs: spentOutputs,
+	}
+
+	transaction, err := caches.Transactions.Add(ctx, addTransaction)
+	if err != nil {
+		t.Fatalf("Failed to add transaction : %s", err)
+	}
+
+	now := uint64(time.Now().UnixNano())
+	if err := agent.Process(ctx, transaction, []actions.Action{transfer}, now); err != nil {
+		t.Fatalf("Failed to process transaction : %s", err)
+	}
+
+	caches.Transactions.Release(ctx, transaction.GetTxID())
+
+	caches.Contracts.Release(ctx, contractLockingScript)
+	caches.StopTestCaches()
+
+	responseTx := broadcaster.GetLastTx()
+	if responseTx == nil {
+		t.Fatalf("No response tx")
+	}
+
+	t.Logf("Response Tx : %s", responseTx)
+
+	// Find rejection action
+	var rejection *actions.Rejection
+	for _, txout := range responseTx.TxOut {
+		action, err := protocol.Deserialize(txout.LockingScript, true)
+		if err != nil {
+			continue
+		}
+
+		r, ok := action.(*actions.Rejection)
+		if ok {
+			rejection = r
+		}
+	}
+
+	if rejection == nil {
+		t.Fatalf("Missing rejection action")
+	}
+
+	rejectData := actions.RejectionsData(rejection.RejectionCode)
+	if rejectData != nil {
+		t.Logf("Rejection Code : %s", rejectData.Label)
+	}
+
+	js, _ = json.MarshalIndent(rejection, "", "  ")
+	t.Logf("Rejection : %s", js)
+
+	if rejection.RejectionCode != actions.RejectionsInvalidSignature {
+		t.Errorf("Wrong rejection code : got %d, want %d", rejection.RejectionCode,
+			actions.RejectionsInvalidSignature)
+	}
+}
+
 func Test_Transfers_Multi_Basic(t *testing.T) {
 	ctx := logger.ContextWithLogger(context.Background(), true, true, "")
 	store := storage.NewMockStorage()
@@ -563,8 +1135,8 @@ func Test_Transfers_Multi_Basic(t *testing.T) {
 	}
 
 	agent1, err := NewAgent(contractKey1, DefaultConfig(), contract1, feeLockingScript1,
-		caches.Contracts, caches.Balances, caches.Transactions, caches.Subscriptions, broadcaster1,
-		nil)
+		caches.Contracts, caches.Balances, caches.Transactions, caches.Subscriptions,
+		caches.Services, broadcaster1, nil, nil)
 	if err != nil {
 		t.Fatalf("Failed to create agent : %s", err)
 	}
@@ -579,8 +1151,8 @@ func Test_Transfers_Multi_Basic(t *testing.T) {
 	}
 
 	agent2, err := NewAgent(contractKey2, DefaultConfig(), contract2, feeLockingScript2,
-		caches.Contracts, caches.Balances, caches.Transactions, caches.Subscriptions, broadcaster2,
-		nil)
+		caches.Contracts, caches.Balances, caches.Transactions, caches.Subscriptions,
+		caches.Services, broadcaster2, nil, nil)
 	if err != nil {
 		t.Fatalf("Failed to create agent : %s", err)
 	}
@@ -974,8 +1546,8 @@ func Test_Transfers_Multi_Reject_First(t *testing.T) {
 	}
 
 	agent1, err := NewAgent(contractKey1, DefaultConfig(), contract1, feeLockingScript1,
-		caches.Contracts, caches.Balances, caches.Transactions, caches.Subscriptions, broadcaster1,
-		nil)
+		caches.Contracts, caches.Balances, caches.Transactions, caches.Subscriptions,
+		caches.Services, broadcaster1, nil, nil)
 	if err != nil {
 		t.Fatalf("Failed to create agent : %s", err)
 	}
@@ -990,8 +1562,8 @@ func Test_Transfers_Multi_Reject_First(t *testing.T) {
 	}
 
 	agent2, err := NewAgent(contractKey2, DefaultConfig(), contract2, feeLockingScript2,
-		caches.Contracts, caches.Balances, caches.Transactions, caches.Subscriptions, broadcaster2,
-		nil)
+		caches.Contracts, caches.Balances, caches.Transactions, caches.Subscriptions,
+		caches.Services, broadcaster2, nil, nil)
 	if err != nil {
 		t.Fatalf("Failed to create agent : %s", err)
 	}
@@ -1216,8 +1788,8 @@ func Test_Transfers_Multi_Reject_Second(t *testing.T) {
 	}
 
 	agent1, err := NewAgent(contractKey1, DefaultConfig(), contract1, feeLockingScript1,
-		caches.Contracts, caches.Balances, caches.Transactions, caches.Subscriptions, broadcaster1,
-		nil)
+		caches.Contracts, caches.Balances, caches.Transactions, caches.Subscriptions,
+		caches.Services, broadcaster1, nil, nil)
 	if err != nil {
 		t.Fatalf("Failed to create agent : %s", err)
 	}
@@ -1232,8 +1804,8 @@ func Test_Transfers_Multi_Reject_Second(t *testing.T) {
 	}
 
 	agent2, err := NewAgent(contractKey2, DefaultConfig(), contract2, feeLockingScript2,
-		caches.Contracts, caches.Balances, caches.Transactions, caches.Subscriptions, broadcaster2,
-		nil)
+		caches.Contracts, caches.Balances, caches.Transactions, caches.Subscriptions,
+		caches.Services, broadcaster2, nil, nil)
 	if err != nil {
 		t.Fatalf("Failed to create agent : %s", err)
 	}
