@@ -256,7 +256,6 @@ func (a *Agent) processSettlementRequest(ctx context.Context, transaction *state
 
 		// Add the contract fee for this agent.
 		if a.ContractFee() > 0 {
-			println("adding contract fee output")
 			if err := settlementTx.AddOutput(a.FeeLockingScript(), a.ContractFee(), true,
 				false); err != nil {
 				return errors.Wrap(err, "add contract fee")
@@ -493,7 +492,7 @@ func (a *Agent) sendSettlementRequest(ctx context.Context,
 		logger.Stringer("next_contract_locking_script", transferContracts.NextLockingScript),
 		logger.Stringer("response_txid", messageTxID),
 	}, "Sending settlement request to next contract")
-	if err := a.BroadcastTx(ctx, messageTx.MsgTx); err != nil {
+	if err := a.BroadcastTx(ctx, messageTx.MsgTx, message.ReceiverIndexes); err != nil {
 		return errors.Wrap(err, "broadcast")
 	}
 

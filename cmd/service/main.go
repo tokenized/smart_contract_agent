@@ -116,7 +116,7 @@ func main() {
 	}
 
 	conductor := conductor.NewConductor(cfg.BaseKey, cfg.Agents, feeLockingScript, spyNode,
-		contracts, balances, transactions, subscriptions, NewSpyNodeBroadcaster(spyNode))
+		contracts, balances, transactions, subscriptions, NewSpyNodeBroadcaster(spyNode), spyNode)
 	spyNode.RegisterHandler(conductor)
 
 	var spyNodeWait, cacheWait sync.WaitGroup
@@ -178,6 +178,7 @@ func NewSpyNodeBroadcaster(client spyNodeClient.Client) *SpyNodeBroadcaster {
 	}
 }
 
-func (b *SpyNodeBroadcaster) BroadcastTx(ctx context.Context, tx *wire.MsgTx) error {
-	return b.client.SendTxAndMarkOutputs(ctx, tx, nil)
+func (b *SpyNodeBroadcaster) BroadcastTx(ctx context.Context, tx *wire.MsgTx,
+	indexes []uint32) error {
+	return b.client.SendTxAndMarkOutputs(ctx, tx, indexes)
 }

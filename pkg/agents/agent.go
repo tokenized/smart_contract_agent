@@ -48,12 +48,17 @@ type Agent struct {
 	subscriptions *state.SubscriptionCache
 
 	broadcaster Broadcaster
+	fetcher     Fetcher
 
 	lock sync.Mutex
 }
 
+type Fetcher interface {
+	GetTx(context.Context, bitcoin.Hash32) (*wire.MsgTx, error)
+}
+
 type Broadcaster interface {
-	BroadcastTx(context.Context, *wire.MsgTx) error
+	BroadcastTx(context.Context, *wire.MsgTx, []uint32) error
 }
 
 type TransactionWithOutputs interface {
@@ -71,7 +76,7 @@ type TransactionWithOutputs interface {
 func NewAgent(key bitcoin.Key, config Config, contract *state.Contract,
 	feeLockingScript bitcoin.Script, contracts *state.ContractCache, balances *state.BalanceCache,
 	transactions *state.TransactionCache, subscriptions *state.SubscriptionCache,
-	broadcaster Broadcaster) (*Agent, error) {
+	broadcaster Broadcaster, fetcher Fetcher) (*Agent, error) {
 
 	result := &Agent{
 		key:              key,
@@ -83,6 +88,7 @@ func NewAgent(key bitcoin.Key, config Config, contract *state.Contract,
 		transactions:     transactions,
 		subscriptions:    subscriptions,
 		broadcaster:      broadcaster,
+		fetcher:          fetcher,
 	}
 
 	return result, nil
@@ -138,12 +144,28 @@ func (a *Agent) Key() bitcoin.Key {
 	return a.key
 }
 
-func (a *Agent) BroadcastTx(ctx context.Context, tx *wire.MsgTx) error {
+func (a *Agent) BroadcastTx(ctx context.Context, tx *wire.MsgTx, indexes []uint32) error {
 	a.lock.Lock()
 	broadcaster := a.broadcaster
 	a.lock.Unlock()
 
-	return broadcaster.BroadcastTx(ctx, tx)
+	if broadcaster == nil {
+		return nil
+	}
+
+	return broadcaster.BroadcastTx(ctx, tx, indexes)
+}
+
+func (a *Agent) FetchTx(ctx context.Context, txid bitcoin.Hash32) (*wire.MsgTx, error) {
+	a.lock.Lock()
+	fetcher := a.fetcher
+	a.lock.Unlock()
+
+	if fetcher == nil {
+		return nil, nil
+	}
+
+	return fetcher.GetTx(ctx, txid)
 }
 
 func (a *Agent) IsTest() bool {

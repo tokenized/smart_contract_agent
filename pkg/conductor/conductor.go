@@ -33,6 +33,7 @@ type Conductor struct {
 	subscriptions *state.SubscriptionCache
 
 	broadcaster agents.Broadcaster
+	fetcher     agents.Fetcher
 
 	lookup map[state.ContractHash]bitcoin.Hash32
 
@@ -44,7 +45,7 @@ type Conductor struct {
 func NewConductor(baseKey bitcoin.Key, config agents.Config, feeLockingScript bitcoin.Script,
 	spyNodeClient spynode.Client, contracts *state.ContractCache, balances *state.BalanceCache,
 	transactions *state.TransactionCache, subscriptions *state.SubscriptionCache,
-	broadcaster agents.Broadcaster) *Conductor {
+	broadcaster agents.Broadcaster, fetcher agents.Fetcher) *Conductor {
 
 	return &Conductor{
 		baseKey:              baseKey,
@@ -56,6 +57,7 @@ func NewConductor(baseKey bitcoin.Key, config agents.Config, feeLockingScript bi
 		transactions:         transactions,
 		subscriptions:        subscriptions,
 		broadcaster:          broadcaster,
+		fetcher:              fetcher,
 		lookup:               make(map[state.ContractHash]bitcoin.Hash32),
 		nextSpyNodeMessageID: 1,
 	}
@@ -181,7 +183,7 @@ func (c *Conductor) AddAgent(ctx context.Context,
 	}
 
 	agent, err := agents.NewAgent(key, c.config, addedContract, c.feeLockingScript, c.contracts,
-		c.balances, c.transactions, c.subscriptions, c.broadcaster)
+		c.balances, c.transactions, c.subscriptions, c.broadcaster, c.fetcher)
 	if err != nil {
 		return nil, errors.Wrap(err, "new agent")
 	}
@@ -227,7 +229,7 @@ func (c *Conductor) GetAgent(ctx context.Context,
 	}
 
 	agent, err := agents.NewAgent(key, c.config, contract, c.feeLockingScript, c.contracts,
-		c.balances, c.transactions, c.subscriptions, c.broadcaster)
+		c.balances, c.transactions, c.subscriptions, c.broadcaster, c.fetcher)
 	if err != nil {
 		return nil, errors.Wrap(err, "new agent")
 	}

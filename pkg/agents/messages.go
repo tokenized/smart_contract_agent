@@ -23,7 +23,7 @@ func (a *Agent) processMessage(ctx context.Context, transaction *state.Transacti
 	}
 
 	receiverIndex := 0
-	if len(message.ReceiverIndexes) == 1 {
+	if len(message.ReceiverIndexes) != 0 {
 		receiverIndex = int(message.ReceiverIndexes[0])
 	}
 
@@ -49,7 +49,9 @@ func (a *Agent) processMessage(ctx context.Context, transaction *state.Transacti
 		logger.InfoWithFields(ctx, []logger.Field{
 			logger.Stringer("receiver_locking_script", output.LockingScript),
 		}, "Agent is not the message receiver")
-		return nil
+
+		// This might be an important message related to an ongoing multi-contract transfer.
+		return a.processNonRelevantMessage(ctx, transaction, message, now)
 	}
 
 	logger.Info(ctx, "Processing message")
@@ -71,6 +73,29 @@ func (a *Agent) processMessage(ctx context.Context, transaction *state.Transacti
 			return errors.Wrapf(err, "settlement request")
 		}
 	}
+
+	return nil
+}
+
+func (a *Agent) processNonRelevantMessage(ctx context.Context, transaction *state.Transaction,
+	message *actions.Message, now uint64) error {
+
+	transaction.Lock()
+	firstInput := transaction.Input(0)
+	transaction.Unlock()
+
+	previousTransaction, err := a.transactions.Get(ctx, firstInput.PreviousOutPoint.Hash)
+	if err != nil {
+		return errors.Wrap(err, "get tx")
+	}
+
+	if previousTransaction == nil {
+		logger.InfoWithFields(ctx, []logger.Field{
+			logger.Stringer("previous_txid", firstInput.PreviousOutPoint.Hash),
+		}, "Previous transaction not found")
+		return nil
+	}
+	defer a.transactions.Release(ctx, firstInput.PreviousOutPoint.Hash)
 
 	return nil
 }

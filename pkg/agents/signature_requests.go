@@ -124,9 +124,12 @@ func (a *Agent) processSignatureRequest(ctx context.Context, transaction *state.
 
 	rejectTransaction := transaction
 	rejectOutputIndex := 0
+	var rejectLockingScript bitcoin.Script
 	if transferContracts.IsFirstContract() {
 		rejectTransaction = transferTransaction
 		rejectOutputIndex = transferContracts.FirstContractOutputIndex
+	} else {
+		rejectLockingScript = transferContracts.PreviousLockingScript
 	}
 
 	transaction.Lock()
@@ -138,8 +141,9 @@ func (a *Agent) processSignatureRequest(ctx context.Context, transaction *state.
 
 	if !firstInputOutput.LockingScript.Equal(transferContracts.NextLockingScript) {
 		return errors.Wrap(a.sendRejection(ctx, rejectTransaction,
-			platform.NewRejectErrorWithOutputIndex(actions.RejectionsMsgMalformed,
-				"signature request not from next contract", now, rejectOutputIndex)), "reject")
+			platform.NewRejectErrorFull(actions.RejectionsMsgMalformed,
+				"signature request not from next contract", now, 0, rejectOutputIndex,
+				rejectLockingScript)), "reject")
 	}
 
 	settlementTx, err := txbuilder.NewTxBuilderFromWire(a.FeeRate(), a.DustFeeRate(), tx,
@@ -161,6 +165,7 @@ func (a *Agent) processSignatureRequest(ctx context.Context, transaction *state.
 
 				if rejectError, ok := errors.Cause(err).(platform.RejectError); ok {
 					rejectError.OutputIndex = rejectOutputIndex
+					rejectError.ReceiverLockingScript = rejectLockingScript
 					return errors.Wrap(a.sendRejection(instrumentCtx, rejectTransaction,
 						rejectError), "reject")
 				}
@@ -190,6 +195,7 @@ func (a *Agent) processSignatureRequest(ctx context.Context, transaction *state.
 
 			if rejectError, ok := errors.Cause(err).(platform.RejectError); ok {
 				rejectError.OutputIndex = rejectOutputIndex
+				rejectError.ReceiverLockingScript = rejectLockingScript
 				return errors.Wrap(a.sendRejection(instrumentCtx, rejectTransaction, rejectError),
 					"reject")
 			}
@@ -210,8 +216,8 @@ func (a *Agent) processSignatureRequest(ctx context.Context, transaction *state.
 
 			logger.Warn(ctx, "Invalid exchange fee address : %s", err)
 			return errors.Wrap(a.sendRejection(ctx, rejectTransaction,
-				platform.NewRejectErrorWithOutputIndex(actions.RejectionsMsgMalformed, err.Error(),
-					now, rejectOutputIndex)), "reject")
+				platform.NewRejectErrorFull(actions.RejectionsMsgMalformed, err.Error(),
+					now, 0, rejectOutputIndex, rejectLockingScript)), "reject")
 		}
 
 		lockingScript, err := ra.LockingScript()
@@ -220,16 +226,17 @@ func (a *Agent) processSignatureRequest(ctx context.Context, transaction *state.
 
 			logger.Warn(ctx, "Invalid exchange fee locking script : %s", err)
 			return errors.Wrap(a.sendRejection(ctx, rejectTransaction,
-				platform.NewRejectErrorWithOutputIndex(actions.RejectionsMsgMalformed, err.Error(),
-					now, rejectOutputIndex)), "reject")
+				platform.NewRejectErrorFull(actions.RejectionsMsgMalformed, err.Error(),
+					now, 0, rejectOutputIndex, rejectLockingScript)), "reject")
 		}
 
 		if !findBitcoinOutput(settlementTx.MsgTx, lockingScript, transfer.ExchangeFee) {
 			balances.Unlock()
 
 			return errors.Wrap(a.sendRejection(ctx, rejectTransaction,
-				platform.NewRejectErrorWithOutputIndex(actions.RejectionsMsgMalformed,
-					"missing exchange fee output", now, rejectOutputIndex)), "reject")
+				platform.NewRejectErrorFull(actions.RejectionsMsgMalformed,
+					"missing exchange fee output", now, 0, rejectOutputIndex, rejectLockingScript)),
+				"reject")
 		}
 	}
 
@@ -240,8 +247,9 @@ func (a *Agent) processSignatureRequest(ctx context.Context, transaction *state.
 			balances.Unlock()
 
 			return errors.Wrap(a.sendRejection(ctx, rejectTransaction,
-				platform.NewRejectErrorWithOutputIndex(actions.RejectionsMsgMalformed,
-					"missing contract fee output", now, rejectOutputIndex)), "reject")
+				platform.NewRejectErrorFull(actions.RejectionsMsgMalformed,
+					"missing contract fee output", now, 0, rejectOutputIndex, rejectLockingScript)),
+				"reject")
 		}
 	}
 
@@ -252,8 +260,8 @@ func (a *Agent) processSignatureRequest(ctx context.Context, transaction *state.
 		if errors.Cause(err) == txbuilder.ErrInsufficientValue {
 			logger.Warn(ctx, "Insufficient tx funding : %s", err)
 			return errors.Wrap(a.sendRejection(ctx, rejectTransaction,
-				platform.NewRejectErrorWithOutputIndex(actions.RejectionsInsufficientTxFeeFunding,
-					err.Error(), now, rejectOutputIndex)), "reject")
+				platform.NewRejectErrorFull(actions.RejectionsInsufficientTxFeeFunding,
+					err.Error(), now, 0, rejectOutputIndex, rejectLockingScript)), "reject")
 		}
 
 		return errors.Wrap(err, "sign")
@@ -514,7 +522,7 @@ func (a *Agent) sendSignatureRequest(ctx context.Context, currentTransaction *st
 			transferContracts.PreviousLockingScript),
 		logger.Stringer("response_txid", messageTxID),
 	}, "Sending signature request to previous contract")
-	if err := a.BroadcastTx(ctx, messageTx.MsgTx); err != nil {
+	if err := a.BroadcastTx(ctx, messageTx.MsgTx, message.ReceiverIndexes); err != nil {
 		return errors.Wrap(err, "broadcast")
 	}
 

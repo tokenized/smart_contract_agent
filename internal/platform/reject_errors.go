@@ -3,15 +3,17 @@ package platform
 import (
 	"fmt"
 
+	"github.com/tokenized/pkg/bitcoin"
 	"github.com/tokenized/specification/dist/golang/actions"
 )
 
 type RejectError struct {
-	Code        uint32
-	Message     string
-	Timestamp   uint64
-	InputIndex  int
-	OutputIndex int
+	Code                  uint32
+	Message               string
+	Timestamp             uint64
+	InputIndex            int
+	OutputIndex           int
+	ReceiverLockingScript bitcoin.Script
 }
 
 func NewRejectError(code int, message string, timestamp uint64) RejectError {
@@ -37,14 +39,15 @@ func NewRejectErrorWithOutputIndex(code int, message string, timestamp uint64,
 }
 
 func NewRejectErrorFull(code int, message string, timestamp uint64,
-	inputIndex, outputIndex int) RejectError {
+	inputIndex, outputIndex int, receiverLockingScript bitcoin.Script) RejectError {
 
 	return RejectError{
-		Code:        uint32(code),
-		Message:     message,
-		Timestamp:   timestamp,
-		InputIndex:  inputIndex,
-		OutputIndex: outputIndex,
+		Code:                  uint32(code),
+		Message:               message,
+		Timestamp:             timestamp,
+		InputIndex:            inputIndex,
+		OutputIndex:           outputIndex,
+		ReceiverLockingScript: receiverLockingScript,
 	}
 }
 

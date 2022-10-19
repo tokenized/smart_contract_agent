@@ -257,7 +257,8 @@ func NewMockTxBroadcaster() *MockTxBroadcaster {
 	return &MockTxBroadcaster{}
 }
 
-func (b *MockTxBroadcaster) BroadcastTx(ctx context.Context, tx *wire.MsgTx) error {
+func (b *MockTxBroadcaster) BroadcastTx(ctx context.Context, tx *wire.MsgTx,
+	indexes []uint32) error {
 	b.lock.Lock()
 	defer b.lock.Unlock()
 

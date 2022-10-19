@@ -36,10 +36,10 @@ func (a *Agent) processTransfer(ctx context.Context, transaction *state.Transact
 		}
 
 		if rejectError, ok := errors.Cause(err).(platform.RejectError); ok {
-			if transferContracts.FirstContractOutputIndex != -1 {
+			if transferContracts != nil && transferContracts.FirstContractOutputIndex != -1 {
 				rejectError.OutputIndex = transferContracts.FirstContractOutputIndex
 			}
-			if transferContracts.IsFirstContract() {
+			if transferContracts != nil && transferContracts.IsFirstContract() {
 				return errors.Wrap(a.sendRejection(ctx, transaction, rejectError), "reject")
 			}
 			return nil // Only first contract can reject at this point
@@ -295,7 +295,7 @@ func (a *Agent) completeSettlement(ctx context.Context, transferTxID bitcoin.Has
 	logger.InfoWithFields(ctx, []logger.Field{
 		logger.Stringer("response_txid", settlementTxID),
 	}, "Responding with settlement")
-	if err := a.BroadcastTx(ctx, settlementTx.MsgTx); err != nil {
+	if err := a.BroadcastTx(ctx, settlementTx.MsgTx, nil); err != nil {
 		return errors.Wrap(err, "broadcast")
 	}
 

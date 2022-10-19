@@ -114,7 +114,7 @@ func main() {
 	broadcaster := NewNoopBroadcaster()
 
 	conductor := conductor.NewConductor(cfg.BaseKey, cfg.Agents, feeLockingScript, nil, contracts,
-		balances, transactions, subscriptions, broadcaster)
+		balances, transactions, subscriptions, broadcaster, woc)
 
 	var cacheWait, loadWait sync.WaitGroup
 
@@ -309,9 +309,10 @@ func NewNoopBroadcaster() *NoopBroadcaster {
 	return &NoopBroadcaster{}
 }
 
-func (*NoopBroadcaster) BroadcastTx(ctx context.Context, tx *wire.MsgTx) error {
+func (*NoopBroadcaster) BroadcastTx(ctx context.Context, tx *wire.MsgTx, indexes []uint32) error {
 	logger.InfoWithFields(ctx, []logger.Field{
 		logger.Stringer("broadcast_txid", tx.TxHash()),
+		logger.Uint32s("indexes", indexes),
 	}, "No operation broadcaster received tx")
 	return nil
 }

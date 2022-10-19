@@ -10,6 +10,7 @@ import (
 	"github.com/tokenized/smart_contract_agent/internal/platform"
 	"github.com/tokenized/smart_contract_agent/internal/state"
 	"github.com/tokenized/specification/dist/golang/actions"
+	"github.com/tokenized/specification/dist/golang/messages"
 	"github.com/tokenized/specification/dist/golang/protocol"
 
 	"github.com/pkg/errors"
@@ -19,6 +20,8 @@ func (a *Agent) processRejection(ctx context.Context, transaction *state.Transac
 	rejection *actions.Rejection, now uint64) error {
 
 	transaction.Lock()
+	firstInput := transaction.Input(0)
+	rejectedTxID := firstInput.PreviousOutPoint.Hash
 
 	receiverIndex := int(rejection.RejectAddressIndex)
 	outputCount := transaction.OutputCount()
@@ -46,15 +49,200 @@ func (a *Agent) processRejection(ctx context.Context, transaction *state.Transac
 
 	logger.Info(ctx, "Processing rejection")
 
-	// TODO Check if this is a reject to a settlement request or signature request from another
-	// contract in a multi-contract transfer. --ce
+	// Check if this is a reject from another contract in a multi-contract transfer to a settlement
+	// request.
+	rejectedTransaction, err := a.transactions.Get(ctx, rejectedTxID)
+	if err != nil {
+		return errors.Wrap(err, "get tx")
+	}
 
-	// TODO Verify this is from the next contract in the transfer. --ce
+	if rejectedTransaction == nil {
+		logger.InfoWithFields(ctx, []logger.Field{
+			logger.Stringer("rejected_txid", rejectedTxID),
+		}, "Rejected transaction not found")
+		return nil
+	}
+	defer a.transactions.Release(ctx, rejectedTxID)
 
-	// TODO Send reject to previous contract in the transfer, or if this is the first contract then
-	// create a reject for the transfer itself. --ce
+	// Find action
+	isTest := a.IsTest()
+	rejectedTransaction.Lock()
+	outputCount = rejectedTransaction.OutputCount()
+	var message *actions.Message
+	for i := 0; i < outputCount; i++ {
+		output := rejectedTransaction.Output(i)
+		action, err := protocol.Deserialize(output.LockingScript, isTest)
+		if err != nil {
+			continue
+		}
 
-	return nil
+		if m, ok := action.(*actions.Message); ok &&
+			(m.MessageCode == messages.CodeSettlementRequest ||
+				m.MessageCode == messages.CodeSignatureRequest) {
+			message = m
+			break
+		}
+	}
+	rejectedTransaction.Unlock()
+
+	if message == nil {
+		logger.InfoWithFields(ctx, []logger.Field{
+			logger.Stringer("rejected_txid", rejectedTxID),
+		}, "Rejected transaction does not contain an action")
+		return nil
+	}
+
+	// Verify this is from the next contract in the transfer.
+	transferTransaction, transfer, err := a.traceToTransfer(ctx,
+		firstInputTxID(rejectedTransaction))
+	if err != nil {
+		return errors.Wrap(err, "trace to transfer")
+	}
+
+	if transferTransaction == nil {
+		logger.InfoWithFields(ctx, []logger.Field{
+			logger.Stringer("rejected_txid", rejectedTxID),
+		}, "Rejected transaction does not trace to a transfer")
+		return nil
+	}
+	transferTxID := transferTransaction.GetTxID()
+	defer a.transactions.Release(ctx, transferTxID)
+
+	logger.InfoWithFields(ctx, []logger.Field{
+		logger.Stringer("transfer_txid", transferTxID),
+	}, "Found related transfer transaction")
+
+	transferContracts, err := parseTransferContracts(transferTransaction, transfer,
+		agentLockingScript, now)
+	if err != nil {
+		if errors.Cause(err) == ErrNotRelevant {
+			logger.Warn(ctx, "Transfer not relevant to this contract agent")
+			return nil // Not for this contract
+		}
+
+		if rejectError, ok := errors.Cause(err).(platform.RejectError); ok {
+			if transferContracts != nil && transferContracts.FirstContractOutputIndex != -1 {
+				rejectError.OutputIndex = transferContracts.FirstContractOutputIndex
+			}
+			if transferContracts != nil && transferContracts.IsFirstContract() {
+				return errors.Wrap(a.sendRejection(ctx, transferTransaction, rejectError), "reject")
+			}
+
+			return nil // Only first contract can reject at this point
+		}
+
+		return errors.Wrap(err, "parse contracts")
+	}
+
+	if transferContracts.IsFirstContract() {
+		// This is the first contract so create a reject for the transfer itself.
+		return errors.Wrap(a.sendRejection(ctx, transferTransaction,
+			platform.NewRejectErrorWithOutputIndex(int(rejection.RejectionCode), rejection.Message,
+				now, transferContracts.FirstContractOutputIndex)), "reject")
+	}
+
+	// This is not the first contract so create a reject to the previous contract agent.
+	if len(transferContracts.PreviousLockingScript) == 0 {
+		return errors.New("Previous locking script missing for send signature request")
+	}
+
+	return errors.Wrap(a.sendRejection(ctx, transaction,
+		platform.NewRejectErrorFull(int(rejection.RejectionCode),
+			rejection.Message, now, 0, -1, transferContracts.PreviousLockingScript)), "reject")
+}
+
+func firstInputTxID(transaction *state.Transaction) bitcoin.Hash32 {
+	transaction.Lock()
+	firstInput := transaction.Input(0)
+	txid := firstInput.PreviousOutPoint.Hash
+	transaction.Unlock()
+
+	return txid
+}
+
+func (a *Agent) traceToTransfer(ctx context.Context,
+	txid bitcoin.Hash32) (*state.Transaction, *actions.Transfer, error) {
+
+	previousTransaction, err := a.transactions.Get(ctx, txid)
+	if err != nil {
+		return nil, nil, errors.Wrap(err, "get tx")
+	}
+
+	if previousTransaction != nil {
+		// Find action
+		isTest := a.IsTest()
+		previousTransaction.Lock()
+		firstInput := previousTransaction.Input(0)
+		previousTxID := firstInput.PreviousOutPoint.Hash
+		outputCount := previousTransaction.OutputCount()
+		var message *actions.Message
+		for i := 0; i < outputCount; i++ {
+			output := previousTransaction.Output(i)
+			action, err := protocol.Deserialize(output.LockingScript, isTest)
+			if err != nil {
+				continue
+			}
+
+			switch a := action.(type) {
+			case *actions.Transfer:
+				previousTransaction.Unlock()
+				return previousTransaction, a, nil
+			case *actions.Message:
+				message = a
+			}
+		}
+		previousTransaction.Unlock()
+		a.transactions.Release(ctx, txid)
+
+		if message != nil && (message.MessageCode == messages.CodeSettlementRequest ||
+			message.MessageCode == messages.CodeSignatureRequest) {
+			return a.traceToTransfer(ctx, previousTxID)
+		}
+
+		// This tx doesn't link back to a multi-contract transfer.
+		return nil, nil, nil
+	}
+
+	fetchedTx, err := a.FetchTx(ctx, txid)
+	if err != nil {
+		return nil, nil, errors.Wrap(err, "fetch tx")
+	}
+
+	if fetchedTx == nil {
+		logger.InfoWithFields(ctx, []logger.Field{
+			logger.Stringer("previous_txid", txid),
+		}, "Previous transaction not found")
+		return nil, nil, nil
+	}
+
+	previousTxID := fetchedTx.TxIn[0].PreviousOutPoint.Hash
+
+	// Find action
+	isTest := a.IsTest()
+	var message *actions.Message
+	for _, txout := range fetchedTx.TxOut {
+		act, err := protocol.Deserialize(txout.LockingScript, isTest)
+		if err != nil {
+			continue
+		}
+
+		switch a := act.(type) {
+		case *actions.Transfer:
+			// This transfer is not known by this agent because it isn't in the transaction storage.
+			return nil, nil, nil
+
+		case *actions.Message:
+			message = a
+		}
+	}
+
+	if message != nil && (message.MessageCode == messages.CodeSettlementRequest ||
+		message.MessageCode == messages.CodeSignatureRequest) {
+		// This tx doesn't link back to a multi-contract transfer.
+		return nil, nil, nil
+	}
+
+	return a.traceToTransfer(ctx, previousTxID)
 }
 
 // sendRejection creates a reject message transaction that spends the specified output and contains
@@ -111,17 +299,25 @@ func (a *Agent) sendRejection(ctx context.Context, transaction *state.Transactio
 		return nil
 	}
 
-	// Add output with locking script that had the issue. This is referenced by the
-	// RejectAddressIndex zero value of the rejection action.
-	rejectInputOutput, err := transaction.InputOutput(rejectError.InputIndex)
-	if err != nil {
-		transaction.Unlock()
-		return errors.Wrap(err, "reject input output")
-	}
+	if len(rejectError.ReceiverLockingScript) == 0 {
+		// Add output with locking script that had the issue. This is referenced by the
+		// RejectAddressIndex zero value of the rejection action.
+		rejectInputOutput, err := transaction.InputOutput(rejectError.InputIndex)
+		if err != nil {
+			transaction.Unlock()
+			return errors.Wrap(err, "reject input output")
+		}
 
-	if err := rejectTx.AddOutput(rejectInputOutput.LockingScript, 1, false, true); err != nil {
-		transaction.Unlock()
-		return errors.Wrap(err, "add action")
+		if err := rejectTx.AddOutput(rejectInputOutput.LockingScript, 1, false, true); err != nil {
+			transaction.Unlock()
+			return errors.Wrap(err, "add action")
+		}
+	} else {
+		if err := rejectTx.AddOutput(rejectError.ReceiverLockingScript, 1, true,
+			true); err != nil {
+			transaction.Unlock()
+			return errors.Wrap(err, "add action")
+		}
 	}
 
 	// Add rejection action
@@ -147,17 +343,21 @@ func (a *Agent) sendRejection(ctx context.Context, transaction *state.Transactio
 	inputCount := transaction.InputCount()
 	var refundInputValue uint64
 	var refundScript bitcoin.Script
-	for i := 0; i < inputCount; i++ {
-		inputOutput, err := transaction.InputOutput(i)
-		if err != nil {
-			transaction.Unlock()
-			return errors.Wrapf(err, "input output %d", i)
-		}
+	if len(rejectError.ReceiverLockingScript) == 0 {
+		for i := 0; i < inputCount; i++ {
+			inputOutput, err := transaction.InputOutput(i)
+			if err != nil {
+				transaction.Unlock()
+				return errors.Wrapf(err, "input output %d", i)
+			}
 
-		if refundInputValue < inputOutput.Value {
-			refundInputValue = inputOutput.Value
-			refundScript = inputOutput.LockingScript
+			if refundInputValue < inputOutput.Value {
+				refundInputValue = inputOutput.Value
+				refundScript = inputOutput.LockingScript
+			}
 		}
+	} else {
+		refundScript = rejectError.ReceiverLockingScript
 	}
 	transaction.Unlock()
 
@@ -184,7 +384,7 @@ func (a *Agent) sendRejection(ctx context.Context, transaction *state.Transactio
 		logger.String("reject_label", rejectError.Label()),
 		logger.String("reject_message", rejectError.Message),
 	}, "Responding with rejection")
-	if err := a.BroadcastTx(ctx, rejectTx.MsgTx); err != nil {
+	if err := a.BroadcastTx(ctx, rejectTx.MsgTx, nil); err != nil {
 		return errors.Wrap(err, "broadcast")
 	}
 
