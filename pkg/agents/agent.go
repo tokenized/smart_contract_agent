@@ -8,6 +8,7 @@ import (
 	"github.com/tokenized/logger"
 	"github.com/tokenized/pkg/bitcoin"
 	"github.com/tokenized/pkg/wire"
+	"github.com/tokenized/smart_contract_agent/internal/platform"
 	"github.com/tokenized/smart_contract_agent/internal/state"
 	"github.com/tokenized/specification/dist/golang/actions"
 
@@ -40,13 +41,10 @@ type Agent struct {
 
 	contract *state.Contract
 
+	lockingScript    bitcoin.Script
 	feeLockingScript bitcoin.Script
 
-	contracts     *state.ContractCache
-	balances      *state.BalanceCache
-	transactions  *state.TransactionCache
-	subscriptions *state.SubscriptionCache
-	services      *state.ContractServicesCache
+	caches *state.Caches
 
 	broadcaster Broadcaster
 	fetcher     Fetcher
@@ -65,6 +63,7 @@ type Broadcaster interface {
 
 type BlockHeaders interface {
 	BlockHash(context.Context, int) (*bitcoin.Hash32, error)
+	GetHeader(context.Context, int) (*wire.BlockHeader, error)
 }
 
 type TransactionWithOutputs interface {
@@ -80,21 +79,20 @@ type TransactionWithOutputs interface {
 }
 
 func NewAgent(key bitcoin.Key, config Config, contract *state.Contract,
-	feeLockingScript bitcoin.Script, contracts *state.ContractCache, balances *state.BalanceCache,
-	transactions *state.TransactionCache, subscriptions *state.SubscriptionCache,
-	services *state.ContractServicesCache, broadcaster Broadcaster,
+	feeLockingScript bitcoin.Script, caches *state.Caches, broadcaster Broadcaster,
 	fetcher Fetcher, headers BlockHeaders) (*Agent, error) {
+
+	contract.Lock()
+	lockingScript := contract.LockingScript
+	contract.Unlock()
 
 	result := &Agent{
 		key:              key,
 		config:           config,
 		contract:         contract,
+		lockingScript:    lockingScript,
 		feeLockingScript: feeLockingScript,
-		contracts:        contracts,
-		balances:         balances,
-		transactions:     transactions,
-		subscriptions:    subscriptions,
-		services:         services,
+		caches:           caches,
 		broadcaster:      broadcaster,
 		fetcher:          fetcher,
 		headers:          headers,
@@ -104,14 +102,18 @@ func NewAgent(key bitcoin.Key, config Config, contract *state.Contract,
 }
 
 func (a *Agent) Release(ctx context.Context) {
-	a.contracts.Release(ctx, a.LockingScript())
+	a.caches.Contracts.Release(ctx, a.LockingScript())
+}
+
+func (a *Agent) Contract() *state.Contract {
+	return a.contract
 }
 
 func (a *Agent) LockingScript() bitcoin.Script {
-	a.contract.Lock()
-	defer a.contract.Unlock()
+	a.lock.Lock()
+	defer a.lock.Unlock()
 
-	return a.contract.LockingScript
+	return a.lockingScript
 }
 
 func (a *Agent) ContractFee() uint64 {
@@ -122,8 +124,6 @@ func (a *Agent) ContractFee() uint64 {
 }
 
 func (a *Agent) AdminLockingScript() bitcoin.Script {
-	a.lock.Lock()
-	defer a.lock.Unlock()
 	a.contract.Lock()
 	defer a.contract.Unlock()
 
@@ -131,8 +131,6 @@ func (a *Agent) AdminLockingScript() bitcoin.Script {
 }
 
 func (a *Agent) ContractIsExpired(now uint64) bool {
-	a.lock.Lock()
-	defer a.lock.Unlock()
 	a.contract.Lock()
 	defer a.contract.Unlock()
 
@@ -191,7 +189,7 @@ func (a *Agent) GetIdentityOracles(ctx context.Context) ([]*IdentityOracle, erro
 			continue
 		}
 
-		services, err := a.services.Get(ctx, lockingScript)
+		services, err := a.caches.Services.Get(ctx, lockingScript)
 		if err != nil {
 			logger.WarnWithFields(ctx, []logger.Field{
 				logger.Stringer("contract_locking_script", contract.LockingScript),
@@ -220,7 +218,7 @@ func (a *Agent) GetIdentityOracles(ctx context.Context) ([]*IdentityOracle, erro
 			break
 		}
 
-		a.services.Release(ctx, lockingScript)
+		a.caches.Services.Release(ctx, lockingScript)
 	}
 
 	return result, nil
@@ -347,11 +345,19 @@ func (a *Agent) Process(ctx context.Context, transaction *state.Transaction,
 func (a *Agent) processAction(ctx context.Context, transaction *state.Transaction,
 	action actions.Action, now uint64) error {
 
+	if err := action.Validate(); err != nil {
+		return errors.Wrap(a.sendRejection(ctx, transaction,
+			platform.NewRejectError(actions.RejectionsMsgMalformed, err.Error(), now)), "reject")
+	}
+
 	ctx = logger.ContextWithLogFields(ctx, logger.String("action", action.Code()))
 
 	switch act := action.(type) {
 	case *actions.ContractOffer:
+		return a.processContractOffer(ctx, transaction, act, now)
+
 	case *actions.ContractAmendment:
+		return a.processContractAmendment(ctx, transaction, act, now)
 
 	case *actions.ContractFormation:
 		return a.processContractFormation(ctx, transaction, act, now)
@@ -359,13 +365,19 @@ func (a *Agent) processAction(ctx context.Context, transaction *state.Transactio
 	case *actions.ContractAddressChange:
 
 	case *actions.BodyOfAgreementOffer:
+		return a.processBodyOfAgreementOffer(ctx, transaction, act, now)
+
 	case *actions.BodyOfAgreementAmendment:
+		return a.processBodyOfAgreementAmendment(ctx, transaction, act, now)
 
 	case *actions.BodyOfAgreementFormation:
 		return a.processBodyOfAgreementFormation(ctx, transaction, act, now)
 
 	case *actions.InstrumentDefinition:
+		return a.processInstrumentDefinition(ctx, transaction, act, now)
+
 	case *actions.InstrumentModification:
+		return a.processInstrumentModification(ctx, transaction, act, now)
 
 	case *actions.InstrumentCreation:
 		return a.processInstrumentCreation(ctx, transaction, act, now)

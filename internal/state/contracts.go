@@ -38,14 +38,16 @@ type Contract struct {
 	BodyOfAgreementFormation     *actions.BodyOfAgreementFormation `bsor:"-" json:"body_of_agreement_formation"`
 	BodyOfAgreementFormationTxID *bitcoin.Hash32                   `bsor:"6" json:"body_of_agreement_formation_txid"`
 
-	Instruments []*Instrument `bsor:"7" json:"instruments"`
+	InstrumentCount uint64 `bsor:"7" json:"instrument_count"`
+
+	Instruments []*Instrument `bsor:"8" json:"instruments"`
 
 	// FormationScript is only used by Serialize to save the Formation value in BSOR.
-	FormationScript bitcoin.Script `bsor:"8" json:"formation_script"`
+	FormationScript bitcoin.Script `bsor:"9" json:"formation_script"`
 
 	// BodyOfAgreementFormationScript is only used by Serialize to save the BodyOfAgreementFormation
 	// value in BSOR.
-	BodyOfAgreementFormationScript bitcoin.Script `bsor:"9" json:"body_of_agreement_formation_script"`
+	BodyOfAgreementFormationScript bitcoin.Script `bsor:"10" json:"body_of_agreement_formation_script"`
 
 	isModified bool
 	sync.Mutex `bsor:"-"`
@@ -163,6 +165,20 @@ func (c *Contract) AdminLockingScript() bitcoin.Script {
 	}
 
 	return lockingScript
+}
+
+func (c *Contract) IsAdminOrOperator(lockingScript bitcoin.Script) bool {
+	if c.Formation == nil {
+		return false
+	}
+
+	ra, err := bitcoin.RawAddressFromLockingScript(lockingScript)
+	if err != nil {
+		return false
+	}
+	b := ra.Bytes()
+
+	return bytes.Equal(c.Formation.AdminAddress, b) || bytes.Equal(c.Formation.OperatorAddress, b)
 }
 
 func (c *Contract) IsExpired(now uint64) bool {

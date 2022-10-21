@@ -132,7 +132,7 @@ func (a *Agent) processTransfer(ctx context.Context, transaction *state.Transact
 		}
 
 		settlement.Instruments = append(settlement.Instruments, instrumentSettlement)
-		defer a.balances.ReleaseMulti(ctx, agentLockingScript, instrumentCode, instrumentBalances)
+		defer a.caches.Balances.ReleaseMulti(ctx, agentLockingScript, instrumentCode, instrumentBalances)
 		balances = state.AppendBalances(balances, instrumentBalances)
 	}
 
@@ -280,11 +280,11 @@ func (a *Agent) completeSettlement(ctx context.Context, transferTxID bitcoin.Has
 	settlementTx *txbuilder.TxBuilder, balances state.Balances, now uint64) error {
 
 	settlementTxID := *settlementTx.MsgTx.TxHash()
-	settlementTransaction, err := a.transactions.AddRaw(ctx, settlementTx.MsgTx, nil)
+	settlementTransaction, err := a.caches.Transactions.AddRaw(ctx, settlementTx.MsgTx, nil)
 	if err != nil {
 		return errors.Wrap(err, "add response tx")
 	}
-	defer a.transactions.Release(ctx, settlementTxID)
+	defer a.caches.Transactions.Release(ctx, settlementTxID)
 
 	// Settle balances regardless of tx acceptance by the network as the agent is the single source
 	// of truth.
@@ -303,7 +303,7 @@ func (a *Agent) completeSettlement(ctx context.Context, transferTxID bitcoin.Has
 		return errors.Wrap(err, "broadcast")
 	}
 
-	if err := a.postSettlementToSubscriptions(ctx, balances.LockingScripts(),
+	if err := a.postTransactionToSubscriptions(ctx, balances.LockingScripts(),
 		settlementTransaction); err != nil {
 		return errors.Wrap(err, "post settlement")
 	}
@@ -391,7 +391,7 @@ func (a *Agent) processSettlement(ctx context.Context, transaction *state.Transa
 		}
 
 		// Add the balances to the cache.
-		addedBalances, err := a.balances.AddMulti(instrumentCtx, agentLockingScript, instrumentCode,
+		addedBalances, err := a.caches.Balances.AddMulti(instrumentCtx, agentLockingScript, instrumentCode,
 			balances)
 		if err != nil {
 			return errors.Wrap(err, "add balances")
@@ -453,29 +453,29 @@ func (a *Agent) processSettlement(ctx context.Context, transaction *state.Transa
 			addedBalance.Unlock()
 		}
 
-		a.balances.ReleaseMulti(instrumentCtx, agentLockingScript, instrumentCode, addedBalances)
+		a.caches.Balances.ReleaseMulti(instrumentCtx, agentLockingScript, instrumentCode, addedBalances)
 	}
 
-	if err := a.postSettlementToSubscriptions(ctx, lockingScripts, transaction); err != nil {
+	if err := a.postTransactionToSubscriptions(ctx, lockingScripts, transaction); err != nil {
 		return errors.Wrap(err, "post settlement")
 	}
 
 	return nil
 }
 
-// postSettlementToSubscriptions posts the settlment transaction to any subscriptsions for the
-// relevant locking scripts.
-func (a *Agent) postSettlementToSubscriptions(ctx context.Context, lockingScripts []bitcoin.Script,
+// postTransactionToSubscriptions posts the transaction to any subscriptions for the relevant
+// locking scripts.
+func (a *Agent) postTransactionToSubscriptions(ctx context.Context, lockingScripts []bitcoin.Script,
 	transaction *state.Transaction) error {
 
 	agentLockingScript := a.LockingScript()
 
-	subscriptions, err := a.subscriptions.GetLockingScriptMulti(ctx, agentLockingScript,
+	subscriptions, err := a.caches.Subscriptions.GetLockingScriptMulti(ctx, agentLockingScript,
 		lockingScripts)
 	if err != nil {
 		return errors.Wrap(err, "get subscriptions")
 	}
-	defer a.subscriptions.ReleaseMulti(ctx, agentLockingScript, subscriptions)
+	defer a.caches.Subscriptions.ReleaseMulti(ctx, agentLockingScript, subscriptions)
 
 	if len(subscriptions) == 0 {
 		return nil
@@ -882,7 +882,7 @@ func (a *Agent) buildInstrumentSettlement(ctx context.Context, settlementTx *txb
 			"sender quantity != receiver quantity", now, int(instrumentTransfer.ContractIndex))
 	}
 
-	balances, err := a.balances.AddMulti(ctx, agentLockingScript, instrumentCode,
+	balances, err := a.caches.Balances.AddMulti(ctx, agentLockingScript, instrumentCode,
 		addBalances)
 	if err != nil {
 		return nil, nil, errors.Wrap(err, "add balances")
@@ -896,7 +896,7 @@ func (a *Agent) buildInstrumentSettlement(ctx context.Context, settlementTx *txb
 		if balance == nil {
 			balances.RevertPending(&transferTxID)
 			balances.Unlock()
-			a.balances.ReleaseMulti(ctx, agentLockingScript, instrumentCode, balances)
+			a.caches.Balances.ReleaseMulti(ctx, agentLockingScript, instrumentCode, balances)
 			return nil, nil, fmt.Errorf("Missing balance for sender %d : %s", i, lockingScript)
 		}
 
@@ -908,7 +908,7 @@ func (a *Agent) buildInstrumentSettlement(ctx context.Context, settlementTx *txb
 
 			balances.RevertPending(&transferTxID)
 			balances.Unlock()
-			a.balances.ReleaseMulti(ctx, agentLockingScript, instrumentCode, balances)
+			a.caches.Balances.ReleaseMulti(ctx, agentLockingScript, instrumentCode, balances)
 
 			if rejectError, ok := errors.Cause(err).(platform.RejectError); ok {
 				rejectError.InputIndex = int(sender.Index)
@@ -926,7 +926,7 @@ func (a *Agent) buildInstrumentSettlement(ctx context.Context, settlementTx *txb
 		if balance == nil {
 			balances.RevertPending(&transferTxID)
 			balances.Unlock()
-			a.balances.ReleaseMulti(ctx, agentLockingScript, instrumentCode, balances)
+			a.caches.Balances.ReleaseMulti(ctx, agentLockingScript, instrumentCode, balances)
 			return nil, nil, fmt.Errorf("Missing balance for receiver %d : %s", i, lockingScript)
 		}
 
@@ -937,7 +937,7 @@ func (a *Agent) buildInstrumentSettlement(ctx context.Context, settlementTx *txb
 			}, "Failed to add credit : %s", err)
 			balances.RevertPending(&transferTxID)
 			balances.Unlock()
-			a.balances.ReleaseMulti(ctx, agentLockingScript, instrumentCode, balances)
+			a.caches.Balances.ReleaseMulti(ctx, agentLockingScript, instrumentCode, balances)
 
 			if rejectError, ok := errors.Cause(err).(platform.RejectError); ok {
 				rejectError.OutputIndex = int(instrumentTransfer.ContractIndex)
@@ -957,7 +957,7 @@ func (a *Agent) buildInstrumentSettlement(ctx context.Context, settlementTx *txb
 	if err := populateTransferSettlement(settlementTx, instrumentSettlement, balances); err != nil {
 		balances.RevertPending(&transferTxID)
 		balances.Unlock()
-		a.balances.ReleaseMulti(ctx, agentLockingScript, instrumentCode, balances)
+		a.caches.Balances.ReleaseMulti(ctx, agentLockingScript, instrumentCode, balances)
 		return nil, nil, errors.Wrap(err, "populate settlement")
 	}
 

@@ -39,8 +39,7 @@ func Test_Transfers_Basic(t *testing.T) {
 	}
 
 	agent, err := NewAgent(contractKey, DefaultConfig(), contract, feeLockingScript,
-		caches.Contracts, caches.Balances, caches.Transactions, caches.Subscriptions,
-		caches.Services, broadcaster, nil, nil)
+		caches.Caches, broadcaster, nil, nil)
 	if err != nil {
 		t.Fatalf("Failed to create agent : %s", err)
 	}
@@ -136,7 +135,7 @@ func Test_Transfers_Basic(t *testing.T) {
 			SpentOutputs: spentOutputs,
 		}
 
-		transaction, err := caches.Transactions.Add(ctx, addTransaction)
+		transaction, err := caches.Caches.Transactions.Add(ctx, addTransaction)
 		if err != nil {
 			t.Fatalf("Failed to add transaction : %s", err)
 		}
@@ -174,7 +173,7 @@ func Test_Transfers_Basic(t *testing.T) {
 		js, _ := json.MarshalIndent(settlement, "", "  ")
 		t.Logf("Settlement : %s", js)
 
-		caches.Transactions.Release(ctx, transaction.GetTxID())
+		caches.Caches.Transactions.Release(ctx, transaction.GetTxID())
 	}
 
 	receiverOffset := 0
@@ -293,7 +292,7 @@ func Test_Transfers_Basic(t *testing.T) {
 			SpentOutputs: spentOutputs,
 		}
 
-		transaction, err := caches.Transactions.Add(ctx, addTransaction)
+		transaction, err := caches.Caches.Transactions.Add(ctx, addTransaction)
 		if err != nil {
 			t.Fatalf("Failed to add transaction : %s", err)
 		}
@@ -331,12 +330,12 @@ func Test_Transfers_Basic(t *testing.T) {
 		js, _ := json.MarshalIndent(settlement, "", "  ")
 		t.Logf("Settlement : %s", js)
 
-		caches.Transactions.Release(ctx, transaction.GetTxID())
+		caches.Caches.Transactions.Release(ctx, transaction.GetTxID())
 	}
 
 	// Check balances
 	for i, lockingScript := range finalLockingScripts {
-		balance, err := caches.Balances.Get(ctx, contractLockingScript, instrument.InstrumentCode,
+		balance, err := caches.Caches.Balances.Get(ctx, contractLockingScript, instrument.InstrumentCode,
 			lockingScript)
 		if err != nil {
 			t.Fatalf("Failed to get final balance : %s", err)
@@ -359,10 +358,10 @@ func Test_Transfers_Basic(t *testing.T) {
 		}
 		balance.Unlock()
 
-		caches.Balances.Release(ctx, contractLockingScript, instrument.InstrumentCode, balance)
+		caches.Caches.Balances.Release(ctx, contractLockingScript, instrument.InstrumentCode, balance)
 	}
 
-	caches.Contracts.Release(ctx, contractLockingScript)
+	caches.Caches.Contracts.Release(ctx, contractLockingScript)
 	caches.StopTestCaches()
 }
 
@@ -379,8 +378,7 @@ func Test_Transfers_InsufficientQuantity(t *testing.T) {
 	_, feeLockingScript, _ := state.MockKey()
 
 	agent, err := NewAgent(contractKey, DefaultConfig(), contract, feeLockingScript,
-		caches.Contracts, caches.Balances, caches.Transactions, caches.Subscriptions,
-		caches.Services, broadcaster, nil, nil)
+		caches.Caches, broadcaster, nil, nil)
 	if err != nil {
 		t.Fatalf("Failed to create agent : %s", err)
 	}
@@ -492,7 +490,7 @@ func Test_Transfers_InsufficientQuantity(t *testing.T) {
 		SpentOutputs: spentOutputs,
 	}
 
-	transaction, err := caches.Transactions.Add(ctx, addTransaction)
+	transaction, err := caches.Caches.Transactions.Add(ctx, addTransaction)
 	if err != nil {
 		t.Fatalf("Failed to add transaction : %s", err)
 	}
@@ -502,9 +500,9 @@ func Test_Transfers_InsufficientQuantity(t *testing.T) {
 		t.Fatalf("Failed to process transaction : %s", err)
 	}
 
-	caches.Transactions.Release(ctx, transaction.GetTxID())
+	caches.Caches.Transactions.Release(ctx, transaction.GetTxID())
 
-	caches.Contracts.Release(ctx, contractLockingScript)
+	caches.Caches.Contracts.Release(ctx, contractLockingScript)
 	caches.StopTestCaches()
 
 	responseTx := broadcaster.GetLastTx()
@@ -562,8 +560,7 @@ func Test_Transfers_IdentityOracle_MissingSignature(t *testing.T) {
 	}
 
 	agent, err := NewAgent(contractKey, DefaultConfig(), contract, feeLockingScript,
-		caches.Contracts, caches.Balances, caches.Transactions, caches.Subscriptions,
-		caches.Services, broadcaster, nil, nil)
+		caches.Caches, broadcaster, nil, nil)
 	if err != nil {
 		t.Fatalf("Failed to create agent : %s", err)
 	}
@@ -666,7 +663,7 @@ func Test_Transfers_IdentityOracle_MissingSignature(t *testing.T) {
 		SpentOutputs: spentOutputs,
 	}
 
-	transaction, err := caches.Transactions.Add(ctx, addTransaction)
+	transaction, err := caches.Caches.Transactions.Add(ctx, addTransaction)
 	if err != nil {
 		t.Fatalf("Failed to add transaction : %s", err)
 	}
@@ -676,9 +673,9 @@ func Test_Transfers_IdentityOracle_MissingSignature(t *testing.T) {
 		t.Fatalf("Failed to process transaction : %s", err)
 	}
 
-	caches.Transactions.Release(ctx, transaction.GetTxID())
+	caches.Caches.Transactions.Release(ctx, transaction.GetTxID())
 
-	caches.Contracts.Release(ctx, contractLockingScript)
+	caches.Caches.Contracts.Release(ctx, contractLockingScript)
 	caches.StopTestCaches()
 
 	responseTx := broadcaster.GetLastTx()
@@ -745,11 +742,10 @@ func Test_Transfers_IdentityOracle_Valid(t *testing.T) {
 	headerHeight := 100045
 	var headerHash bitcoin.Hash32
 	rand.Read(headerHash[:])
-	headers.AddHeader(headerHeight, headerHash)
+	headers.AddHash(headerHeight, headerHash)
 
 	agent, err := NewAgent(contractKey, DefaultConfig(), contract, feeLockingScript,
-		caches.Contracts, caches.Balances, caches.Transactions, caches.Subscriptions,
-		caches.Services, broadcaster, nil, headers)
+		caches.Caches, broadcaster, nil, headers)
 	if err != nil {
 		t.Fatalf("Failed to create agent : %s", err)
 	}
@@ -825,7 +821,7 @@ func Test_Transfers_IdentityOracle_Valid(t *testing.T) {
 	}
 
 	// Add contract output
-	if err := tx.AddOutput(contractLockingScript, 150, false, false); err != nil {
+	if err := tx.AddOutput(contractLockingScript, 200, false, false); err != nil {
 		t.Fatalf("Failed to add contract output : %s", err)
 	}
 
@@ -845,13 +841,13 @@ func Test_Transfers_IdentityOracle_Valid(t *testing.T) {
 	// Add funding
 	key, lockingScript, _ := state.MockKey()
 	keys = append(keys, key)
-	outpoint = state.MockOutPoint(lockingScript, 250)
+	outpoint = state.MockOutPoint(lockingScript, 350)
 	spentOutputs = append(spentOutputs, &expanded_tx.Output{
 		LockingScript: lockingScript,
-		Value:         250,
+		Value:         350,
 	})
 
-	if err := tx.AddInput(*outpoint, lockingScript, 250); err != nil {
+	if err := tx.AddInput(*outpoint, lockingScript, 350); err != nil {
 		t.Fatalf("Failed to add input : %s", err)
 	}
 
@@ -869,7 +865,7 @@ func Test_Transfers_IdentityOracle_Valid(t *testing.T) {
 		SpentOutputs: spentOutputs,
 	}
 
-	transaction, err := caches.Transactions.Add(ctx, addTransaction)
+	transaction, err := caches.Caches.Transactions.Add(ctx, addTransaction)
 	if err != nil {
 		t.Fatalf("Failed to add transaction : %s", err)
 	}
@@ -879,9 +875,9 @@ func Test_Transfers_IdentityOracle_Valid(t *testing.T) {
 		t.Fatalf("Failed to process transaction : %s", err)
 	}
 
-	caches.Transactions.Release(ctx, transaction.GetTxID())
+	caches.Caches.Transactions.Release(ctx, transaction.GetTxID())
 
-	caches.Contracts.Release(ctx, contractLockingScript)
+	caches.Caches.Contracts.Release(ctx, contractLockingScript)
 	caches.StopTestCaches()
 
 	responseTx := broadcaster.GetLastTx()
@@ -939,11 +935,10 @@ func Test_Transfers_IdentityOracle_BadSignature(t *testing.T) {
 	headerHeight := 100045
 	var headerHash bitcoin.Hash32
 	rand.Read(headerHash[:])
-	headers.AddHeader(headerHeight, headerHash)
+	headers.AddHash(headerHeight, headerHash)
 
 	agent, err := NewAgent(contractKey, DefaultConfig(), contract, feeLockingScript,
-		caches.Contracts, caches.Balances, caches.Transactions, caches.Subscriptions,
-		caches.Services, broadcaster, nil, headers)
+		caches.Caches, broadcaster, nil, headers)
 	if err != nil {
 		t.Fatalf("Failed to create agent : %s", err)
 	}
@@ -1063,7 +1058,7 @@ func Test_Transfers_IdentityOracle_BadSignature(t *testing.T) {
 		SpentOutputs: spentOutputs,
 	}
 
-	transaction, err := caches.Transactions.Add(ctx, addTransaction)
+	transaction, err := caches.Caches.Transactions.Add(ctx, addTransaction)
 	if err != nil {
 		t.Fatalf("Failed to add transaction : %s", err)
 	}
@@ -1073,9 +1068,9 @@ func Test_Transfers_IdentityOracle_BadSignature(t *testing.T) {
 		t.Fatalf("Failed to process transaction : %s", err)
 	}
 
-	caches.Transactions.Release(ctx, transaction.GetTxID())
+	caches.Caches.Transactions.Release(ctx, transaction.GetTxID())
 
-	caches.Contracts.Release(ctx, contractLockingScript)
+	caches.Caches.Contracts.Release(ctx, contractLockingScript)
 	caches.StopTestCaches()
 
 	responseTx := broadcaster.GetLastTx()
@@ -1135,8 +1130,7 @@ func Test_Transfers_Multi_Basic(t *testing.T) {
 	}
 
 	agent1, err := NewAgent(contractKey1, DefaultConfig(), contract1, feeLockingScript1,
-		caches.Contracts, caches.Balances, caches.Transactions, caches.Subscriptions,
-		caches.Services, broadcaster1, nil, nil)
+		caches.Caches, broadcaster1, nil, nil)
 	if err != nil {
 		t.Fatalf("Failed to create agent : %s", err)
 	}
@@ -1151,8 +1145,7 @@ func Test_Transfers_Multi_Basic(t *testing.T) {
 	}
 
 	agent2, err := NewAgent(contractKey2, DefaultConfig(), contract2, feeLockingScript2,
-		caches.Contracts, caches.Balances, caches.Transactions, caches.Subscriptions,
-		caches.Services, broadcaster2, nil, nil)
+		caches.Caches, broadcaster2, nil, nil)
 	if err != nil {
 		t.Fatalf("Failed to create agent : %s", err)
 	}
@@ -1294,7 +1287,7 @@ func Test_Transfers_Multi_Basic(t *testing.T) {
 			SpentOutputs: spentOutputs,
 		}
 
-		transaction, err := caches.Transactions.Add(ctx, addTransaction)
+		transaction, err := caches.Caches.Transactions.Add(ctx, addTransaction)
 		if err != nil {
 			t.Fatalf("Failed to add transaction : %s", err)
 		}
@@ -1343,7 +1336,7 @@ func Test_Transfers_Multi_Basic(t *testing.T) {
 			t.Fatalf("Failed to process transfer transaction : %s", err)
 		}
 
-		caches.Transactions.Release(ctx, transaction.GetTxID())
+		caches.Caches.Transactions.Release(ctx, transaction.GetTxID())
 
 		agent2ResponseTx := broadcaster2.GetLastTx()
 		broadcaster2.ClearTxs()
@@ -1365,7 +1358,7 @@ func Test_Transfers_Multi_Basic(t *testing.T) {
 			SpentOutputs: messageSpentOutputs,
 		}
 
-		messageTransaction, err := caches.Transactions.Add(ctx, addMessageTransaction)
+		messageTransaction, err := caches.Caches.Transactions.Add(ctx, addMessageTransaction)
 		if err != nil {
 			t.Fatalf("Failed to add transaction : %s", err)
 		}
@@ -1451,7 +1444,7 @@ func Test_Transfers_Multi_Basic(t *testing.T) {
 			t.Fatalf("Missing settlement in sig request")
 		}
 
-		caches.Transactions.Release(ctx, messageTransaction.GetTxID())
+		caches.Caches.Transactions.Release(ctx, messageTransaction.GetTxID())
 
 		message2SpentOutputs := []*expanded_tx.Output{
 			{
@@ -1465,7 +1458,7 @@ func Test_Transfers_Multi_Basic(t *testing.T) {
 			SpentOutputs: message2SpentOutputs,
 		}
 
-		message2Transaction, err := caches.Transactions.Add(ctx, addMessage2Transaction)
+		message2Transaction, err := caches.Caches.Transactions.Add(ctx, addMessage2Transaction)
 		if err != nil {
 			t.Fatalf("Failed to add transaction : %s", err)
 		}
@@ -1518,11 +1511,11 @@ func Test_Transfers_Multi_Basic(t *testing.T) {
 		js, _ = json.MarshalIndent(settlement, "", "  ")
 		t.Logf("Settlement : %s", js)
 
-		caches.Transactions.Release(ctx, message2Transaction.GetTxID())
+		caches.Caches.Transactions.Release(ctx, message2Transaction.GetTxID())
 	}
 
-	caches.Contracts.Release(ctx, contractLockingScript1)
-	caches.Contracts.Release(ctx, contractLockingScript2)
+	caches.Caches.Contracts.Release(ctx, contractLockingScript1)
+	caches.Caches.Contracts.Release(ctx, contractLockingScript2)
 	caches.StopTestCaches()
 }
 
@@ -1546,8 +1539,7 @@ func Test_Transfers_Multi_Reject_First(t *testing.T) {
 	}
 
 	agent1, err := NewAgent(contractKey1, DefaultConfig(), contract1, feeLockingScript1,
-		caches.Contracts, caches.Balances, caches.Transactions, caches.Subscriptions,
-		caches.Services, broadcaster1, nil, nil)
+		caches.Caches, broadcaster1, nil, nil)
 	if err != nil {
 		t.Fatalf("Failed to create agent : %s", err)
 	}
@@ -1562,8 +1554,7 @@ func Test_Transfers_Multi_Reject_First(t *testing.T) {
 	}
 
 	agent2, err := NewAgent(contractKey2, DefaultConfig(), contract2, feeLockingScript2,
-		caches.Contracts, caches.Balances, caches.Transactions, caches.Subscriptions,
-		caches.Services, broadcaster2, nil, nil)
+		caches.Caches, broadcaster2, nil, nil)
 	if err != nil {
 		t.Fatalf("Failed to create agent : %s", err)
 	}
@@ -1705,7 +1696,7 @@ func Test_Transfers_Multi_Reject_First(t *testing.T) {
 			SpentOutputs: spentOutputs,
 		}
 
-		transaction, err := caches.Transactions.Add(ctx, addTransaction)
+		transaction, err := caches.Caches.Transactions.Add(ctx, addTransaction)
 		if err != nil {
 			t.Fatalf("Failed to add transaction : %s", err)
 		}
@@ -1752,7 +1743,7 @@ func Test_Transfers_Multi_Reject_First(t *testing.T) {
 			t.Fatalf("Failed to process transfer transaction : %s", err)
 		}
 
-		caches.Transactions.Release(ctx, transaction.GetTxID())
+		caches.Caches.Transactions.Release(ctx, transaction.GetTxID())
 
 		agent2ResponseTx := broadcaster2.GetLastTx()
 		broadcaster2.ClearTxs()
@@ -1763,8 +1754,8 @@ func Test_Transfers_Multi_Reject_First(t *testing.T) {
 		t.Logf("Agent 2 no response tx 1")
 	}
 
-	caches.Contracts.Release(ctx, contractLockingScript1)
-	caches.Contracts.Release(ctx, contractLockingScript2)
+	caches.Caches.Contracts.Release(ctx, contractLockingScript1)
+	caches.Caches.Contracts.Release(ctx, contractLockingScript2)
 	caches.StopTestCaches()
 }
 
@@ -1788,8 +1779,7 @@ func Test_Transfers_Multi_Reject_Second(t *testing.T) {
 	}
 
 	agent1, err := NewAgent(contractKey1, DefaultConfig(), contract1, feeLockingScript1,
-		caches.Contracts, caches.Balances, caches.Transactions, caches.Subscriptions,
-		caches.Services, broadcaster1, nil, nil)
+		caches.Caches, broadcaster1, nil, nil)
 	if err != nil {
 		t.Fatalf("Failed to create agent : %s", err)
 	}
@@ -1804,8 +1794,7 @@ func Test_Transfers_Multi_Reject_Second(t *testing.T) {
 	}
 
 	agent2, err := NewAgent(contractKey2, DefaultConfig(), contract2, feeLockingScript2,
-		caches.Contracts, caches.Balances, caches.Transactions, caches.Subscriptions,
-		caches.Services, broadcaster2, nil, nil)
+		caches.Caches, broadcaster2, nil, nil)
 	if err != nil {
 		t.Fatalf("Failed to create agent : %s", err)
 	}
@@ -1948,7 +1937,7 @@ func Test_Transfers_Multi_Reject_Second(t *testing.T) {
 		}
 		transferTxID := tx.MsgTx.TxHash()
 
-		transaction, err := caches.Transactions.Add(ctx, addTransaction)
+		transaction, err := caches.Caches.Transactions.Add(ctx, addTransaction)
 		if err != nil {
 			t.Fatalf("Failed to add transaction : %s", err)
 		}
@@ -1997,7 +1986,7 @@ func Test_Transfers_Multi_Reject_Second(t *testing.T) {
 			t.Fatalf("Failed to process transfer transaction : %s", err)
 		}
 
-		caches.Transactions.Release(ctx, transaction.GetTxID())
+		caches.Caches.Transactions.Release(ctx, transaction.GetTxID())
 
 		agent2ResponseTx := broadcaster2.GetLastTx()
 		broadcaster2.ClearTxs()
@@ -2019,7 +2008,7 @@ func Test_Transfers_Multi_Reject_Second(t *testing.T) {
 			SpentOutputs: messageSpentOutputs,
 		}
 
-		messageTransaction, err := caches.Transactions.Add(ctx, addMessageTransaction)
+		messageTransaction, err := caches.Caches.Transactions.Add(ctx, addMessageTransaction)
 		if err != nil {
 			t.Fatalf("Failed to add transaction : %s", err)
 		}
@@ -2073,7 +2062,7 @@ func Test_Transfers_Multi_Reject_Second(t *testing.T) {
 		js, _ = json.MarshalIndent(rejection, "", "  ")
 		t.Logf("Rejection : %s", js)
 
-		caches.Transactions.Release(ctx, messageTransaction.GetTxID())
+		caches.Caches.Transactions.Release(ctx, messageTransaction.GetTxID())
 
 		rejectionSpentOutputs := []*expanded_tx.Output{
 			{
@@ -2087,7 +2076,7 @@ func Test_Transfers_Multi_Reject_Second(t *testing.T) {
 			SpentOutputs: rejectionSpentOutputs,
 		}
 
-		rejectionTransaction, err := caches.Transactions.Add(ctx, addRejectionTransaction)
+		rejectionTransaction, err := caches.Caches.Transactions.Add(ctx, addRejectionTransaction)
 		if err != nil {
 			t.Fatalf("Failed to add transaction : %s", err)
 		}
@@ -2135,10 +2124,10 @@ func Test_Transfers_Multi_Reject_Second(t *testing.T) {
 				agent1ResponseTx3.TxIn[0].PreviousOutPoint.Hash, transferTxID)
 		}
 
-		caches.Transactions.Release(ctx, rejectionTransaction.GetTxID())
+		caches.Caches.Transactions.Release(ctx, rejectionTransaction.GetTxID())
 	}
 
-	caches.Contracts.Release(ctx, contractLockingScript1)
-	caches.Contracts.Release(ctx, contractLockingScript2)
+	caches.Caches.Contracts.Release(ctx, contractLockingScript1)
+	caches.Caches.Contracts.Release(ctx, contractLockingScript2)
 	caches.StopTestCaches()
 }

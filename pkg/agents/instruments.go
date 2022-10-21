@@ -14,6 +14,18 @@ import (
 	"github.com/pkg/errors"
 )
 
+func (a *Agent) processInstrumentDefinition(ctx context.Context, transaction *state.Transaction,
+	definition *actions.InstrumentDefinition, now uint64) error {
+
+	return errors.New("Not Implemented")
+}
+
+func (a *Agent) processInstrumentModification(ctx context.Context, transaction *state.Transaction,
+	modification *actions.InstrumentModification, now uint64) error {
+
+	return errors.New("Not Implemented")
+}
+
 func (a *Agent) processInstrumentCreation(ctx context.Context, transaction *state.Transaction,
 	creation *actions.InstrumentCreation, now uint64) error {
 
@@ -152,11 +164,11 @@ func (a *Agent) updateAdminBalance(ctx context.Context, transaction *state.Trans
 		TxID:          &txid,
 	}
 
-	addedBalance, err := a.balances.Add(ctx, a.contract.LockingScript, instrumentCode, balance)
+	addedBalance, err := a.caches.Balances.Add(ctx, a.contract.LockingScript, instrumentCode, balance)
 	if err != nil {
 		return errors.Wrap(err, "get balance")
 	}
-	defer a.balances.Release(ctx, contractLockingScript, instrumentCode, balance)
+	defer a.caches.Balances.Release(ctx, contractLockingScript, instrumentCode, balance)
 
 	var quantity uint64
 	if addedBalance != balance {

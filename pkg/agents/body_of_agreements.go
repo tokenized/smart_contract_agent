@@ -10,6 +10,18 @@ import (
 	"github.com/pkg/errors"
 )
 
+func (a *Agent) processBodyOfAgreementOffer(ctx context.Context,
+	transaction *state.Transaction, offer *actions.BodyOfAgreementOffer, now uint64) error {
+
+	return errors.New("Not Implemented")
+}
+
+func (a *Agent) processBodyOfAgreementAmendment(ctx context.Context,
+	transaction *state.Transaction, amendment *actions.BodyOfAgreementAmendment, now uint64) error {
+
+	return errors.New("Not Implemented")
+}
+
 func (a *Agent) processBodyOfAgreementFormation(ctx context.Context,
 	transaction *state.Transaction, formation *actions.BodyOfAgreementFormation, now uint64) error {
 

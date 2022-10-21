@@ -56,6 +56,15 @@ type BlockHashOnly struct {
 	Hash *bitcoin.Hash32 `json:"hash"`
 }
 
+type BlockHeaderOnly struct {
+	Version    int32          `json:"version"`
+	PrevBlock  bitcoin.Hash32 `json:"previousblockhash"`
+	MerkleRoot bitcoin.Hash32 `json:"merkleroot"`
+	Timestamp  uint32         `json:"time"`
+	Bits       uint32         `json:"bits"`
+	Nonce      uint32         `json:"nonce"`
+}
+
 func (err HTTPError) Error() string {
 	if len(err.Message) > 0 {
 		return fmt.Sprintf("HTTP Status %d : %s", err.Status, err.Message)
@@ -136,6 +145,24 @@ func (s *Service) BlockHash(ctx context.Context, height int) (*bitcoin.Hash32, e
 	}
 
 	return response.Hash, nil
+}
+
+func (s *Service) GetHeader(ctx context.Context, height int) (*wire.BlockHeader, error) {
+	url := fmt.Sprintf(URLGetHeader, s.NetworkName(), height)
+
+	response := &BlockHeaderOnly{}
+	if err := getWithToken(ctx, url, s.apiKey, response); err != nil {
+		return nil, errors.Wrap(err, "get")
+	}
+
+	return &wire.BlockHeader{
+		Version:    response.Version,
+		PrevBlock:  response.PrevBlock,
+		MerkleRoot: response.MerkleRoot,
+		Timestamp:  response.Timestamp,
+		Bits:       response.Bits,
+		Nonce:      response.Nonce,
+	}, nil
 }
 
 // postWithToken sends a request to the HTTP server using the POST method with an authentication

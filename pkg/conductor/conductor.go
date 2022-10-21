@@ -27,11 +27,7 @@ type Conductor struct {
 	feeLockingScript bitcoin.Script
 
 	spyNodeClient spynode.Client
-	contracts     *state.ContractCache
-	balances      *state.BalanceCache
-	transactions  *state.TransactionCache
-	subscriptions *state.SubscriptionCache
-	services      *state.ContractServicesCache
+	caches        *state.Caches
 
 	broadcaster agents.Broadcaster
 	fetcher     agents.Fetcher
@@ -45,21 +41,15 @@ type Conductor struct {
 }
 
 func NewConductor(baseKey bitcoin.Key, config agents.Config, feeLockingScript bitcoin.Script,
-	spyNodeClient spynode.Client, contracts *state.ContractCache, balances *state.BalanceCache,
-	transactions *state.TransactionCache, subscriptions *state.SubscriptionCache,
-	services *state.ContractServicesCache, broadcaster agents.Broadcaster, fetcher agents.Fetcher,
-	headers agents.BlockHeaders) *Conductor {
+	spyNodeClient spynode.Client, caches *state.Caches, broadcaster agents.Broadcaster,
+	fetcher agents.Fetcher, headers agents.BlockHeaders) *Conductor {
 
 	return &Conductor{
 		baseKey:              baseKey,
 		config:               config,
 		feeLockingScript:     feeLockingScript,
 		spyNodeClient:        spyNodeClient,
-		contracts:            contracts,
-		balances:             balances,
-		transactions:         transactions,
-		subscriptions:        subscriptions,
-		services:             services,
+		caches:               caches,
 		broadcaster:          broadcaster,
 		fetcher:              fetcher,
 		headers:              headers,
@@ -90,7 +80,7 @@ func (c *Conductor) UpdateNextSpyNodeMessageID(id uint64) {
 }
 
 func (c *Conductor) Load(ctx context.Context, store storage.StreamStorage) error {
-	lookups, err := c.contracts.List(ctx, store)
+	lookups, err := c.caches.Contracts.List(ctx, store)
 	if err != nil {
 		return errors.Wrap(err, "list contracts")
 	}
@@ -164,7 +154,7 @@ func (c *Conductor) AddAgent(ctx context.Context,
 		LockingScript: lockingScript,
 	}
 
-	addedContract, err := c.contracts.Add(ctx, contract)
+	addedContract, err := c.caches.Contracts.Add(ctx, contract)
 	if err != nil {
 		return nil, errors.Wrap(err, "add contract")
 	}
@@ -187,9 +177,8 @@ func (c *Conductor) AddAgent(ctx context.Context,
 		}, "Already have contract")
 	}
 
-	agent, err := agents.NewAgent(key, c.config, addedContract, c.feeLockingScript, c.contracts,
-		c.balances, c.transactions, c.subscriptions, c.services, c.broadcaster, c.fetcher,
-		c.headers)
+	agent, err := agents.NewAgent(key, c.config, addedContract, c.feeLockingScript, c.caches,
+		c.broadcaster, c.fetcher, c.headers)
 	if err != nil {
 		return nil, errors.Wrap(err, "new agent")
 	}
@@ -225,7 +214,7 @@ func (c *Conductor) GetAgent(ctx context.Context,
 		return nil, errors.New("Wrong locking script")
 	}
 
-	contract, err := c.contracts.Get(ctx, lockingScript)
+	contract, err := c.caches.Contracts.Get(ctx, lockingScript)
 	if err != nil {
 		return nil, errors.Wrap(err, "get contract")
 	}
@@ -234,9 +223,8 @@ func (c *Conductor) GetAgent(ctx context.Context,
 		return nil, nil
 	}
 
-	agent, err := agents.NewAgent(key, c.config, contract, c.feeLockingScript, c.contracts,
-		c.balances, c.transactions, c.subscriptions, c.services, c.broadcaster, c.fetcher,
-		c.headers)
+	agent, err := agents.NewAgent(key, c.config, contract, c.feeLockingScript, c.caches,
+		c.broadcaster, c.fetcher, c.headers)
 	if err != nil {
 		return nil, errors.Wrap(err, "new agent")
 	}

@@ -49,7 +49,7 @@ func (c *Conductor) addTx(ctx context.Context, txid bitcoin.Hash32,
 		transaction.MerkleProofs = []*merkle_proof.MerkleProof{mp}
 	}
 
-	addedTx, err := c.transactions.Add(ctx, transaction)
+	addedTx, err := c.caches.Transactions.Add(ctx, transaction)
 	if err != nil {
 		return nil, errors.Wrap(err, "add tx")
 	}

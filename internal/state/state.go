@@ -5,6 +5,8 @@ import (
 	"encoding/binary"
 	"sync"
 
+	"github.com/pkg/errors"
+	"github.com/tokenized/cacher"
 	"github.com/tokenized/pkg/bitcoin"
 )
 
@@ -14,6 +16,57 @@ var (
 	isTestLock sync.Mutex
 	isTest     = true
 )
+
+type Caches struct {
+	Contracts     *ContractCache
+	Balances      *BalanceCache
+	Transactions  *TransactionCache
+	Subscriptions *SubscriptionCache
+	Services      *ContractServicesCache
+	Votes         *VoteCache
+}
+
+func NewCaches(cache *cacher.Cache) (*Caches, error) {
+	result := &Caches{}
+
+	contracts, err := NewContractCache(cache)
+	if err != nil {
+		return nil, errors.Wrap(err, "contracts")
+	}
+	result.Contracts = contracts
+
+	balances, err := NewBalanceCache(cache)
+	if err != nil {
+		return nil, errors.Wrap(err, "balances")
+	}
+	result.Balances = balances
+
+	transactions, err := NewTransactionCache(cache)
+	if err != nil {
+		return nil, errors.Wrap(err, "transactions")
+	}
+	result.Transactions = transactions
+
+	subscriptions, err := NewSubscriptionCache(cache)
+	if err != nil {
+		return nil, errors.Wrap(err, "subscriptions")
+	}
+	result.Subscriptions = subscriptions
+
+	services, err := NewContractServicesCache(cache)
+	if err != nil {
+		return nil, errors.Wrap(err, "services")
+	}
+	result.Services = services
+
+	votes, err := NewVoteCache(cache)
+	if err != nil {
+		return nil, errors.Wrap(err, "votes")
+	}
+	result.Votes = votes
+
+	return result, nil
+}
 
 type ContractHash bitcoin.Hash32
 

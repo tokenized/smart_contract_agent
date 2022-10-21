@@ -57,7 +57,7 @@ func (a *Agent) processSettlementRequest(ctx context.Context, transaction *state
 	ctx = logger.ContextWithLogFields(ctx, logger.Stringer("transfer_txid", transferTxID))
 	logger.Info(ctx, "Processing settlement request")
 
-	transferTransaction, err := a.transactions.Get(ctx, transferTxID)
+	transferTransaction, err := a.caches.Transactions.Get(ctx, transferTxID)
 	if err != nil {
 		return errors.Wrap(err, "get transfer tx")
 	}
@@ -67,7 +67,7 @@ func (a *Agent) processSettlementRequest(ctx context.Context, transaction *state
 			logger.Stringer("transfer_txid", transferTxID),
 		}, "Transfer tx not found")
 	}
-	defer a.transactions.Release(ctx, transferTxID)
+	defer a.caches.Transactions.Release(ctx, transferTxID)
 
 	isTest := a.IsTest()
 	var transfer *actions.Transfer
@@ -166,7 +166,7 @@ func (a *Agent) processSettlementRequest(ctx context.Context, transaction *state
 				}
 
 				settlement.Instruments = append(settlement.Instruments, instrumentSettlement)
-				defer a.balances.ReleaseMulti(instrumentCtx, agentLockingScript, instrumentCode,
+				defer a.caches.Balances.ReleaseMulti(instrumentCtx, agentLockingScript, instrumentCode,
 					instrumentBalances)
 				balances = state.AppendBalances(balances, instrumentBalances)
 
@@ -486,10 +486,10 @@ func (a *Agent) sendSettlementRequest(ctx context.Context,
 	}
 
 	messageTxID := *messageTx.MsgTx.TxHash()
-	if _, err := a.transactions.AddRaw(ctx, messageTx.MsgTx, nil); err != nil {
+	if _, err := a.caches.Transactions.AddRaw(ctx, messageTx.MsgTx, nil); err != nil {
 		return errors.Wrap(err, "add response tx")
 	}
-	defer a.transactions.Release(ctx, messageTxID)
+	defer a.caches.Transactions.Release(ctx, messageTxID)
 
 	logger.InfoWithFields(ctx, []logger.Field{
 		logger.Stringer("next_contract_locking_script", transferContracts.NextLockingScript),

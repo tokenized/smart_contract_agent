@@ -90,36 +90,15 @@ func main() {
 	}
 
 	cache := cacher.NewCache(store, cfg.Cache)
-
-	contracts, err := state.NewContractCache(cache)
+	caches, err := state.NewCaches(cache)
 	if err != nil {
-		logger.Fatal(ctx, "main : Failed to create contracts cache : %s", err)
-	}
-
-	balances, err := state.NewBalanceCache(cache)
-	if err != nil {
-		logger.Fatal(ctx, "main : Failed to create balance cache : %s", err)
-	}
-
-	transactions, err := state.NewTransactionCache(cache)
-	if err != nil {
-		logger.Fatal(ctx, "main : Failed to create transaction cache : %s", err)
-	}
-
-	subscriptions, err := state.NewSubscriptionCache(cache)
-	if err != nil {
-		logger.Fatal(ctx, "main : Failed to create subscription cache : %s", err)
-	}
-
-	services, err := state.NewContractServicesCache(cache)
-	if err != nil {
-		logger.Fatal(ctx, "main : Failed to create services cache : %s", err)
+		logger.Fatal(ctx, "main : Failed to create caches : %s", err)
 	}
 
 	broadcaster := NewNoopBroadcaster()
 
-	conductor := conductor.NewConductor(cfg.BaseKey, cfg.Agents, feeLockingScript, nil, contracts,
-		balances, transactions, subscriptions, services, broadcaster, woc, woc)
+	conductor := conductor.NewConductor(cfg.BaseKey, cfg.Agents, feeLockingScript, nil, caches,
+		broadcaster, woc, woc)
 
 	var cacheWait, loadWait sync.WaitGroup
 
@@ -131,7 +110,8 @@ func main() {
 
 	loadThread, loadComplete := threads.NewInterruptableThreadComplete("Load",
 		func(ctx context.Context, interrupt <-chan interface{}) error {
-			return load(ctx, interrupt, conductor, transactions, cfg.BaseKey, cfg.ContractKey, woc)
+			return load(ctx, interrupt, conductor, caches.Transactions, cfg.BaseKey,
+				cfg.ContractKey, woc)
 		}, &loadWait)
 
 	cacheThread.Start(ctx)

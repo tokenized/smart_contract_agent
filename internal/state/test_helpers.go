@@ -20,11 +20,7 @@ import (
 type TestCaches struct {
 	Timeout       time.Duration
 	Cache         *cacher.Cache
-	Contracts     *ContractCache
-	Balances      *BalanceCache
-	Transactions  *TransactionCache
-	Subscriptions *SubscriptionCache
-	Services      *ContractServicesCache
+	Caches        *Caches
 	Interrupt     chan interface{}
 	Complete      chan error
 	Shutdown      chan error
@@ -49,29 +45,9 @@ func StartTestCaches(ctx context.Context, t *testing.T, store storage.StreamStor
 	}
 
 	var err error
-	result.Contracts, err = NewContractCache(result.Cache)
+	result.Caches, err = NewCaches(result.Cache)
 	if err != nil {
-		panic(fmt.Sprintf("Failed to create contract cache : %s", err))
-	}
-
-	result.Balances, err = NewBalanceCache(result.Cache)
-	if err != nil {
-		panic(fmt.Sprintf("Failed to create balance cache : %s", err))
-	}
-
-	result.Transactions, err = NewTransactionCache(result.Cache)
-	if err != nil {
-		panic(fmt.Sprintf("Failed to create transaction cache : %s", err))
-	}
-
-	result.Subscriptions, err = NewSubscriptionCache(result.Cache)
-	if err != nil {
-		panic(fmt.Sprintf("Failed to create subscription cache : %s", err))
-	}
-
-	result.Services, err = NewContractServicesCache(result.Cache)
-	if err != nil {
-		panic(fmt.Sprintf("Failed to create contract services cache : %s", err))
+		panic(fmt.Sprintf("Failed to create caches : %s", err))
 	}
 
 	go func() {
@@ -147,6 +123,7 @@ func MockInstrument(ctx context.Context,
 
 	contractKey, contractLockingScript, _ := MockKey()
 	adminKey, adminLockingScript, adminAddress := MockKey()
+	_, _, entityAddress := MockKey()
 
 	var keyHash bitcoin.Hash32
 	rand.Read(keyHash[:])
@@ -155,10 +132,12 @@ func MockInstrument(ctx context.Context,
 		KeyHash:       keyHash,
 		LockingScript: contractLockingScript,
 		Formation: &actions.ContractFormation{
-			ContractName: "Test",
-			AdminAddress: adminAddress.Bytes(),
-			ContractFee:  100,
-			Timestamp:    uint64(time.Now().UnixNano()),
+			ContractName:   "Test",
+			AdminAddress:   adminAddress.Bytes(),
+			ContractFee:    100,
+			ContractType:   actions.ContractTypeInstrument,
+			EntityContract: entityAddress.Bytes(),
+			Timestamp:      uint64(time.Now().UnixNano()),
 		},
 		FormationTxID: &bitcoin.Hash32{},
 	}
@@ -204,13 +183,13 @@ func MockInstrument(ctx context.Context,
 	contract.Instruments = append(contract.Instruments, instrument)
 
 	var err error
-	contract, err = caches.Contracts.Add(ctx, contract)
+	contract, err = caches.Caches.Contracts.Add(ctx, contract)
 	if err != nil {
 		panic(fmt.Sprintf("Failed to add contract : %s", err))
 	}
 
-	adminBalance, err := caches.Balances.Add(ctx, contractLockingScript, instrument.InstrumentCode,
-		&Balance{
+	adminBalance, err := caches.Caches.Balances.Add(ctx, contractLockingScript,
+		instrument.InstrumentCode, &Balance{
 			LockingScript: adminLockingScript,
 			Quantity:      authorizedQuantity,
 			Timestamp:     instrument.Creation.Timestamp,
@@ -220,7 +199,8 @@ func MockInstrument(ctx context.Context,
 		panic(fmt.Sprintf("Failed to add admin balance : %s", err))
 	}
 
-	caches.Balances.Release(ctx, contractLockingScript, instrument.InstrumentCode, adminBalance)
+	caches.Caches.Balances.Release(ctx, contractLockingScript, instrument.InstrumentCode,
+		adminBalance)
 
 	return contractKey, contractLockingScript, adminKey, contract, instrument
 }
@@ -234,6 +214,7 @@ func MockInstrumentWithOracle(ctx context.Context,
 
 	contractKey, contractLockingScript, _ := MockKey()
 	adminKey, adminLockingScript, adminAddress := MockKey()
+	_, _, entityAddress := MockKey()
 
 	var keyHash bitcoin.Hash32
 	rand.Read(keyHash[:])
@@ -242,10 +223,11 @@ func MockInstrumentWithOracle(ctx context.Context,
 		KeyHash:       keyHash,
 		LockingScript: contractLockingScript,
 		Formation: &actions.ContractFormation{
-			ContractName: "Test",
-			AdminAddress: adminAddress.Bytes(),
-			ContractFee:  100,
-			ContractType: actions.ContractTypeInstrument,
+			ContractName:   "Test",
+			AdminAddress:   adminAddress.Bytes(),
+			ContractFee:    100,
+			ContractType:   actions.ContractTypeInstrument,
+			EntityContract: entityAddress.Bytes(),
 			Oracles: []*actions.OracleField{
 				{
 					OracleTypes:    []uint32{actions.ServiceTypeIdentityOracle},
@@ -298,13 +280,13 @@ func MockInstrumentWithOracle(ctx context.Context,
 	contract.Instruments = append(contract.Instruments, instrument)
 
 	var err error
-	contract, err = caches.Contracts.Add(ctx, contract)
+	contract, err = caches.Caches.Contracts.Add(ctx, contract)
 	if err != nil {
 		panic(fmt.Sprintf("Failed to add contract : %s", err))
 	}
 
-	adminBalance, err := caches.Balances.Add(ctx, contractLockingScript, instrument.InstrumentCode,
-		&Balance{
+	adminBalance, err := caches.Caches.Balances.Add(ctx, contractLockingScript,
+		instrument.InstrumentCode, &Balance{
 			LockingScript: adminLockingScript,
 			Quantity:      authorizedQuantity,
 			Timestamp:     instrument.Creation.Timestamp,
@@ -314,7 +296,7 @@ func MockInstrumentWithOracle(ctx context.Context,
 		panic(fmt.Sprintf("Failed to add admin balance : %s", err))
 	}
 
-	caches.Balances.Release(ctx, contractLockingScript, instrument.InstrumentCode, adminBalance)
+	caches.Caches.Balances.Release(ctx, contractLockingScript, instrument.InstrumentCode, adminBalance)
 
 	return contractKey, contractLockingScript, adminKey, contract, instrument, identityKey
 }
@@ -352,17 +334,17 @@ func MockIdentityOracle(ctx context.Context,
 	rand.Read(contract.FormationTxID[:])
 
 	var err error
-	contract, err = caches.Contracts.Add(ctx, contract)
+	contract, err = caches.Caches.Contracts.Add(ctx, contract)
 	if err != nil {
 		panic(fmt.Sprintf("Failed to add contract : %s", err))
 	}
 
-	caches.Contracts.Release(ctx, contractLockingScript)
+	caches.Caches.Contracts.Release(ctx, contractLockingScript)
 
 	var txid bitcoin.Hash32
 	rand.Read(txid[:])
 
-	if err := caches.Services.Update(ctx, contractLockingScript, contract.Formation,
+	if err := caches.Caches.Services.Update(ctx, contractLockingScript, contract.Formation,
 		txid); err != nil {
 		panic(fmt.Sprintf("Failed to update identity service : %s", err))
 	}
@@ -437,31 +419,52 @@ func (b *MockTxBroadcaster) GetLastTx() *wire.MsgTx {
 }
 
 type MockHeaders struct {
-	headers map[int]*bitcoin.Hash32
+	hashes  map[int]*bitcoin.Hash32
+	headers map[int]*wire.BlockHeader
 
 	lock sync.Mutex
 }
 
 func NewMockHeaders() *MockHeaders {
 	return &MockHeaders{
-		headers: make(map[int]*bitcoin.Hash32),
+		hashes:  make(map[int]*bitcoin.Hash32),
+		headers: make(map[int]*wire.BlockHeader),
 	}
 }
 
-func (h *MockHeaders) AddHeader(height int, hash bitcoin.Hash32) {
+func (h *MockHeaders) AddHash(height int, hash bitcoin.Hash32) {
 	h.lock.Lock()
 	defer h.lock.Unlock()
 
-	h.headers[height] = &hash
+	h.hashes[height] = &hash
+}
+
+func (h *MockHeaders) AddHeader(height int, header *wire.BlockHeader) {
+	h.lock.Lock()
+	defer h.lock.Unlock()
+
+	h.headers[height] = header
 }
 
 func (h *MockHeaders) BlockHash(ctx context.Context, height int) (*bitcoin.Hash32, error) {
 	h.lock.Lock()
 	defer h.lock.Unlock()
 
-	hash, exists := h.headers[height]
+	hash, exists := h.hashes[height]
 	if exists {
 		return hash, nil
+	}
+
+	return nil, nil
+}
+
+func (h *MockHeaders) GetHeader(ctx context.Context, height int) (*wire.BlockHeader, error) {
+	h.lock.Lock()
+	defer h.lock.Unlock()
+
+	header, exists := h.headers[height]
+	if exists {
+		return header, nil
 	}
 
 	return nil, nil

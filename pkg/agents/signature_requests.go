@@ -78,7 +78,7 @@ func (a *Agent) processSignatureRequest(ctx context.Context, transaction *state.
 	ctx = logger.ContextWithLogFields(ctx, logger.Stringer("transfer_txid", transferTxID))
 	logger.Info(ctx, "Processing signature request")
 
-	transferTransaction, err := a.transactions.Get(ctx, transferTxID)
+	transferTransaction, err := a.caches.Transactions.Get(ctx, transferTxID)
 	if err != nil {
 		return errors.Wrap(err, "get transfer tx")
 	}
@@ -87,7 +87,7 @@ func (a *Agent) processSignatureRequest(ctx context.Context, transaction *state.
 		return errors.Wrap(a.sendRejection(ctx, transaction,
 			platform.NewRejectError(actions.RejectionsMsgMalformed, "unknown transfer tx", now)), "reject")
 	}
-	defer a.transactions.Release(ctx, transferTxID)
+	defer a.caches.Transactions.Release(ctx, transferTxID)
 
 	transferTransaction.Lock()
 	transferTx := transferTransaction.GetMsgTx()
@@ -203,7 +203,7 @@ func (a *Agent) processSignatureRequest(ctx context.Context, transaction *state.
 			return errors.Wrapf(err, "verify settlement: %s", instrumentID)
 		}
 
-		defer a.balances.ReleaseMulti(instrumentCtx, agentLockingScript, instrumentCode,
+		defer a.caches.Balances.ReleaseMulti(instrumentCtx, agentLockingScript, instrumentCode,
 			instrumentBalances)
 		balances = state.AppendBalances(balances, instrumentBalances)
 	}
@@ -383,7 +383,7 @@ func (a *Agent) verifyInstrumentSettlement(ctx context.Context, agentLockingScri
 		lockingScripts = appendLockingScript(lockingScripts, txout.LockingScript)
 	}
 
-	balances, err := a.balances.GetMulti(ctx, agentLockingScript, instrumentCode, lockingScripts)
+	balances, err := a.caches.Balances.GetMulti(ctx, agentLockingScript, instrumentCode, lockingScripts)
 	if err != nil {
 		return nil, errors.Wrap(err, "get balances")
 	}
@@ -396,7 +396,7 @@ func (a *Agent) verifyInstrumentSettlement(ctx context.Context, agentLockingScri
 		balance := balances.Find(txout.LockingScript)
 		if balance == nil {
 			balances.Unlock()
-			a.balances.ReleaseMulti(ctx, agentLockingScript, instrumentCode, balances)
+			a.caches.Balances.ReleaseMulti(ctx, agentLockingScript, instrumentCode, balances)
 			logger.WarnWithFields(ctx, []logger.Field{
 				logger.Int("index", i),
 				logger.Stringer("locking_script", txout.LockingScript),
@@ -408,7 +408,7 @@ func (a *Agent) verifyInstrumentSettlement(ctx context.Context, agentLockingScri
 		adjustment := balance.VerifySettlement(transferTxID)
 		if adjustment == nil {
 			balances.Unlock()
-			a.balances.ReleaseMulti(ctx, agentLockingScript, instrumentCode, balances)
+			a.caches.Balances.ReleaseMulti(ctx, agentLockingScript, instrumentCode, balances)
 			logger.WarnWithFields(ctx, []logger.Field{
 				logger.Int("index", i),
 				logger.Stringer("locking_script", txout.LockingScript),
@@ -419,7 +419,7 @@ func (a *Agent) verifyInstrumentSettlement(ctx context.Context, agentLockingScri
 
 		if adjustment.SettledQuantity != settlement.Quantity {
 			balances.Unlock()
-			a.balances.ReleaseMulti(ctx, agentLockingScript, instrumentCode, balances)
+			a.caches.Balances.ReleaseMulti(ctx, agentLockingScript, instrumentCode, balances)
 			logger.WarnWithFields(ctx, []logger.Field{
 				logger.Int("index", i),
 				logger.Stringer("locking_script", txout.LockingScript),
@@ -512,10 +512,10 @@ func (a *Agent) sendSignatureRequest(ctx context.Context, currentTransaction *st
 	}
 
 	messageTxID := *messageTx.MsgTx.TxHash()
-	if _, err := a.transactions.AddRaw(ctx, messageTx.MsgTx, nil); err != nil {
+	if _, err := a.caches.Transactions.AddRaw(ctx, messageTx.MsgTx, nil); err != nil {
 		return errors.Wrap(err, "add response tx")
 	}
-	defer a.transactions.Release(ctx, messageTxID)
+	defer a.caches.Transactions.Release(ctx, messageTxID)
 
 	logger.InfoWithFields(ctx, []logger.Field{
 		logger.Stringer("previous_contract_locking_script",

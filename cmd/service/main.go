@@ -15,6 +15,7 @@ import (
 	"github.com/tokenized/pkg/bitcoin"
 	"github.com/tokenized/pkg/storage"
 	"github.com/tokenized/pkg/wire"
+	"github.com/tokenized/smart_contract_agent/internal/platform"
 	"github.com/tokenized/smart_contract_agent/internal/state"
 	"github.com/tokenized/smart_contract_agent/pkg/agents"
 	"github.com/tokenized/smart_contract_agent/pkg/conductor"
@@ -94,35 +95,13 @@ func main() {
 	}
 
 	cache := cacher.NewCache(store, cfg.Cache)
-
-	contracts, err := state.NewContractCache(cache)
+	caches, err := state.NewCaches(cache)
 	if err != nil {
-		logger.Fatal(ctx, "main : Failed to create contracts cache : %s", err)
-	}
-
-	balances, err := state.NewBalanceCache(cache)
-	if err != nil {
-		logger.Fatal(ctx, "main : Failed to create balance cache : %s", err)
-	}
-
-	transactions, err := state.NewTransactionCache(cache)
-	if err != nil {
-		logger.Fatal(ctx, "main : Failed to create transaction cache : %s", err)
-	}
-
-	subscriptions, err := state.NewSubscriptionCache(cache)
-	if err != nil {
-		logger.Fatal(ctx, "main : Failed to create subscription cache : %s", err)
-	}
-
-	services, err := state.NewContractServicesCache(cache)
-	if err != nil {
-		logger.Fatal(ctx, "main : Failed to create services cache : %s", err)
+		logger.Fatal(ctx, "main : Failed to create caches : %s", err)
 	}
 
 	conductor := conductor.NewConductor(cfg.BaseKey, cfg.Agents, feeLockingScript, spyNode,
-		contracts, balances, transactions, subscriptions, services, NewSpyNodeBroadcaster(spyNode),
-		spyNode, spyNode)
+		caches, NewSpyNodeBroadcaster(spyNode), spyNode, platform.NewHeaders(spyNode))
 	spyNode.RegisterHandler(conductor)
 
 	var spyNodeWait, cacheWait sync.WaitGroup

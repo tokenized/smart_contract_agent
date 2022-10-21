@@ -125,8 +125,9 @@ github.com/tokenized/pkg v0.4.1-0.20220902162108-2e13eadf8696/go.mod h1:uUb7b1xH
 github.com/tokenized/pkg v0.4.1-0.20220902192427-a00dc57bbeb3/go.mod h1:uUb7b1xHv6KfTB+b+FzAlUNJ/al+K7cEAT2wT2Ltglo=
 github.com/tokenized/pkg v0.4.1-0.20221014195121-78aa81509fe5 h1:V8RDCARYTqhSxASh7zwCOtiZfsOhRAEYIA/5dHjy4gE=
 github.com/tokenized/pkg v0.4.1-0.20221014195121-78aa81509fe5/go.mod h1:uUb7b1xHv6KfTB+b+FzAlUNJ/al+K7cEAT2wT2Ltglo=
-github.com/tokenized/specification v1.1.2-0.20220902163651-058d13f0a70f h1:0GtkbIcqmr2LbDa58+1WFzx/uswzNYVyYycKtNwYBXg=
 github.com/tokenized/specification v1.1.2-0.20220902163651-058d13f0a70f/go.mod h1:oGIczii95Lb/C8kVkHEC0eAaIXhAzhM6HOAr33d4kkc=
+github.com/tokenized/specification v1.1.2-0.20221020235628-66b1d984bb2b h1:Wbjzgm6OJz7IficHNXfCl2Yr2myeowKzih2hyC4MTyA=
+github.com/tokenized/specification v1.1.2-0.20221020235628-66b1d984bb2b/go.mod h1:oGIczii95Lb/C8kVkHEC0eAaIXhAzhM6HOAr33d4kkc=
 github.com/tokenized/spynode v0.2.2-0.20220902163745-06e7a19f49ee h1:TQPyQ6sZ0rqEQeFS0vKHNHVMM/YSmz+HxQReoGas0sY=
 github.com/tokenized/spynode v0.2.2-0.20220902163745-06e7a19f49ee/go.mod h1:mpEPvtvfHLnrx1PxTVuANEL6CVGxPgOBc+uQlpZOBR4=
 github.com/tokenized/threads v0.1.1-0.20220902155404-d844f8ac41b5/go.mod h1:Dii75FyJFZwaFWPai5CrczSZpF8vqznaCtkiwDx/WEg=

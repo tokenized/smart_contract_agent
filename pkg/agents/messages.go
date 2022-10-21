@@ -84,7 +84,7 @@ func (a *Agent) processNonRelevantMessage(ctx context.Context, transaction *stat
 	firstInput := transaction.Input(0)
 	transaction.Unlock()
 
-	previousTransaction, err := a.transactions.Get(ctx, firstInput.PreviousOutPoint.Hash)
+	previousTransaction, err := a.caches.Transactions.Get(ctx, firstInput.PreviousOutPoint.Hash)
 	if err != nil {
 		return errors.Wrap(err, "get tx")
 	}
@@ -95,7 +95,7 @@ func (a *Agent) processNonRelevantMessage(ctx context.Context, transaction *stat
 		}, "Previous transaction not found")
 		return nil
 	}
-	defer a.transactions.Release(ctx, firstInput.PreviousOutPoint.Hash)
+	defer a.caches.Transactions.Release(ctx, firstInput.PreviousOutPoint.Hash)
 
 	return nil
 }

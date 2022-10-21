@@ -51,7 +51,7 @@ func (a *Agent) processRejection(ctx context.Context, transaction *state.Transac
 
 	// Check if this is a reject from another contract in a multi-contract transfer to a settlement
 	// request.
-	rejectedTransaction, err := a.transactions.Get(ctx, rejectedTxID)
+	rejectedTransaction, err := a.caches.Transactions.Get(ctx, rejectedTxID)
 	if err != nil {
 		return errors.Wrap(err, "get tx")
 	}
@@ -62,7 +62,7 @@ func (a *Agent) processRejection(ctx context.Context, transaction *state.Transac
 		}, "Rejected transaction not found")
 		return nil
 	}
-	defer a.transactions.Release(ctx, rejectedTxID)
+	defer a.caches.Transactions.Release(ctx, rejectedTxID)
 
 	// Find action
 	isTest := a.IsTest()
@@ -106,7 +106,7 @@ func (a *Agent) processRejection(ctx context.Context, transaction *state.Transac
 		return nil
 	}
 	transferTxID := transferTransaction.GetTxID()
-	defer a.transactions.Release(ctx, transferTxID)
+	defer a.caches.Transactions.Release(ctx, transferTxID)
 
 	logger.InfoWithFields(ctx, []logger.Field{
 		logger.Stringer("transfer_txid", transferTxID),
@@ -163,7 +163,7 @@ func firstInputTxID(transaction *state.Transaction) bitcoin.Hash32 {
 func (a *Agent) traceToTransfer(ctx context.Context,
 	txid bitcoin.Hash32) (*state.Transaction, *actions.Transfer, error) {
 
-	previousTransaction, err := a.transactions.Get(ctx, txid)
+	previousTransaction, err := a.caches.Transactions.Get(ctx, txid)
 	if err != nil {
 		return nil, nil, errors.Wrap(err, "get tx")
 	}
@@ -192,7 +192,7 @@ func (a *Agent) traceToTransfer(ctx context.Context,
 			}
 		}
 		previousTransaction.Unlock()
-		a.transactions.Release(ctx, txid)
+		a.caches.Transactions.Release(ctx, txid)
 
 		if message != nil && (message.MessageCode == messages.CodeSettlementRequest ||
 			message.MessageCode == messages.CodeSignatureRequest) {

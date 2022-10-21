@@ -20,7 +20,7 @@ func (c *Conductor) HandleTx(ctx context.Context, spyNodeTx *spynode.Tx) {
 		logger.Error(ctx, "Failed to add tx : %s", err)
 		return
 	}
-	defer c.transactions.Release(ctx, txid)
+	defer c.caches.Transactions.Release(ctx, txid)
 
 	if err := c.UpdateTransaction(ctx, transaction, uint64(time.Now().UnixNano())); err != nil {
 		logger.Error(ctx, "Failed to update tx : %s", err)
@@ -31,7 +31,7 @@ func (c *Conductor) HandleTx(ctx context.Context, spyNodeTx *spynode.Tx) {
 func (c *Conductor) HandleTxUpdate(ctx context.Context, txUpdate *spynode.TxUpdate) {
 	ctx = logger.ContextWithLogFields(ctx, logger.Stringer("txid", txUpdate.TxID))
 
-	transaction, err := c.transactions.Get(ctx, txUpdate.TxID)
+	transaction, err := c.caches.Transactions.Get(ctx, txUpdate.TxID)
 	if err != nil {
 		logger.Error(ctx, "Failed to get tx : %s", err)
 		return
@@ -43,7 +43,7 @@ func (c *Conductor) HandleTxUpdate(ctx context.Context, txUpdate *spynode.TxUpda
 		}, "Update transaction not found")
 		return
 	}
-	defer c.transactions.Release(ctx, txUpdate.TxID)
+	defer c.caches.Transactions.Release(ctx, txUpdate.TxID)
 
 	transaction.Lock()
 
