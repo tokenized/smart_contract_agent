@@ -19,7 +19,7 @@ import (
 	"github.com/tokenized/specification/dist/golang/protocol"
 )
 
-func Test_Contracts_Invalid(t *testing.T) {
+func Test_Contracts_Offer_Invalid(t *testing.T) {
 	ctx := logger.ContextWithLogger(context.Background(), true, true, "")
 	store := storage.NewMockStorage()
 	broadcaster := state.NewMockTxBroadcaster()
@@ -162,7 +162,7 @@ func Test_Contracts_Invalid(t *testing.T) {
 	caches.StopTestCaches()
 }
 
-func Test_Contracts_Valid(t *testing.T) {
+func Test_Contracts_Offer_Valid(t *testing.T) {
 	ctx := logger.ContextWithLogger(context.Background(), true, true, "")
 	store := storage.NewMockStorage()
 	broadcaster := state.NewMockTxBroadcaster()
@@ -348,7 +348,7 @@ func Test_Contracts_Valid(t *testing.T) {
 	caches.StopTestCaches()
 }
 
-func Test_Contracts_AlreadyExists(t *testing.T) {
+func Test_Contracts_Offer_AlreadyExists(t *testing.T) {
 	ctx := logger.ContextWithLogger(context.Background(), true, true, "")
 	store := storage.NewMockStorage()
 	broadcaster := state.NewMockTxBroadcaster()
@@ -492,6 +492,373 @@ func Test_Contracts_AlreadyExists(t *testing.T) {
 	t.Logf("Rejection : %s", js)
 
 	caches.Caches.Transactions.Release(ctx, transaction.GetTxID())
+
+	caches.Caches.Contracts.Release(ctx, contractLockingScript)
+	caches.StopTestCaches()
+}
+
+func Test_Contracts_Amendment_Valid(t *testing.T) {
+	ctx := logger.ContextWithLogger(context.Background(), true, true, "")
+	store := storage.NewMockStorage()
+	broadcaster := state.NewMockTxBroadcaster()
+
+	caches := state.StartTestCaches(ctx, t, store, cacher.DefaultConfig(), time.Second)
+	contractKey, contractLockingScript, adminKey, adminLockingScript, contract := state.MockContract(ctx, caches)
+
+	var keyHash bitcoin.Hash32
+	rand.Read(keyHash[:])
+	_, feeLockingScript, _ := state.MockKey()
+
+	agent, err := NewAgent(contractKey, DefaultConfig(), contract, feeLockingScript,
+		caches.Caches, broadcaster, nil, nil)
+	if err != nil {
+		t.Fatalf("Failed to create agent : %s", err)
+	}
+
+	tx := txbuilder.NewTxBuilder(0.05, 0.0)
+
+	// Add input
+	outpoint := state.MockOutPoint(adminLockingScript, 1)
+	spentOutputs := []*expanded_tx.Output{
+		{
+			LockingScript: adminLockingScript,
+			Value:         1,
+		},
+	}
+
+	if err := tx.AddInput(*outpoint, adminLockingScript, 1); err != nil {
+		t.Fatalf("Failed to add input : %s", err)
+	}
+
+	// Add contract output
+	if err := tx.AddOutput(contractLockingScript, 150, false, false); err != nil {
+		t.Fatalf("Failed to add contract output : %s", err)
+	}
+
+	js, _ := json.MarshalIndent(contract.Formation, "", "  ")
+	t.Logf("Original ContractFormation : %s", js)
+
+	newOffer := &actions.ContractOffer{
+		ContractName:   "New Test Name",
+		ContractFee:    contract.Formation.ContractFee,
+		ContractType:   contract.Formation.ContractType,
+		EntityContract: contract.Formation.EntityContract,
+	}
+
+	amendments, err := contract.Formation.CreateAmendments(newOffer)
+	if err != nil {
+		t.Fatalf("Failed to create amendments : %s", err)
+	}
+
+	if len(amendments) != 1 {
+		t.Fatalf("Wrong amendment count : %s", err)
+	}
+
+	js, _ = json.MarshalIndent(amendments, "", "  ")
+	t.Logf("Amendments : %s", js)
+
+	contractAmendment := &actions.ContractAmendment{
+		// ChangeAdministrationAddress bool
+		// ChangeOperatorAddress       bool
+		// RefTxID                     []byte
+		ContractRevision: 0,
+		Amendments:       amendments,
+	}
+
+	// Add action output
+	contractAmendmentScript, err := protocol.Serialize(contractAmendment, true)
+	if err != nil {
+		t.Fatalf("Failed to serialize contract offer action : %s", err)
+	}
+
+	if err := tx.AddOutput(contractAmendmentScript, 0, false, false); err != nil {
+		t.Fatalf("Failed to add contract offer action output : %s", err)
+	}
+
+	// Add funding
+	fundingKey, fundingLockingScript, _ := state.MockKey()
+	fundingOutpoint := state.MockOutPoint(fundingLockingScript, 300)
+	spentOutputs = append(spentOutputs, &expanded_tx.Output{
+		LockingScript: fundingLockingScript,
+		Value:         300,
+	})
+
+	if err := tx.AddInput(*fundingOutpoint, fundingLockingScript, 300); err != nil {
+		t.Fatalf("Failed to add input : %s", err)
+	}
+
+	_, changeLockingScript, _ := state.MockKey()
+	tx.SetChangeLockingScript(changeLockingScript, "")
+
+	if _, err := tx.Sign([]bitcoin.Key{adminKey, fundingKey}); err != nil {
+		t.Fatalf("Failed to sign tx : %s", err)
+	}
+
+	t.Logf("Created tx : %s", tx.String(bitcoin.MainNet))
+
+	addTransaction := &state.Transaction{
+		Tx:           tx.MsgTx,
+		SpentOutputs: spentOutputs,
+	}
+
+	transaction, err := caches.Caches.Transactions.Add(ctx, addTransaction)
+	if err != nil {
+		t.Fatalf("Failed to add transaction : %s", err)
+	}
+
+	now := uint64(time.Now().UnixNano())
+	if err := agent.Process(ctx, transaction, []actions.Action{contractAmendment}, now); err != nil {
+		t.Fatalf("Failed to process transaction : %s", err)
+	}
+
+	caches.Caches.Transactions.Release(ctx, transaction.GetTxID())
+
+	responseTx := broadcaster.GetLastTx()
+	if responseTx == nil {
+		t.Fatalf("No response tx")
+	}
+	responseTxID := *responseTx.TxHash()
+
+	t.Logf("Response Tx : %s", responseTx)
+
+	if !responseTx.TxOut[0].LockingScript.Equal(contractLockingScript) {
+		t.Errorf("Wrong contract output locking script : got %s, want %s",
+			responseTx.TxOut[0].LockingScript, contractLockingScript)
+	}
+
+	// Find formation action
+	var formation *actions.ContractFormation
+	for _, txout := range responseTx.TxOut {
+		action, err := protocol.Deserialize(txout.LockingScript, true)
+		if err != nil {
+			continue
+		}
+
+		if a, ok := action.(*actions.ContractFormation); ok {
+			formation = a
+			break
+		}
+	}
+
+	if formation == nil {
+		t.Fatalf("Missing formation action")
+	}
+
+	js, _ = json.MarshalIndent(formation, "", "  ")
+	t.Logf("Amended ContractFormation : %s", js)
+
+	if formation.ContractName != "New Test Name" {
+		t.Errorf("Wrong formation name : got \"%s\", want \"%s\"", formation.ContractName,
+			"New Test Name")
+	}
+
+	contract.Lock()
+	if contract.Formation == nil {
+		t.Errorf("Missing state contract formation")
+	} else if !contract.Formation.Equal(formation) {
+		t.Errorf("State contract formation doesn't equal tx action")
+	}
+
+	if contract.FormationTxID == nil {
+		t.Errorf("Missing state contract formation txid")
+	} else if !contract.FormationTxID.Equal(&responseTxID) {
+		t.Errorf("Wrong state contract formation txid : got %s, want %s", contract.FormationTxID,
+			responseTxID)
+	}
+	contract.Unlock()
+
+	caches.Caches.Contracts.Release(ctx, contractLockingScript)
+	caches.StopTestCaches()
+}
+
+func Test_Contracts_Amendment_Proposal(t *testing.T) {
+	ctx := logger.ContextWithLogger(context.Background(), true, true, "")
+	store := storage.NewMockStorage()
+	broadcaster := state.NewMockTxBroadcaster()
+
+	caches := state.StartTestCaches(ctx, t, store, cacher.DefaultConfig(), time.Second)
+
+	votingSystems := []*actions.VotingSystemField{
+		{
+			Name:                    "Basic",
+			VoteType:                "R", // Relative Threshold
+			TallyLogic:              0,   // Standard
+			ThresholdPercentage:     50,
+			VoteMultiplierPermitted: false,
+			HolderProposalFee:       0,
+		},
+	}
+
+	contractKey, contractLockingScript, adminKey, adminLockingScript, contract := state.MockContractWithVoteSystems(ctx, caches, votingSystems)
+
+	var keyHash bitcoin.Hash32
+	rand.Read(keyHash[:])
+	_, feeLockingScript, _ := state.MockKey()
+
+	agent, err := NewAgent(contractKey, DefaultConfig(), contract, feeLockingScript,
+		caches.Caches, broadcaster, nil, nil)
+	if err != nil {
+		t.Fatalf("Failed to create agent : %s", err)
+	}
+
+	tx := txbuilder.NewTxBuilder(0.05, 0.0)
+
+	// Add input
+	outpoint := state.MockOutPoint(adminLockingScript, 1)
+	spentOutputs := []*expanded_tx.Output{
+		{
+			LockingScript: adminLockingScript,
+			Value:         1,
+		},
+	}
+
+	if err := tx.AddInput(*outpoint, adminLockingScript, 1); err != nil {
+		t.Fatalf("Failed to add input : %s", err)
+	}
+
+	// Add contract output
+	if err := tx.AddOutput(contractLockingScript, 150, false, false); err != nil {
+		t.Fatalf("Failed to add contract output : %s", err)
+	}
+
+	js, _ := json.MarshalIndent(contract.Formation, "", "  ")
+	t.Logf("Original ContractFormation : %s", js)
+
+	newOffer := &actions.ContractOffer{
+		ContractName:   "New Test Name",
+		ContractFee:    contract.Formation.ContractFee,
+		ContractType:   contract.Formation.ContractType,
+		EntityContract: contract.Formation.EntityContract,
+		VotingSystems:  votingSystems,
+	}
+
+	amendments, err := contract.Formation.CreateAmendments(newOffer)
+	if err != nil {
+		t.Fatalf("Failed to create amendments : %s", err)
+	}
+
+	if len(amendments) != 1 {
+		t.Fatalf("Wrong amendment count : got %d, want %d", len(amendments), 1)
+	}
+
+	js, _ = json.MarshalIndent(amendments, "", "  ")
+	t.Logf("Amendments : %s", js)
+
+	vote := state.MockVoteContractAmendmentCompleted(ctx, caches, adminLockingScript,
+		contractLockingScript, 0, amendments)
+
+	js, _ = json.MarshalIndent(vote, "", "  ")
+	t.Logf("Vote : %s", js)
+
+	contractAmendment := &actions.ContractAmendment{
+		// ChangeAdministrationAddress bool
+		// ChangeOperatorAddress       bool
+		RefTxID:          vote.ResultTxID[:],
+		ContractRevision: 0,
+		Amendments:       amendments,
+	}
+
+	// Add action output
+	contractAmendmentScript, err := protocol.Serialize(contractAmendment, true)
+	if err != nil {
+		t.Fatalf("Failed to serialize contract offer action : %s", err)
+	}
+
+	if err := tx.AddOutput(contractAmendmentScript, 0, false, false); err != nil {
+		t.Fatalf("Failed to add contract offer action output : %s", err)
+	}
+
+	// Add funding
+	fundingKey, fundingLockingScript, _ := state.MockKey()
+	fundingOutpoint := state.MockOutPoint(fundingLockingScript, 300)
+	spentOutputs = append(spentOutputs, &expanded_tx.Output{
+		LockingScript: fundingLockingScript,
+		Value:         300,
+	})
+
+	if err := tx.AddInput(*fundingOutpoint, fundingLockingScript, 300); err != nil {
+		t.Fatalf("Failed to add input : %s", err)
+	}
+
+	_, changeLockingScript, _ := state.MockKey()
+	tx.SetChangeLockingScript(changeLockingScript, "")
+
+	if _, err := tx.Sign([]bitcoin.Key{adminKey, fundingKey}); err != nil {
+		t.Fatalf("Failed to sign tx : %s", err)
+	}
+
+	t.Logf("Created tx : %s", tx.String(bitcoin.MainNet))
+
+	addTransaction := &state.Transaction{
+		Tx:           tx.MsgTx,
+		SpentOutputs: spentOutputs,
+	}
+
+	transaction, err := caches.Caches.Transactions.Add(ctx, addTransaction)
+	if err != nil {
+		t.Fatalf("Failed to add transaction : %s", err)
+	}
+
+	now := uint64(time.Now().UnixNano())
+	if err := agent.Process(ctx, transaction, []actions.Action{contractAmendment}, now); err != nil {
+		t.Fatalf("Failed to process transaction : %s", err)
+	}
+
+	caches.Caches.Transactions.Release(ctx, transaction.GetTxID())
+
+	responseTx := broadcaster.GetLastTx()
+	if responseTx == nil {
+		t.Fatalf("No response tx")
+	}
+	responseTxID := *responseTx.TxHash()
+
+	t.Logf("Response Tx : %s", responseTx)
+
+	if !responseTx.TxOut[0].LockingScript.Equal(contractLockingScript) {
+		t.Errorf("Wrong contract output locking script : got %s, want %s",
+			responseTx.TxOut[0].LockingScript, contractLockingScript)
+	}
+
+	// Find formation action
+	var formation *actions.ContractFormation
+	for _, txout := range responseTx.TxOut {
+		action, err := protocol.Deserialize(txout.LockingScript, true)
+		if err != nil {
+			continue
+		}
+
+		if a, ok := action.(*actions.ContractFormation); ok {
+			formation = a
+			break
+		}
+	}
+
+	if formation == nil {
+		t.Fatalf("Missing formation action")
+	}
+
+	js, _ = json.MarshalIndent(formation, "", "  ")
+	t.Logf("Amended ContractFormation : %s", js)
+
+	if formation.ContractName != "New Test Name" {
+		t.Errorf("Wrong formation name : got \"%s\", want \"%s\"", formation.ContractName,
+			"New Test Name")
+	}
+
+	contract.Lock()
+	if contract.Formation == nil {
+		t.Errorf("Missing state contract formation")
+	} else if !contract.Formation.Equal(formation) {
+		t.Errorf("State contract formation doesn't equal tx action")
+	}
+
+	if contract.FormationTxID == nil {
+		t.Errorf("Missing state contract formation txid")
+	} else if !contract.FormationTxID.Equal(&responseTxID) {
+		t.Errorf("Wrong state contract formation txid : got %s, want %s", contract.FormationTxID,
+			responseTxID)
+	}
+	contract.Unlock()
 
 	caches.Caches.Contracts.Release(ctx, contractLockingScript)
 	caches.StopTestCaches()

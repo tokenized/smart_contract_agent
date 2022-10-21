@@ -22,17 +22,21 @@ import (
 func (a *Agent) processContractOffer(ctx context.Context, transaction *state.Transaction,
 	offer *actions.ContractOffer, now uint64) error {
 
+	logger.Info(ctx, "Processing contract offer")
+
+	agentLockingScript := a.LockingScript()
+
 	// First output must be the agent's locking script
 	transaction.Lock()
 	contractOutput := transaction.Output(0)
-	transaction.Unlock()
-
-	agentLockingScript := a.LockingScript()
 	if !agentLockingScript.Equal(contractOutput.LockingScript) {
+		transaction.Unlock()
+		logger.WarnWithFields(ctx, []logger.Field{
+			logger.Stringer("contract_locking_script", contractOutput.LockingScript),
+		}, "Contract output locking script is wrong")
 		return nil // Not for this agent's contract
 	}
-
-	logger.Info(ctx, "Processing contract offer")
+	transaction.Unlock()
 
 	contract := a.Contract()
 
@@ -45,7 +49,8 @@ func (a *Agent) processContractOffer(ctx context.Context, transaction *state.Tra
 			platform.NewRejectError(actions.RejectionsContractExists, "", now)), "reject")
 	}
 
-	if offer.BodyOfAgreementType == 1 && len(offer.BodyOfAgreement) != 32 {
+	if offer.BodyOfAgreementType == actions.ContractBodyOfAgreementTypeHash &&
+		len(offer.BodyOfAgreement) != 32 {
 		return errors.Wrap(a.sendRejection(ctx, transaction,
 			platform.NewRejectError(actions.RejectionsMsgMalformed,
 				"BodyOfAgreement: hash wrong size", now)), "reject")
@@ -163,6 +168,8 @@ func (a *Agent) processContractOffer(ctx context.Context, transaction *state.Tra
 		return errors.Wrap(err, "admin identity certificates")
 	}
 
+	logger.Info(ctx, "Accepting contract offer")
+
 	formation.AdminAddress = adminAddress.Bytes()
 	if offer.ContractOperatorIncluded {
 		formation.OperatorAddress = operatorAddress.Bytes()
@@ -213,20 +220,30 @@ func (a *Agent) processContractOffer(ctx context.Context, transaction *state.Tra
 		return errors.Wrap(err, "sign")
 	}
 
-	logger.Info(ctx, "Accepted contract offer")
-
 	// Finalize contract formation.
 	contract.Formation = formation
 	contract.FormationTxID = formationTx.MsgTx.TxHash()
 	contract.MarkModified()
 
+	formationTxID := *formationTx.MsgTx.TxHash()
+	formationTransaction, err := a.caches.Transactions.AddRaw(ctx, formationTx.MsgTx, nil)
+	if err != nil {
+		return errors.Wrap(err, "add response tx")
+	}
+	defer a.caches.Transactions.Release(ctx, formationTxID)
+
+	// Set formation tx as processed since all the balances were just settled.
+	formationTransaction.Lock()
+	formationTransaction.SetProcessed()
+	formationTransaction.Unlock()
+
 	if err := a.BroadcastTx(ctx, formationTx.MsgTx, nil); err != nil {
 		return errors.Wrap(err, "broadcast")
 	}
 
-	// TODO Post to any contract subscribers. Maybe post to all subscribers for anything to this
-	// contract. Like if they are subscribed for a locking script under this contract, then send
-	// this transaction. --ce
+	if err := a.postTransactionToContractSubscriptions(ctx, formationTransaction); err != nil {
+		return errors.Wrap(err, "post formation")
+	}
 
 	return nil
 }
@@ -234,11 +251,22 @@ func (a *Agent) processContractOffer(ctx context.Context, transaction *state.Tra
 func (a *Agent) processContractAmendment(ctx context.Context, transaction *state.Transaction,
 	amendment *actions.ContractAmendment, now uint64) error {
 
+	logger.Info(ctx, "Processing contract amendment")
+
+	agentLockingScript := a.LockingScript()
+
 	// First output must be the agent's locking script
 	transaction.Lock()
 
 	txid := transaction.TxID()
 	contractOutput := transaction.Output(0)
+	if !agentLockingScript.Equal(contractOutput.LockingScript) {
+		transaction.Unlock()
+		logger.WarnWithFields(ctx, []logger.Field{
+			logger.Stringer("contract_locking_script", contractOutput.LockingScript),
+		}, "Contract output locking script is wrong")
+		return nil // Not for this agent's contract
+	}
 
 	inputOutput, err := transaction.InputOutput(0)
 	if err != nil {
@@ -248,13 +276,6 @@ func (a *Agent) processContractAmendment(ctx context.Context, transaction *state
 	authorizingLockingScript := inputOutput.LockingScript
 
 	transaction.Unlock()
-
-	agentLockingScript := a.LockingScript()
-	if !agentLockingScript.Equal(contractOutput.LockingScript) {
-		return nil // Not for this agent's contract
-	}
-
-	logger.Info(ctx, "Processing contract amendment")
 
 	contract := a.Contract()
 
@@ -288,119 +309,65 @@ func (a *Agent) processContractAmendment(ctx context.Context, transaction *state
 	proposalType := uint32(0)
 	votingSystem := uint32(0)
 
-	if len(amendment.RefTxID) != 0 { // Vote Result Action allowing these amendments
-		proposed = true
-
-		refTxID, err := bitcoin.NewHash32(amendment.RefTxID)
-		if err != nil {
-			return errors.Wrap(a.sendRejection(ctx, transaction,
-				platform.NewRejectError(actions.RejectionsMsgMalformed, "RefTxID", now)), "reject")
+	vote, err := fetchReferenceVote(ctx, a.caches, agentLockingScript, amendment.RefTxID,
+		a.IsTest(), now)
+	if err != nil {
+		if rejectError, ok := errors.Cause(err).(platform.RejectError); ok {
+			return errors.Wrap(a.sendRejection(ctx, transaction, rejectError), "reject")
 		}
 
-		// Retrieve Vote Result
-		voteResultTransaction, err := a.caches.Transactions.Get(ctx, *refTxID)
-		if err != nil {
-			return errors.Wrap(err, "get ref tx")
-		}
+		return errors.Wrap(err, "fetch vote")
+	}
 
-		if voteResultTransaction == nil {
-			return errors.Wrap(a.sendRejection(ctx, transaction,
-				platform.NewRejectError(actions.RejectionsMsgMalformed,
-					"RefTxID: Vote Result Tx Not Found", now)), "reject")
-		}
-		defer a.caches.Transactions.Release(ctx, *refTxID)
-
-		var voteResult *actions.Result
-		isTest := a.IsTest()
-		voteResultTransaction.Lock()
-		outputCount := voteResultTransaction.OutputCount()
-		for i := 0; i < outputCount; i++ {
-			output := voteResultTransaction.Output(i)
-			action, err := protocol.Deserialize(output.LockingScript, isTest)
-			if err != nil {
-				continue
-			}
-
-			if r, ok := action.(*actions.Result); ok {
-				voteResult = r
-			}
-		}
-		voteResultTransaction.Unlock()
-
-		if voteResult == nil {
-			return errors.Wrap(a.sendRejection(ctx, transaction,
-				platform.NewRejectError(actions.RejectionsMsgMalformed,
-					"RefTxID: Vote Result Not Found", now)), "reject")
-		}
-
-		// Retrieve Vote
-		voteTxID, err := bitcoin.NewHash32(voteResult.VoteTxId)
-		if err != nil {
-			return errors.Wrap(a.sendRejection(ctx, transaction,
-				platform.NewRejectError(actions.RejectionsMsgMalformed,
-					fmt.Sprintf("RefTxID: Vote Result: VoteTxId: %s", err), now)), "reject")
-		}
-
-		// Retrieve the vote
-		vote, err := a.caches.Votes.Get(ctx, *voteTxID)
-		if err != nil {
-			return errors.Wrap(err, "get vote data")
-		}
-
-		if vote == nil {
-			return errors.Wrap(a.sendRejection(ctx, transaction,
-				platform.NewRejectError(actions.RejectionsVoteNotFound,
-					"RefTxID: Vote Result: Vote Data Not Found", now)), "reject")
-		}
-		defer a.caches.Votes.Release(ctx, *voteTxID)
-
-		if vote.Proposal == nil || vote.Result == nil {
-			return errors.Wrap(a.sendRejection(ctx, transaction,
-				platform.NewRejectError(actions.RejectionsMsgMalformed,
-					"RefTxID: Vote Result: Vote Not Completed", now)), "reject")
-		}
-
-		if vote.Result.Result != "A" {
-			return errors.Wrap(a.sendRejection(ctx, transaction,
-				platform.NewRejectError(actions.RejectionsMsgMalformed,
-					fmt.Sprintf("RefTxID: Vote Result: Vote Not Accepted: %s", vote.Result.Result),
-					now)), "reject")
-		}
+	if vote != nil {
+		vote.Lock()
 
 		if len(vote.Result.ProposedAmendments) == 0 {
+			vote.Unlock()
+			a.caches.Votes.Release(ctx, agentLockingScript, *vote.VoteTxID)
 			return errors.Wrap(a.sendRejection(ctx, transaction,
 				platform.NewRejectError(actions.RejectionsMsgMalformed,
 					"RefTxID: Vote Result: Vote Not For Specific Amendments", now)), "reject")
 		}
 
 		if len(vote.Result.InstrumentCode) != 0 {
+			vote.Unlock()
+			a.caches.Votes.Release(ctx, agentLockingScript, *vote.VoteTxID)
 			instrumentID, _ := protocol.InstrumentIDForRaw(vote.Result.InstrumentType,
 				vote.Result.InstrumentCode)
 			return errors.Wrap(a.sendRejection(ctx, transaction,
 				platform.NewRejectError(actions.RejectionsMsgMalformed,
-					fmt.Sprintf("RefTxID: Vote Result: Vote For Instrument: %s", instrumentID),
-					now)), "reject")
+					fmt.Sprintf("RefTxID: Vote Result: Vote For Instrument: %s", instrumentID), now)),
+				"reject")
 		}
 
 		// Verify proposal amendments match these amendments.
 		if len(vote.Result.ProposedAmendments) != len(amendment.Amendments) {
+			vote.Unlock()
+			a.caches.Votes.Release(ctx, agentLockingScript, *vote.VoteTxID)
 			return errors.Wrap(a.sendRejection(ctx, transaction,
 				platform.NewRejectError(actions.RejectionsMsgMalformed,
-					fmt.Sprintf("RefTxID: Vote Result: Vote For Different Amendment Count: Proposal %d, Amendment %d",
+					fmt.Sprintf("RefTxID: Vote Result: Wrong Vote Amendment Count: Proposal %d, Amendment %d",
 						len(vote.Result.ProposedAmendments), len(amendment.Amendments)), now)), "reject")
 		}
 
 		for i, proposedAmendment := range vote.Result.ProposedAmendments {
 			if !proposedAmendment.Equal(amendment.Amendments[i]) {
+				vote.Unlock()
+				a.caches.Votes.Release(ctx, agentLockingScript, *vote.VoteTxID)
 				return errors.Wrap(a.sendRejection(ctx, transaction,
 					platform.NewRejectError(actions.RejectionsMsgMalformed,
-						fmt.Sprintf("RefTxID: Vote Result: Vote For Different Amendment %d", i),
-						now)), "reject")
+						fmt.Sprintf("RefTxID: Vote Result: Wrong Vote Amendment %d", i), now)),
+					"reject")
 			}
 		}
 
+		proposed = true
 		proposalType = vote.Proposal.Type
 		votingSystem = vote.Proposal.VoteSystem
+
+		vote.Unlock()
+		a.caches.Votes.Release(ctx, agentLockingScript, *vote.VoteTxID)
 	}
 
 	if amendment.ChangeAdministrationAddress || amendment.ChangeOperatorAddress {
@@ -604,6 +571,8 @@ func (a *Agent) processContractAmendment(ctx context.Context, transaction *state
 		}
 	}
 
+	logger.Info(ctx, "Accepting contract amendment")
+
 	formation.ContractRevision = contract.Formation.ContractRevision + 1 // Bump the revision
 	formation.Timestamp = now
 
@@ -650,26 +619,38 @@ func (a *Agent) processContractAmendment(ctx context.Context, transaction *state
 		return errors.Wrap(err, "sign")
 	}
 
-	logger.Info(ctx, "Accepted contract amendment")
-
 	// Finalize contract formation.
 	contract.Formation = formation
 	contract.FormationTxID = formationTx.MsgTx.TxHash()
 	contract.MarkModified()
 
+	formationTxID := *formationTx.MsgTx.TxHash()
+	formationTransaction, err := a.caches.Transactions.AddRaw(ctx, formationTx.MsgTx, nil)
+	if err != nil {
+		return errors.Wrap(err, "add response tx")
+	}
+	defer a.caches.Transactions.Release(ctx, formationTxID)
+
+	// Set formation tx as processed since all the balances were just settled.
+	formationTransaction.Lock()
+	formationTransaction.SetProcessed()
+	formationTransaction.Unlock()
+
 	if err := a.BroadcastTx(ctx, formationTx.MsgTx, nil); err != nil {
 		return errors.Wrap(err, "broadcast")
 	}
 
-	// TODO Post to any contract subscribers. Maybe post to all subscribers for anything to this
-	// contract. Like if they are subscribed for a locking script under this contract, then send
-	// this transaction. --ce
+	if err := a.postTransactionToContractSubscriptions(ctx, formationTransaction); err != nil {
+		return errors.Wrap(err, "post formation")
+	}
 
 	return nil
 }
 
 func (a *Agent) processContractFormation(ctx context.Context, transaction *state.Transaction,
 	formation *actions.ContractFormation, now uint64) error {
+
+	logger.Info(ctx, "Processing contract formation")
 
 	// First input must be the agent's locking script
 	transaction.Lock()
@@ -681,20 +662,32 @@ func (a *Agent) processContractFormation(ctx context.Context, transaction *state
 
 	agentLockingScript := a.LockingScript()
 	if !agentLockingScript.Equal(inputOutput.LockingScript) {
+		logger.WarnWithFields(ctx, []logger.Field{
+			logger.Stringer("contract_locking_script", inputOutput.LockingScript),
+		}, "Contract output locking script is wrong")
 		return nil // Not for this agent's contract
 	}
 
-	logger.Info(ctx, "Processing contract formation")
-
+	defer a.caches.Contracts.Save(ctx, a.contract)
 	a.contract.Lock()
+	defer a.contract.Unlock()
 
 	isFirst := a.contract.Formation == nil
 
-	if a.contract.Formation != nil && formation.Timestamp < a.contract.Formation.Timestamp {
-		logger.WarnWithFields(ctx, []logger.Field{
-			logger.Timestamp("timestamp", int64(formation.Timestamp)),
-			logger.Timestamp("existing_timestamp", int64(a.contract.Formation.Timestamp)),
-		}, "Older contract formation")
+	if a.contract.Formation != nil {
+		if formation.Timestamp < a.contract.Formation.Timestamp {
+			logger.WarnWithFields(ctx, []logger.Field{
+				logger.Timestamp("timestamp", int64(formation.Timestamp)),
+				logger.Timestamp("existing_timestamp", int64(a.contract.Formation.Timestamp)),
+			}, "Older contract formation")
+			return nil
+		} else if formation.Timestamp == a.contract.Formation.Timestamp {
+			logger.WarnWithFields(ctx, []logger.Field{
+				logger.Timestamp("timestamp", int64(formation.Timestamp)),
+				logger.Timestamp("existing_timestamp", int64(a.contract.Formation.Timestamp)),
+			}, "Already processed contract formation")
+			return nil
+		}
 	}
 
 	a.contract.Formation = formation
@@ -712,21 +705,6 @@ func (a *Agent) processContractFormation(ctx context.Context, transaction *state
 		}, "Updated contract formation")
 	}
 
-	a.contract.Unlock()
-
-	return nil
-}
-
-func validateVotingSystem(system *actions.VotingSystemField) error {
-	if system.VoteType != "R" && system.VoteType != "A" && system.VoteType != "P" {
-		return fmt.Errorf("Unsupported vote type : %s", system.VoteType)
-	}
-	if system.ThresholdPercentage == 0 || system.ThresholdPercentage >= 100 {
-		return fmt.Errorf("Threshold Percentage out of range : %d", system.ThresholdPercentage)
-	}
-	if system.TallyLogic != 0 && system.TallyLogic != 1 {
-		return fmt.Errorf("Tally Logic invalid : %d", system.TallyLogic)
-	}
 	return nil
 }
 
@@ -967,6 +945,59 @@ func applyContractAmendments(contractFormation *actions.ContractFormation,
 		return platform.NewRejectError(actions.RejectionsMsgMalformed,
 			fmt.Sprintf("Formation invalid after amendments: %s", err), now)
 	}
+
+	return nil
+}
+
+// postTransactionToContractSubscriptions posts the transaction to any subscriptions for the
+// relevant locking scripts for the contract.
+func (a *Agent) postTransactionToContractSubscriptions(ctx context.Context,
+	transaction *state.Transaction) error {
+
+	// agentLockingScript := a.LockingScript()
+
+	// subscriptions, err := a.caches.Subscriptions.GetLockingScriptMulti(ctx, agentLockingScript,
+	// 	lockingScripts)
+	// if err != nil {
+	// 	return errors.Wrap(err, "get subscriptions")
+	// }
+	// defer a.caches.Subscriptions.ReleaseMulti(ctx, agentLockingScript, subscriptions)
+
+	// if len(subscriptions) == 0 {
+	// 	return nil
+	// }
+
+	// expandedTx, err := transaction.ExpandedTx(ctx)
+	// if err != nil {
+	// 	return errors.Wrap(err, "get expanded tx")
+	// }
+
+	// msg := channels_expanded_tx.ExpandedTxMessage(*expandedTx)
+
+	// for _, subscription := range subscriptions {
+	// 	if subscription == nil {
+	// 		continue
+	// 	}
+
+	// 	subscription.Lock()
+	// 	channelHash := subscription.GetChannelHash()
+	// 	subscription.Unlock()
+
+	// 	// Send settlement over channel
+	// 	channel, err := a.GetChannel(ctx, channelHash)
+	// 	if err != nil {
+	// 		return errors.Wrapf(err, "get channel : %s", channelHash)
+	// 	}
+	// 	if channel == nil {
+	// 		continue
+	// 	}
+
+	// 	if err := channel.SendMessage(ctx, &msg); err != nil {
+	// 		logger.WarnWithFields(ctx, []logger.Field{
+	// 			logger.Stringer("channel", channelHash),
+	// 		}, "Failed to send channels message : %s", err)
+	// 	}
+	// }
 
 	return nil
 }

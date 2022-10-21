@@ -40,6 +40,7 @@ type Contract struct {
 
 	InstrumentCount uint64 `bsor:"7" json:"instrument_count"`
 
+	// TODO Move Instruments to independent storage objects. --ce
 	Instruments []*Instrument `bsor:"8" json:"instruments"`
 
 	// FormationScript is only used by Serialize to save the Formation value in BSOR.

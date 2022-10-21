@@ -11,10 +11,12 @@ import (
 
 	"github.com/tokenized/cacher"
 	"github.com/tokenized/pkg/bitcoin"
+	"github.com/tokenized/pkg/expanded_tx"
 	"github.com/tokenized/pkg/storage"
 	"github.com/tokenized/pkg/wire"
 	"github.com/tokenized/specification/dist/golang/actions"
 	"github.com/tokenized/specification/dist/golang/instruments"
+	"github.com/tokenized/specification/dist/golang/protocol"
 )
 
 type TestCaches struct {
@@ -116,10 +118,8 @@ func (c *TestCaches) IsFailed() error {
 	return c.failed
 }
 
-// MockInstrument creates a contract and instrument.
-// `caches.Contracts.Release(ctx, contractLockingScript)` must be called before the end of the test.
-func MockInstrument(ctx context.Context,
-	caches *TestCaches) (bitcoin.Key, bitcoin.Script, bitcoin.Key, *Contract, *Instrument) {
+func MockContract(ctx context.Context,
+	caches *TestCaches) (bitcoin.Key, bitcoin.Script, bitcoin.Key, bitcoin.Script, *Contract) {
 
 	contractKey, contractLockingScript, _ := MockKey()
 	adminKey, adminLockingScript, adminAddress := MockKey()
@@ -142,6 +142,25 @@ func MockInstrument(ctx context.Context,
 		FormationTxID: &bitcoin.Hash32{},
 	}
 	rand.Read(contract.FormationTxID[:])
+
+	addedContract, err := caches.Caches.Contracts.Add(ctx, contract)
+	if err != nil {
+		panic(fmt.Sprintf("Failed to add contract : %s", err))
+	}
+
+	if addedContract != contract {
+		panic("Created contract is not new")
+	}
+
+	return contractKey, contractLockingScript, adminKey, adminLockingScript, contract
+}
+
+// MockInstrument creates a contract and instrument.
+// `caches.Contracts.Release(ctx, contractLockingScript)` must be called before the end of the test.
+func MockInstrument(ctx context.Context,
+	caches *TestCaches) (bitcoin.Key, bitcoin.Script, bitcoin.Key, *Contract, *Instrument) {
+
+	contractKey, contractLockingScript, adminKey, adminLockingScript, contract := MockContract(ctx, caches)
 
 	currency := &instruments.Currency{
 		CurrencyCode: "USD",
@@ -181,12 +200,6 @@ func MockInstrument(ctx context.Context,
 	copy(instrument.InstrumentType[:], []byte(instruments.CodeCurrency))
 
 	contract.Instruments = append(contract.Instruments, instrument)
-
-	var err error
-	contract, err = caches.Caches.Contracts.Add(ctx, contract)
-	if err != nil {
-		panic(fmt.Sprintf("Failed to add contract : %s", err))
-	}
 
 	adminBalance, err := caches.Caches.Balances.Add(ctx, contractLockingScript,
 		instrument.InstrumentCode, &Balance{
@@ -350,6 +363,136 @@ func MockIdentityOracle(ctx context.Context,
 	}
 
 	return contractAddress, oracleKey
+}
+
+func MockContractWithVoteSystems(ctx context.Context, caches *TestCaches,
+	votingSystems []*actions.VotingSystemField) (bitcoin.Key, bitcoin.Script, bitcoin.Key, bitcoin.Script, *Contract) {
+
+	contractKey, contractLockingScript, adminKey, adminLockingScript, contract := MockContract(ctx, caches)
+	contract.Formation.VotingSystems = votingSystems
+	contract.MarkModified()
+	return contractKey, contractLockingScript, adminKey, adminLockingScript, contract
+}
+
+func MockVoteContractAmendmentCompleted(ctx context.Context, caches *TestCaches,
+	adminLockingScript, contractLockingScript bitcoin.Script, voteSystem uint32,
+	amendments []*actions.AmendmentField) *Vote {
+
+	now := uint64(time.Now().UnixNano())
+
+	vote := &Vote{
+		ContractLockingScript: contractLockingScript,
+		Proposal: &actions.Proposal{
+			Type: 0, // Referendum
+			// InstrumentType       string
+			// InstrumentCode       []byte
+			VoteSystem:          voteSystem,
+			ProposedAmendments:  amendments,
+			VoteOptions:         "AR",
+			VoteMax:             1,
+			ProposalDescription: "Vote on amendments",
+		},
+		Vote: &actions.Vote{
+			Timestamp: now - 1000,
+		},
+		Result: &actions.Result{
+			// InstrumentType       string
+			// InstrumentCode       []byte
+			ProposedAmendments: amendments,
+			OptionTally:        []uint64{100, 5},
+			Result:             "A",
+			Timestamp:          now - 1000,
+		},
+	}
+
+	var fundingTxID bitcoin.Hash32
+	rand.Read(fundingTxID[:])
+
+	proposalTx := wire.NewMsgTx(1)
+	proposalTx.AddTxIn(wire.NewTxIn(wire.NewOutPoint(&fundingTxID, 0), nil))
+	proposalTx.AddTxOut(wire.NewTxOut(200, contractLockingScript)) // For Vote
+	proposalTx.AddTxOut(wire.NewTxOut(200, contractLockingScript)) // For Result
+
+	proposalScript, err := protocol.Serialize(vote.Proposal, IsTest())
+	if err != nil {
+		panic(fmt.Sprintf("Failed to serialize proposal : %s", err))
+	}
+	proposalTx.AddTxOut(wire.NewTxOut(0, proposalScript))
+
+	vote.ProposalTxID = proposalTx.TxHash()
+
+	if _, err := caches.Caches.Transactions.AddExpandedTx(ctx, &expanded_tx.ExpandedTx{
+		Tx: proposalTx,
+		SpentOutputs: []*expanded_tx.Output{
+			{
+				Value:         200,
+				LockingScript: adminLockingScript,
+			},
+		},
+	}); err != nil {
+		panic(fmt.Sprintf("Failed to add proposal tx : %s", err))
+	}
+
+	voteTx := wire.NewMsgTx(1)
+	voteTx.AddTxIn(wire.NewTxIn(wire.NewOutPoint(vote.ProposalTxID, 0), contractLockingScript))
+	voteTx.AddTxOut(wire.NewTxOut(200, contractLockingScript))
+
+	voteScript, err := protocol.Serialize(vote.Vote, IsTest())
+	if err != nil {
+		panic(fmt.Sprintf("Failed to serialize vote : %s", err))
+	}
+	voteTx.AddTxOut(wire.NewTxOut(0, voteScript))
+
+	vote.VoteTxID = voteTx.TxHash()
+
+	if _, err := caches.Caches.Transactions.AddExpandedTx(ctx, &expanded_tx.ExpandedTx{
+		Tx: voteTx,
+		SpentOutputs: []*expanded_tx.Output{
+			{
+				Value:         200,
+				LockingScript: contractLockingScript,
+			},
+		},
+	}); err != nil {
+		panic(fmt.Sprintf("Failed to add vote tx : %s", err))
+	}
+
+	vote.Result.VoteTxId = vote.VoteTxID[:]
+
+	resultTx := wire.NewMsgTx(1)
+	resultTx.AddTxIn(wire.NewTxIn(wire.NewOutPoint(vote.ProposalTxID, 1), contractLockingScript))
+	resultTx.AddTxOut(wire.NewTxOut(200, contractLockingScript))
+
+	resultScript, err := protocol.Serialize(vote.Result, IsTest())
+	if err != nil {
+		panic(fmt.Sprintf("Failed to serialize result : %s", err))
+	}
+	resultTx.AddTxOut(wire.NewTxOut(0, resultScript))
+
+	vote.ResultTxID = resultTx.TxHash()
+
+	if _, err := caches.Caches.Transactions.AddExpandedTx(ctx, &expanded_tx.ExpandedTx{
+		Tx: resultTx,
+		SpentOutputs: []*expanded_tx.Output{
+			{
+				Value:         200,
+				LockingScript: contractLockingScript,
+			},
+		},
+	}); err != nil {
+		panic(fmt.Sprintf("Failed to add result tx : %s", err))
+	}
+
+	addedVote, err := caches.Caches.Votes.Add(ctx, vote)
+	if err != nil {
+		panic(fmt.Sprintf("Failed to add contract : %s", err))
+	}
+
+	if addedVote != vote {
+		panic("Created vote is not new")
+	}
+
+	return vote
 }
 
 func MockKey() (bitcoin.Key, bitcoin.Script, bitcoin.RawAddress) {
