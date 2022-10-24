@@ -1,6 +1,7 @@
 package state
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/binary"
 	"sync"
@@ -19,6 +20,7 @@ var (
 
 type Caches struct {
 	Contracts     *ContractCache
+	Instruments   *InstrumentCache
 	Balances      *BalanceCache
 	Transactions  *TransactionCache
 	Subscriptions *SubscriptionCache
@@ -34,6 +36,12 @@ func NewCaches(cache *cacher.Cache) (*Caches, error) {
 		return nil, errors.Wrap(err, "contracts")
 	}
 	result.Contracts = contracts
+
+	instruments, err := NewInstrumentCache(cache)
+	if err != nil {
+		return nil, errors.Wrap(err, "instruments")
+	}
+	result.Instruments = instruments
 
 	balances, err := NewBalanceCache(cache)
 	if err != nil {
@@ -101,4 +109,48 @@ func appendHashIfDoesntExist(list []bitcoin.Hash32, value bitcoin.Hash32) []bitc
 	}
 
 	return append(list, value) // add value
+}
+
+func (id ContractHash) String() string {
+	return bitcoin.Hash32(id).String()
+}
+
+func (id ContractHash) MarshalText() ([]byte, error) {
+	return []byte(id.String()), nil
+}
+
+func (id *ContractHash) UnmarshalText(text []byte) error {
+	h, err := bitcoin.NewHash32FromStr(string(text))
+	if err != nil {
+		return err
+	}
+
+	*id = ContractHash(*h)
+	return nil
+}
+
+func (id InstrumentCode) Equal(other InstrumentCode) bool {
+	return bytes.Equal(id[:], other[:])
+}
+
+func (id InstrumentCode) Bytes() []byte {
+	return id[:]
+}
+
+func (id InstrumentCode) String() string {
+	return bitcoin.Hash20(id).String()
+}
+
+func (id InstrumentCode) MarshalText() ([]byte, error) {
+	return []byte(id.String()), nil
+}
+
+func (id *InstrumentCode) UnmarshalText(text []byte) error {
+	h, err := bitcoin.NewHash20FromStr(string(text))
+	if err != nil {
+		return err
+	}
+
+	*id = InstrumentCode(*h)
+	return nil
 }

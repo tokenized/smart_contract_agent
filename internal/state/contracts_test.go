@@ -13,22 +13,14 @@ import (
 	"github.com/tokenized/pkg/storage"
 	"github.com/tokenized/specification/dist/golang/actions"
 	"github.com/tokenized/specification/dist/golang/instruments"
+	"github.com/tokenized/specification/dist/golang/protocol"
 )
 
 func Test_Contracts(t *testing.T) {
 	ctx := context.Background()
 	store := storage.NewMockStorage()
 
-	contractKey, err := bitcoin.GenerateKey(bitcoin.MainNet)
-	if err != nil {
-		t.Fatalf("Failed to create key : %s", err)
-	}
-
-	contractLockingScript, err := contractKey.LockingScript()
-	if err != nil {
-		t.Fatalf("Failed to create locking script : %s", err)
-	}
-
+	_, contractLockingScript, contractAddress := MockKey()
 	contractHash := CalculateContractHash(contractLockingScript)
 
 	cacherConfig := cacher.DefaultConfig()
@@ -38,6 +30,11 @@ func Test_Contracts(t *testing.T) {
 	cache, err := NewContractCache(cacher)
 	if err != nil {
 		t.Fatalf("Failed to create contract cache : %s", err)
+	}
+
+	instrumentCache, err := NewInstrumentCache(cacher)
+	if err != nil {
+		t.Fatalf("Failed to create instrument cache : %s", err)
 	}
 
 	shutdown := make(chan error, 1)
@@ -78,10 +75,26 @@ func Test_Contracts(t *testing.T) {
 	rand.Read(contract.FormationTxID[:])
 	rand.Read(contract.BodyOfAgreementFormationTxID[:])
 
+	addedContract, err := cache.Add(ctx, contract)
+	if err != nil {
+		t.Fatalf("Failed to add contract : %s", err)
+	}
+
+	if addedContract != contract {
+		t.Errorf("Added contract should match contract")
+	}
+
+	contract.Lock()
+
 	// Add some instruments
 	for i := 0; i < 3; i++ {
 		var code InstrumentCode
-		rand.Read(code[:])
+
+		nextInstrumentCode := protocol.InstrumentCodeFromContract(contractAddress,
+			contract.InstrumentCount)
+		contract.InstrumentCount++
+
+		copy(code[:], nextInstrumentCode[:])
 
 		currency := &instruments.Currency{
 			CurrencyCode: "USD",
@@ -109,18 +122,19 @@ func Test_Contracts(t *testing.T) {
 		copy(instrument.InstrumentType[:], []byte(instruments.CodeCurrency))
 		rand.Read(instrument.CreationTxID[:])
 
-		contract.Instruments = append(contract.Instruments, instrument)
+		addedInstrument, err := instrumentCache.Add(ctx, instrument)
+		if err != nil {
+			t.Fatalf("Failed to add instrument : %s", err)
+		}
+
+		if addedInstrument != instrument {
+			t.Errorf("Added instrument should match instrument")
+		}
+
+		instrumentCache.Release(ctx, contractLockingScript, code)
 	}
 
-	addedContract, err := cache.Add(ctx, contract)
-	if err != nil {
-		t.Fatalf("Failed to add contract : %s", err)
-	}
-
-	if addedContract != contract {
-		t.Errorf("Added contract should match contract")
-	}
-
+	contract.Unlock()
 	cache.Release(ctx, contractLockingScript)
 
 	time.Sleep(time.Millisecond * 100) // expire contract so it is removed from cache
@@ -162,39 +176,8 @@ func Test_Contracts(t *testing.T) {
 			contract.BodyOfAgreementFormation.Timestamp)
 	}
 
-	if len(gotContract.Instruments) != 3 {
-		t.Errorf("Wrong number of contracts : got %d, want %d", len(gotContract.Instruments), 3)
-	}
-
-	for i := 0; i < 3; i++ {
-		instrument := gotContract.Instruments[i]
-
-		if instrument.Creation == nil {
-			t.Fatalf("Missing instrument creation")
-		}
-
-		if instrument.Creation.InstrumentIndex != uint64(i) {
-			t.Errorf("Wrong instrument index : got %d, want %d",
-				instrument.Creation.InstrumentIndex, uint64(i))
-		}
-
-		payload, err := instrument.GetPayload()
-		if err != nil {
-			t.Fatalf("Failed to get instrument payload : %s", err)
-		}
-
-		cur, ok := payload.(*instruments.Currency)
-		if !ok {
-			t.Fatalf("Instrument payload is not currency")
-		}
-
-		if cur.CurrencyCode != "USD" {
-			t.Errorf("Wrong currency code : got %s, want %s", cur.CurrencyCode, "USD")
-		}
-
-		if cur.Precision != 2 {
-			t.Errorf("Wrong precision : got %d, want %d", cur.Precision, 2)
-		}
+	if gotContract.InstrumentCount != 3 {
+		t.Errorf("Wrong number of contracts : got %d, want %d", gotContract.InstrumentCount, 3)
 	}
 
 	cache.Release(ctx, contractLockingScript)

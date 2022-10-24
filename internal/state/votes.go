@@ -30,13 +30,13 @@ type VoteCache struct {
 type Vote struct {
 	ContractLockingScript bitcoin.Script `bsor:"1" json:"contract_locking_script"`
 
-	Proposal     *actions.Proposal `bsor:"2" json:"proposal"`
+	Proposal     *actions.Proposal `bsor:"-" json:"proposal"`
 	ProposalTxID *bitcoin.Hash32   `bsor:"3" json:"proposal_txid"`
 
-	Vote     *actions.Vote   `bsor:"4" json:"vote"`
+	Vote     *actions.Vote   `bsor:"-" json:"vote"`
 	VoteTxID *bitcoin.Hash32 `bsor:"5" json:"vote_txid"`
 
-	Result     *actions.Result `bsor:"6" json:"result"`
+	Result     *actions.Result `bsor:"-" json:"result"`
 	ResultTxID *bitcoin.Hash32 `bsor:"7" json:"result_txid"`
 
 	// ProposalScript is only used by Serialize to save the Proposal value in BSOR.

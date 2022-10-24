@@ -725,11 +725,12 @@ func Test_Contracts_Amendment_Proposal(t *testing.T) {
 	t.Logf("Original ContractFormation : %s", js)
 
 	newOffer := &actions.ContractOffer{
-		ContractName:   "New Test Name",
-		ContractFee:    contract.Formation.ContractFee,
-		ContractType:   contract.Formation.ContractType,
-		EntityContract: contract.Formation.EntityContract,
-		VotingSystems:  votingSystems,
+		ContractName:        "New Test Name",
+		ContractFee:         contract.Formation.ContractFee,
+		ContractType:        contract.Formation.ContractType,
+		EntityContract:      contract.Formation.EntityContract,
+		VotingSystems:       contract.Formation.VotingSystems,
+		ContractPermissions: contract.Formation.ContractPermissions,
 	}
 
 	amendments, err := contract.Formation.CreateAmendments(newOffer)
@@ -746,6 +747,8 @@ func Test_Contracts_Amendment_Proposal(t *testing.T) {
 
 	vote := state.MockVoteContractAmendmentCompleted(ctx, caches, adminLockingScript,
 		contractLockingScript, 0, amendments)
+	vote.Lock()
+	voteTxID := *vote.VoteTxID
 
 	js, _ = json.MarshalIndent(vote, "", "  ")
 	t.Logf("Vote : %s", js)
@@ -757,6 +760,7 @@ func Test_Contracts_Amendment_Proposal(t *testing.T) {
 		ContractRevision: 0,
 		Amendments:       amendments,
 	}
+	vote.Unlock()
 
 	// Add action output
 	contractAmendmentScript, err := protocol.Serialize(contractAmendment, true)
@@ -860,6 +864,7 @@ func Test_Contracts_Amendment_Proposal(t *testing.T) {
 	}
 	contract.Unlock()
 
+	caches.Caches.Votes.Release(ctx, contractLockingScript, voteTxID)
 	caches.Caches.Contracts.Release(ctx, contractLockingScript)
 	caches.StopTestCaches()
 }

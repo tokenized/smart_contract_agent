@@ -63,7 +63,7 @@ func Test_Transfers_Basic(t *testing.T) {
 		var spentOutputs []*expanded_tx.Output
 
 		// Add admin as sender
-		quantity := uint64(mathRand.Intn(1000))
+		quantity := uint64(mathRand.Intn(1000)) + 1
 		receiverQuantities = append(receiverQuantities, quantity)
 
 		instrumentTransfer.InstrumentSenders = append(instrumentTransfer.InstrumentSenders,
@@ -230,7 +230,7 @@ func Test_Transfers_Basic(t *testing.T) {
 
 		// Add receivers
 		for {
-			quantity := uint64(mathRand.Intn(1000))
+			quantity := uint64(mathRand.Intn(1000)) + 1
 			if quantity > senderQuantity {
 				quantity = senderQuantity
 			}
@@ -335,8 +335,8 @@ func Test_Transfers_Basic(t *testing.T) {
 
 	// Check balances
 	for i, lockingScript := range finalLockingScripts {
-		balance, err := caches.Caches.Balances.Get(ctx, contractLockingScript, instrument.InstrumentCode,
-			lockingScript)
+		balance, err := caches.Caches.Balances.Get(ctx, contractLockingScript,
+			instrument.InstrumentCode, lockingScript)
 		if err != nil {
 			t.Fatalf("Failed to get final balance : %s", err)
 		}
@@ -361,6 +361,7 @@ func Test_Transfers_Basic(t *testing.T) {
 		caches.Caches.Balances.Release(ctx, contractLockingScript, instrument.InstrumentCode, balance)
 	}
 
+	caches.Caches.Instruments.Release(ctx, contractLockingScript, instrument.InstrumentCode)
 	caches.Caches.Contracts.Release(ctx, contractLockingScript)
 	caches.StopTestCaches()
 }
@@ -502,6 +503,7 @@ func Test_Transfers_InsufficientQuantity(t *testing.T) {
 
 	caches.Caches.Transactions.Release(ctx, transaction.GetTxID())
 
+	caches.Caches.Instruments.Release(ctx, contractLockingScript, instrument.InstrumentCode)
 	caches.Caches.Contracts.Release(ctx, contractLockingScript)
 	caches.StopTestCaches()
 
@@ -675,6 +677,7 @@ func Test_Transfers_IdentityOracle_MissingSignature(t *testing.T) {
 
 	caches.Caches.Transactions.Release(ctx, transaction.GetTxID())
 
+	caches.Caches.Instruments.Release(ctx, contractLockingScript, instrument.InstrumentCode)
 	caches.Caches.Contracts.Release(ctx, contractLockingScript)
 	caches.StopTestCaches()
 
@@ -877,6 +880,7 @@ func Test_Transfers_IdentityOracle_Valid(t *testing.T) {
 
 	caches.Caches.Transactions.Release(ctx, transaction.GetTxID())
 
+	caches.Caches.Instruments.Release(ctx, contractLockingScript, instrument.InstrumentCode)
 	caches.Caches.Contracts.Release(ctx, contractLockingScript)
 	caches.StopTestCaches()
 
@@ -1070,6 +1074,7 @@ func Test_Transfers_IdentityOracle_BadSignature(t *testing.T) {
 
 	caches.Caches.Transactions.Release(ctx, transaction.GetTxID())
 
+	caches.Caches.Instruments.Release(ctx, contractLockingScript, instrument.InstrumentCode)
 	caches.Caches.Contracts.Release(ctx, contractLockingScript)
 	caches.StopTestCaches()
 
@@ -1514,6 +1519,8 @@ func Test_Transfers_Multi_Basic(t *testing.T) {
 		caches.Caches.Transactions.Release(ctx, message2Transaction.GetTxID())
 	}
 
+	caches.Caches.Instruments.Release(ctx, contractLockingScript1, instrument1.InstrumentCode)
+	caches.Caches.Instruments.Release(ctx, contractLockingScript2, instrument2.InstrumentCode)
 	caches.Caches.Contracts.Release(ctx, contractLockingScript1)
 	caches.Caches.Contracts.Release(ctx, contractLockingScript2)
 	caches.StopTestCaches()
@@ -1754,6 +1761,8 @@ func Test_Transfers_Multi_Reject_First(t *testing.T) {
 		t.Logf("Agent 2 no response tx 1")
 	}
 
+	caches.Caches.Instruments.Release(ctx, contractLockingScript1, instrument1.InstrumentCode)
+	caches.Caches.Instruments.Release(ctx, contractLockingScript2, instrument2.InstrumentCode)
 	caches.Caches.Contracts.Release(ctx, contractLockingScript1)
 	caches.Caches.Contracts.Release(ctx, contractLockingScript2)
 	caches.StopTestCaches()
@@ -2127,6 +2136,8 @@ func Test_Transfers_Multi_Reject_Second(t *testing.T) {
 		caches.Caches.Transactions.Release(ctx, rejectionTransaction.GetTxID())
 	}
 
+	caches.Caches.Instruments.Release(ctx, contractLockingScript1, instrument1.InstrumentCode)
+	caches.Caches.Instruments.Release(ctx, contractLockingScript2, instrument2.InstrumentCode)
 	caches.Caches.Contracts.Release(ctx, contractLockingScript1)
 	caches.Caches.Contracts.Release(ctx, contractLockingScript2)
 	caches.StopTestCaches()

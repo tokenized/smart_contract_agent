@@ -16,6 +16,7 @@ import (
 	"github.com/tokenized/pkg/wire"
 	"github.com/tokenized/specification/dist/golang/actions"
 	"github.com/tokenized/specification/dist/golang/instruments"
+	"github.com/tokenized/specification/dist/golang/permissions"
 	"github.com/tokenized/specification/dist/golang/protocol"
 )
 
@@ -199,7 +200,14 @@ func MockInstrument(ctx context.Context,
 	rand.Read(instrument.CreationTxID[:])
 	copy(instrument.InstrumentType[:], []byte(instruments.CodeCurrency))
 
-	contract.Instruments = append(contract.Instruments, instrument)
+	addedInstrument, err := caches.Caches.Instruments.Add(ctx, instrument)
+	if err != nil {
+		panic(fmt.Sprintf("Failed to add instrument : %s", err))
+	}
+
+	if addedInstrument != instrument {
+		panic("Created instrument is not new")
+	}
 
 	adminBalance, err := caches.Caches.Balances.Add(ctx, contractLockingScript,
 		instrument.InstrumentCode, &Balance{
@@ -290,12 +298,22 @@ func MockInstrumentWithOracle(ctx context.Context,
 	rand.Read(instrument.CreationTxID[:])
 	copy(instrument.InstrumentType[:], []byte(instruments.CodeCurrency))
 
-	contract.Instruments = append(contract.Instruments, instrument)
+	addedInstrument, err := caches.Caches.Instruments.Add(ctx, instrument)
+	if err != nil {
+		panic(fmt.Sprintf("Failed to add instrument : %s", err))
+	}
 
-	var err error
-	contract, err = caches.Caches.Contracts.Add(ctx, contract)
+	if addedInstrument != instrument {
+		panic("Created instrument is not new")
+	}
+
+	addedContract, err := caches.Caches.Contracts.Add(ctx, contract)
 	if err != nil {
 		panic(fmt.Sprintf("Failed to add contract : %s", err))
+	}
+
+	if addedContract != contract {
+		panic("Created contract is not new")
 	}
 
 	adminBalance, err := caches.Caches.Balances.Add(ctx, contractLockingScript,
@@ -369,7 +387,29 @@ func MockContractWithVoteSystems(ctx context.Context, caches *TestCaches,
 	votingSystems []*actions.VotingSystemField) (bitcoin.Key, bitcoin.Script, bitcoin.Key, bitcoin.Script, *Contract) {
 
 	contractKey, contractLockingScript, adminKey, adminLockingScript, contract := MockContract(ctx, caches)
+
 	contract.Formation.VotingSystems = votingSystems
+
+	// Set all fields to be updatable by an administration proposal using these voting systems.
+	permissions := permissions.Permissions{
+		permissions.Permission{
+			Permitted:              false, // Issuer can update field without proposal
+			AdministrationProposal: true,  // Issuer can update field with a proposal
+			HolderProposal:         false, // Holder's can initiate proposals to update field
+		},
+	}
+
+	permissions[0].VotingSystemsAllowed = make([]bool, len(votingSystems))
+	for i := range permissions[0].VotingSystemsAllowed {
+		permissions[0].VotingSystemsAllowed[i] = true // Enable this voting system for proposals on this field.
+	}
+
+	permissionsBytes, err := permissions.Bytes()
+	if err != nil {
+		panic(fmt.Sprintf("Failed to serialize contract permissions : %s", err))
+	}
+	contract.Formation.ContractPermissions = permissionsBytes
+
 	contract.MarkModified()
 	return contractKey, contractLockingScript, adminKey, adminLockingScript, contract
 }

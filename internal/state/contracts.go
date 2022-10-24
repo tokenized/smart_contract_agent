@@ -40,15 +40,12 @@ type Contract struct {
 
 	InstrumentCount uint64 `bsor:"7" json:"instrument_count"`
 
-	// TODO Move Instruments to independent storage objects. --ce
-	Instruments []*Instrument `bsor:"8" json:"instruments"`
-
 	// FormationScript is only used by Serialize to save the Formation value in BSOR.
-	FormationScript bitcoin.Script `bsor:"9" json:"formation_script"`
+	FormationScript bitcoin.Script `bsor:"8" json:"formation_script"`
 
 	// BodyOfAgreementFormationScript is only used by Serialize to save the BodyOfAgreementFormation
 	// value in BSOR.
-	BodyOfAgreementFormationScript bitcoin.Script `bsor:"10" json:"body_of_agreement_formation_script"`
+	BodyOfAgreementFormationScript bitcoin.Script `bsor:"9" json:"body_of_agreement_formation_script"`
 
 	isModified bool
 	sync.Mutex `bsor:"-"`
@@ -187,16 +184,6 @@ func (c *Contract) IsExpired(now uint64) bool {
 		c.Formation.ContractExpiration < now
 }
 
-func (c *Contract) GetInstrument(instrumentCode InstrumentCode) *Instrument {
-	for _, instrument := range c.Instruments {
-		if bytes.Equal(instrument.InstrumentCode[:], instrumentCode[:]) {
-			return instrument
-		}
-	}
-
-	return nil
-}
-
 func (c *Contract) Path() string {
 	return ContractPath(c.LockingScript)
 }
@@ -230,12 +217,6 @@ func (c *Contract) Serialize(w io.Writer) error {
 		}
 
 		c.BodyOfAgreementFormationScript = script
-	}
-
-	for i, instrument := range c.Instruments {
-		if err := instrument.PrepareForMarshal(); err != nil {
-			return errors.Wrapf(err, "prepare instrument %d", i)
-		}
 	}
 
 	b, err := bsor.MarshalBinary(c)
@@ -312,29 +293,5 @@ func (c *Contract) Deserialize(r io.Reader) error {
 		c.BodyOfAgreementFormation = bodyOfAgreementFormation
 	}
 
-	for i, instrument := range c.Instruments {
-		if err := instrument.CompleteUnmarshal(); err != nil {
-			return errors.Wrapf(err, "complete instrument %d", i)
-		}
-	}
-
-	return nil
-}
-
-func (id ContractHash) String() string {
-	return bitcoin.Hash32(id).String()
-}
-
-func (id ContractHash) MarshalText() ([]byte, error) {
-	return []byte(id.String()), nil
-}
-
-func (id *ContractHash) UnmarshalText(text []byte) error {
-	h, err := bitcoin.NewHash32FromStr(string(text))
-	if err != nil {
-		return err
-	}
-
-	*id = ContractHash(*h)
 	return nil
 }

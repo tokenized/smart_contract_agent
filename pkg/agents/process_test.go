@@ -149,7 +149,7 @@ func Test_Process(t *testing.T) {
 		t.Errorf("Contract formation txid does not match")
 	}
 
-	t.Logf("Found %d instruments", len(currentContract.Instruments))
+	t.Logf("Found %d instruments", currentContract.InstrumentCount)
 
 	currentContract.Unlock()
 	caches.Caches.Contracts.Release(ctx, contractLockingScript)
@@ -251,36 +251,45 @@ func Test_Process(t *testing.T) {
 		t.Errorf("Contract formation txid does not match")
 	}
 
-	t.Logf("Found %d instruments", len(currentContract.Instruments))
+	t.Logf("Found %d instruments", currentContract.InstrumentCount)
 
-	var instrument *state.Instrument
-	for _, inst := range currentContract.Instruments {
-		t.Logf("Instrument : %s", protocol.InstrumentID(currency.Code(),
-			bitcoin.Hash20(inst.InstrumentCode)))
-		if inst.InstrumentCode.Equal(instrumentCode) {
-			instrument = inst
-			break
+	for i := uint64(0); i < currentContract.InstrumentCount; i++ {
+		instrumentCode := state.InstrumentCode(protocol.InstrumentCodeFromContract(contractAddress,
+			i))
+		t.Logf("Instrument : %s", protocol.InstrumentID(instruments.CodeCurrency,
+			bitcoin.Hash20(instrumentCode)))
+
+		gotInstrument, err := caches.Caches.Instruments.Get(ctx, contractLockingScript,
+			instrumentCode)
+		if err != nil {
+			t.Fatalf("Failed to get instrument : %s", err)
 		}
-	}
 
-	if instrument == nil {
-		t.Fatalf("Instrument missing from contract")
-	}
+		if gotInstrument == nil {
+			t.Fatalf("Instrument missing")
+		}
+		caches.Caches.Instruments.Release(ctx, contractLockingScript, instrumentCode)
 
-	if instrument.Creation == nil {
-		t.Fatalf("Missing instrument creation")
-	}
+		if !gotInstrument.InstrumentCode.Equal(instrumentCode) {
+			t.Errorf("Wrong instrument code : got %s, want %s", gotInstrument.InstrumentCode,
+				instrumentCode)
+		}
 
-	if !instrument.Creation.Equal(instrumentCreation) {
-		t.Errorf("Instrument creation does not match")
-	}
+		if gotInstrument.Creation == nil {
+			t.Fatalf("Missing instrument creation")
+		}
 
-	if instrument.CreationTxID == nil {
-		t.Fatalf("Missing instrument creation txid")
-	}
+		if !gotInstrument.Creation.Equal(instrumentCreation) {
+			t.Errorf("Instrument creation does not match")
+		}
 
-	if !instrument.CreationTxID.Equal(&instrumentCreationTxID) {
-		t.Errorf("Instrument creation txid does not match")
+		if gotInstrument.CreationTxID == nil {
+			t.Fatalf("Missing instrument creation txid")
+		}
+
+		if !gotInstrument.CreationTxID.Equal(&instrumentCreationTxID) {
+			t.Errorf("Instrument creation txid does not match")
+		}
 	}
 
 	currentContract.Unlock()

@@ -619,12 +619,13 @@ func (a *Agent) processContractAmendment(ctx context.Context, transaction *state
 		return errors.Wrap(err, "sign")
 	}
 
+	formationTxID := *formationTx.MsgTx.TxHash()
+
 	// Finalize contract formation.
 	contract.Formation = formation
-	contract.FormationTxID = formationTx.MsgTx.TxHash()
+	contract.FormationTxID = &formationTxID
 	contract.MarkModified()
 
-	formationTxID := *formationTx.MsgTx.TxHash()
 	formationTransaction, err := a.caches.Transactions.AddRaw(ctx, formationTx.MsgTx, nil)
 	if err != nil {
 		return errors.Wrap(err, "add response tx")
@@ -674,7 +675,9 @@ func (a *Agent) processContractFormation(ctx context.Context, transaction *state
 
 	isFirst := a.contract.Formation == nil
 
+	previousTimeStamp := int64(0)
 	if a.contract.Formation != nil {
+		previousTimeStamp = int64(a.contract.Formation.Timestamp)
 		if formation.Timestamp < a.contract.Formation.Timestamp {
 			logger.WarnWithFields(ctx, []logger.Field{
 				logger.Timestamp("timestamp", int64(formation.Timestamp)),
@@ -702,7 +705,8 @@ func (a *Agent) processContractFormation(ctx context.Context, transaction *state
 	} else {
 		logger.InfoWithFields(ctx, []logger.Field{
 			logger.Timestamp("timestamp", int64(formation.Timestamp)),
-		}, "Updated contract formation")
+			logger.Timestamp("previous_timestamp", previousTimeStamp),
+		}, "Updating contract formation")
 	}
 
 	return nil
@@ -943,7 +947,7 @@ func applyContractAmendments(contractFormation *actions.ContractFormation,
 	// Check validity of updated contract data
 	if err := contractFormation.Validate(); err != nil {
 		return platform.NewRejectError(actions.RejectionsMsgMalformed,
-			fmt.Sprintf("Formation invalid after amendments: %s", err), now)
+			fmt.Sprintf("Contract invalid after amendments: %s", err), now)
 	}
 
 	return nil

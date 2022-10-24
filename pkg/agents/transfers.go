@@ -356,14 +356,17 @@ func (a *Agent) processSettlement(ctx context.Context, transaction *state.Transa
 		var instrumentCode state.InstrumentCode
 		copy(instrumentCode[:], instrument.InstrumentCode)
 
-		a.contract.Lock()
-		stateInstrument := a.contract.GetInstrument(instrumentCode)
-		a.contract.Unlock()
+		stateInstrument, err := a.caches.Instruments.Get(instrumentCtx, agentLockingScript,
+			instrumentCode)
+		if err != nil {
+			return errors.Wrap(err, "get instrument")
+		}
 
 		if stateInstrument == nil {
 			logger.Error(ctx, "Instrument not found: %s", instrumentCode)
 			return nil
 		}
+		a.caches.Instruments.Release(instrumentCtx, agentLockingScript, instrumentCode)
 
 		logger.Info(instrumentCtx, "Processing settlement")
 
@@ -391,8 +394,8 @@ func (a *Agent) processSettlement(ctx context.Context, transaction *state.Transa
 		}
 
 		// Add the balances to the cache.
-		addedBalances, err := a.caches.Balances.AddMulti(instrumentCtx, agentLockingScript, instrumentCode,
-			balances)
+		addedBalances, err := a.caches.Balances.AddMulti(instrumentCtx, agentLockingScript,
+			instrumentCode, balances)
 		if err != nil {
 			return errors.Wrap(err, "add balances")
 		}
@@ -738,14 +741,14 @@ func (a *Agent) buildInstrumentSettlement(ctx context.Context, settlementTx *txb
 		return nil, nil, errors.Wrap(err, "add response input")
 	}
 
-	a.contract.Lock()
-	instrument := a.contract.GetInstrument(instrumentCode)
-	a.contract.Unlock()
+	instrument, err := a.caches.Instruments.Get(ctx, agentLockingScript, instrumentCode)
+	if err != nil {
+		return nil, nil, errors.Wrap(err, "get instrument")
+	}
 
 	if instrument == nil {
-		logger.Warn(ctx, "Instrument not found: %s", instrumentCode)
-		return nil, nil, platform.NewRejectErrorWithOutputIndex(actions.RejectionsInstrumentNotFound, "",
-			now, int(instrumentTransfer.ContractIndex))
+		return nil, nil, platform.NewRejectErrorWithOutputIndex(actions.RejectionsInstrumentNotFound,
+			"", now, int(instrumentTransfer.ContractIndex))
 	}
 
 	instrument.Lock()
@@ -754,6 +757,7 @@ func (a *Agent) buildInstrumentSettlement(ctx context.Context, settlementTx *txb
 	isFrozen := instrument.IsFrozen(now)
 	isExpired := instrument.IsExpired(now)
 	instrument.Unlock()
+	a.caches.Instruments.Release(ctx, agentLockingScript, instrumentCode)
 
 	if instrumentTransfer.InstrumentType != instrumentType {
 		logger.Warn(ctx, "Wrong instrument type: %s (should be %s)",

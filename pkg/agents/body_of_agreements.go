@@ -467,15 +467,6 @@ func applyBodyOfAgreementAmendments(bodyOfAgreementFormation *actions.BodyOfAgre
 				fmt.Sprintf("Amendments %d: missing field index", i), now)
 		}
 
-		switch fip[0] {
-		case actions.ContractFieldContractPermissions:
-			if _, err := permissions.PermissionsFromBytes(amendment.Data,
-				votingSystemsCount); err != nil {
-				return platform.NewRejectError(actions.RejectionsMsgMalformed,
-					fmt.Sprintf("Amendments %d: Data: %s", i, err), now)
-			}
-		}
-
 		fieldPermissions, err := bodyOfAgreementFormation.ApplyAmendment(fip, amendment.Operation,
 			amendment.Data, perms)
 		if err != nil {
@@ -535,7 +526,7 @@ func applyBodyOfAgreementAmendments(bodyOfAgreementFormation *actions.BodyOfAgre
 	// Check validity of updated contract data
 	if err := bodyOfAgreementFormation.Validate(); err != nil {
 		return platform.NewRejectError(actions.RejectionsMsgMalformed,
-			fmt.Sprintf("Formation invalid after amendments: %s", err), now)
+			fmt.Sprintf("Body of agreement invalid after amendments: %s", err), now)
 	}
 
 	return nil
