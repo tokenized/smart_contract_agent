@@ -146,7 +146,7 @@ func (a *Agent) processBodyOfAgreementOffer(ctx context.Context, transaction *st
 	}
 	defer a.caches.Transactions.Release(ctx, formationTxID)
 
-	// Set formation tx as processed since all the balances were just settled.
+	// Set formation tx as processed since the body of agreement is now formed.
 	formationTransaction.Lock()
 	formationTransaction.SetProcessed()
 	formationTransaction.Unlock()
@@ -192,7 +192,7 @@ func (a *Agent) processBodyOfAgreementAmendment(ctx context.Context, transaction
 	transaction.Unlock()
 
 	contract := a.Contract()
-
+	defer a.caches.Contracts.Save(ctx, a.contract)
 	contract.Lock()
 	defer contract.Unlock()
 
@@ -281,9 +281,14 @@ func (a *Agent) processBodyOfAgreementAmendment(ctx context.Context, transaction
 			}
 		}
 
+		voteTxID := *vote.VoteTxID
 		proposed = true
 		proposalType = vote.Proposal.Type
 		votingSystem = vote.Proposal.VoteSystem
+
+		logger.InfoWithFields(ctx, []logger.Field{
+			logger.Stringer("vote_txid", voteTxID),
+		}, "Verified amendments from vote")
 
 		vote.Unlock()
 		a.caches.Votes.Release(ctx, agentLockingScript, *vote.VoteTxID)
@@ -376,7 +381,7 @@ func (a *Agent) processBodyOfAgreementAmendment(ctx context.Context, transaction
 	}
 	defer a.caches.Transactions.Release(ctx, formationTxID)
 
-	// Set formation tx as processed since all the balances were just settled.
+	// Set formation tx as processed since the body of agreement is now amended.
 	formationTransaction.Lock()
 	formationTransaction.SetProcessed()
 	formationTransaction.Unlock()

@@ -29,14 +29,9 @@ func Test_Transfers_Basic(t *testing.T) {
 
 	caches := state.StartTestCaches(ctx, t, store, cacher.DefaultConfig(), time.Second)
 
-	contractKey, contractLockingScript, adminKey, contract, instrument := state.MockInstrument(ctx,
+	contractKey, contractLockingScript, adminKey, adminLockingScript, contract, instrument := state.MockInstrument(ctx,
 		caches)
 	_, feeLockingScript, _ := state.MockKey()
-
-	adminLockingScript, err := adminKey.LockingScript()
-	if err != nil {
-		t.Fatalf("Failed to create admin locking script : %s", err)
-	}
 
 	agent, err := NewAgent(contractKey, DefaultConfig(), contract, feeLockingScript,
 		caches.Caches, broadcaster, nil, nil)
@@ -375,7 +370,7 @@ func Test_Transfers_InsufficientQuantity(t *testing.T) {
 
 	caches := state.StartTestCaches(ctx, t, store, cacher.DefaultConfig(), time.Second)
 
-	contractKey, contractLockingScript, _, contract, instrument := state.MockInstrument(ctx, caches)
+	contractKey, contractLockingScript, _, _, contract, instrument := state.MockInstrument(ctx, caches)
 	_, feeLockingScript, _ := state.MockKey()
 
 	agent, err := NewAgent(contractKey, DefaultConfig(), contract, feeLockingScript,
@@ -553,13 +548,8 @@ func Test_Transfers_IdentityOracle_MissingSignature(t *testing.T) {
 
 	caches := state.StartTestCaches(ctx, t, store, cacher.DefaultConfig(), time.Second)
 
-	contractKey, contractLockingScript, adminKey, contract, instrument, _ := state.MockInstrumentWithOracle(ctx, caches)
+	contractKey, contractLockingScript, adminKey, adminLockingScript, contract, instrument, _ := state.MockInstrumentWithOracle(ctx, caches)
 	_, feeLockingScript, _ := state.MockKey()
-
-	adminLockingScript, err := adminKey.LockingScript()
-	if err != nil {
-		t.Fatalf("Failed to create admin locking script : %s", err)
-	}
 
 	agent, err := NewAgent(contractKey, DefaultConfig(), contract, feeLockingScript,
 		caches.Caches, broadcaster, nil, nil)
@@ -727,13 +717,8 @@ func Test_Transfers_IdentityOracle_Valid(t *testing.T) {
 
 	caches := state.StartTestCaches(ctx, t, store, cacher.DefaultConfig(), time.Second)
 
-	contractKey, contractLockingScript, adminKey, contract, instrument, identityKey := state.MockInstrumentWithOracle(ctx, caches)
+	contractKey, contractLockingScript, adminKey, adminLockingScript, contract, instrument, identityKey := state.MockInstrumentWithOracle(ctx, caches)
 	_, feeLockingScript, _ := state.MockKey()
-
-	adminLockingScript, err := adminKey.LockingScript()
-	if err != nil {
-		t.Fatalf("Failed to create admin locking script : %s", err)
-	}
 
 	contractAddress, err := bitcoin.RawAddressFromLockingScript(contractLockingScript)
 	if err != nil {
@@ -919,13 +904,8 @@ func Test_Transfers_IdentityOracle_BadSignature(t *testing.T) {
 
 	caches := state.StartTestCaches(ctx, t, store, cacher.DefaultConfig(), time.Second)
 
-	contractKey, contractLockingScript, adminKey, contract, instrument, _ := state.MockInstrumentWithOracle(ctx, caches)
+	contractKey, contractLockingScript, adminKey, adminLockingScript, contract, instrument, _ := state.MockInstrumentWithOracle(ctx, caches)
 	_, feeLockingScript, _ := state.MockKey()
-
-	adminLockingScript, err := adminKey.LockingScript()
-	if err != nil {
-		t.Fatalf("Failed to create admin locking script : %s", err)
-	}
 
 	badIdentityKey, _, _ := state.MockKey()
 
@@ -1125,14 +1105,9 @@ func Test_Transfers_Multi_Basic(t *testing.T) {
 
 	caches := state.StartTestCaches(ctx, t, store, cacher.DefaultConfig(), time.Second)
 
-	contractKey1, contractLockingScript1, adminKey1, contract1, instrument1 := state.MockInstrument(ctx,
+	contractKey1, contractLockingScript1, adminKey1, adminLockingScript1, contract1, instrument1 := state.MockInstrument(ctx,
 		caches)
 	_, feeLockingScript1, _ := state.MockKey()
-
-	adminLockingScript1, err := adminKey1.LockingScript()
-	if err != nil {
-		t.Fatalf("Failed to create admin locking script : %s", err)
-	}
 
 	agent1, err := NewAgent(contractKey1, DefaultConfig(), contract1, feeLockingScript1,
 		caches.Caches, broadcaster1, nil, nil)
@@ -1140,14 +1115,9 @@ func Test_Transfers_Multi_Basic(t *testing.T) {
 		t.Fatalf("Failed to create agent : %s", err)
 	}
 
-	contractKey2, contractLockingScript2, adminKey2, contract2, instrument2 := state.MockInstrument(ctx,
+	contractKey2, contractLockingScript2, adminKey2, adminLockingScript2, contract2, instrument2 := state.MockInstrument(ctx,
 		caches)
 	_, feeLockingScript2, _ := state.MockKey()
-
-	adminLockingScript2, err := adminKey2.LockingScript()
-	if err != nil {
-		t.Fatalf("Failed to create admin locking script : %s", err)
-	}
 
 	agent2, err := NewAgent(contractKey2, DefaultConfig(), contract2, feeLockingScript2,
 		caches.Caches, broadcaster2, nil, nil)
@@ -1536,14 +1506,9 @@ func Test_Transfers_Multi_Reject_First(t *testing.T) {
 
 	caches := state.StartTestCaches(ctx, t, store, cacher.DefaultConfig(), time.Second)
 
-	contractKey1, contractLockingScript1, adminKey1, contract1, instrument1 := state.MockInstrument(ctx,
+	contractKey1, contractLockingScript1, adminKey1, adminLockingScript1, contract1, instrument1 := state.MockInstrument(ctx,
 		caches)
 	_, feeLockingScript1, _ := state.MockKey()
-
-	adminLockingScript1, err := adminKey1.LockingScript()
-	if err != nil {
-		t.Fatalf("Failed to create admin locking script : %s", err)
-	}
 
 	agent1, err := NewAgent(contractKey1, DefaultConfig(), contract1, feeLockingScript1,
 		caches.Caches, broadcaster1, nil, nil)
@@ -1551,14 +1516,9 @@ func Test_Transfers_Multi_Reject_First(t *testing.T) {
 		t.Fatalf("Failed to create agent : %s", err)
 	}
 
-	contractKey2, contractLockingScript2, adminKey2, contract2, instrument2 := state.MockInstrument(ctx,
+	contractKey2, contractLockingScript2, adminKey2, adminLockingScript2, contract2, instrument2 := state.MockInstrument(ctx,
 		caches)
 	_, feeLockingScript2, _ := state.MockKey()
-
-	adminLockingScript2, err := adminKey2.LockingScript()
-	if err != nil {
-		t.Fatalf("Failed to create admin locking script : %s", err)
-	}
 
 	agent2, err := NewAgent(contractKey2, DefaultConfig(), contract2, feeLockingScript2,
 		caches.Caches, broadcaster2, nil, nil)
@@ -1778,14 +1738,9 @@ func Test_Transfers_Multi_Reject_Second(t *testing.T) {
 
 	caches := state.StartTestCaches(ctx, t, store, cacher.DefaultConfig(), time.Second)
 
-	contractKey1, contractLockingScript1, adminKey1, contract1, instrument1 := state.MockInstrument(ctx,
+	contractKey1, contractLockingScript1, adminKey1, adminLockingScript1, contract1, instrument1 := state.MockInstrument(ctx,
 		caches)
 	_, feeLockingScript1, _ := state.MockKey()
-
-	adminLockingScript1, err := adminKey1.LockingScript()
-	if err != nil {
-		t.Fatalf("Failed to create admin locking script : %s", err)
-	}
 
 	agent1, err := NewAgent(contractKey1, DefaultConfig(), contract1, feeLockingScript1,
 		caches.Caches, broadcaster1, nil, nil)
@@ -1793,14 +1748,9 @@ func Test_Transfers_Multi_Reject_Second(t *testing.T) {
 		t.Fatalf("Failed to create agent : %s", err)
 	}
 
-	contractKey2, contractLockingScript2, adminKey2, contract2, instrument2 := state.MockInstrument(ctx,
+	contractKey2, contractLockingScript2, adminKey2, adminLockingScript2, contract2, instrument2 := state.MockInstrument(ctx,
 		caches)
 	_, feeLockingScript2, _ := state.MockKey()
-
-	adminLockingScript2, err := adminKey2.LockingScript()
-	if err != nil {
-		t.Fatalf("Failed to create admin locking script : %s", err)
-	}
 
 	agent2, err := NewAgent(contractKey2, DefaultConfig(), contract2, feeLockingScript2,
 		caches.Caches, broadcaster2, nil, nil)

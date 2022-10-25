@@ -144,20 +144,23 @@ func fetchReferenceVote(ctx context.Context, caches *state.Caches,
 	}
 
 	vote.Lock()
-	defer vote.Unlock()
 
 	if vote.Proposal == nil || vote.Result == nil {
-		defer caches.Votes.Release(ctx, contractLockingScript, *vote.VoteTxID)
+		vote.Unlock()
+		caches.Votes.Release(ctx, contractLockingScript, *voteTxID)
 		return nil, platform.NewRejectError(actions.RejectionsMsgMalformed,
 			"RefTxID: Vote Result: Vote Not Completed", now)
 	}
 
 	if vote.Result.Result != "A" {
-		defer caches.Votes.Release(ctx, contractLockingScript, *vote.VoteTxID)
+		result := vote.Result.Result
+		vote.Unlock()
+		caches.Votes.Release(ctx, contractLockingScript, *voteTxID)
 		return nil, platform.NewRejectError(actions.RejectionsMsgMalformed,
-			fmt.Sprintf("RefTxID: Vote Result: Vote Not Accepted: %s", vote.Result.Result), now)
+			fmt.Sprintf("RefTxID: Vote Result: Vote Not Accepted: %s", result), now)
 	}
 
+	vote.Unlock()
 	return vote, nil
 }
 

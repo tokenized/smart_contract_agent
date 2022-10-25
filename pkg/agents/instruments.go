@@ -49,6 +49,7 @@ func (a *Agent) processInstrumentDefinition(ctx context.Context, transaction *st
 	transaction.Unlock()
 
 	contract := a.Contract()
+	defer a.caches.Contracts.Save(ctx, contract)
 	contract.Lock()
 	defer contract.Unlock()
 
@@ -81,8 +82,6 @@ func (a *Agent) processInstrumentDefinition(ctx context.Context, transaction *st
 			platform.NewRejectError(actions.RejectionsMsgMalformed,
 				fmt.Sprintf("payload invalid: %s", err), now)), "reject")
 	}
-
-	defer a.caches.Contracts.Save(ctx, contract)
 
 	contractAddress, err := bitcoin.RawAddressFromLockingScript(agentLockingScript)
 	if err != nil {
@@ -187,7 +186,7 @@ func (a *Agent) processInstrumentDefinition(ctx context.Context, transaction *st
 	}
 	defer a.caches.Transactions.Release(ctx, creationTxID)
 
-	// Set creation tx as processed since all the balances were just settled.
+	// Set creation tx as processed since the instrument is now created.
 	creationTransaction.Lock()
 	creationTransaction.SetProcessed()
 	creationTransaction.Unlock()
@@ -311,9 +310,9 @@ func (a *Agent) processInstrumentModification(ctx context.Context, transaction *
 
 		if !bytes.Equal(vote.Result.InstrumentCode, modification.InstrumentCode) {
 			vote.Unlock()
-			a.caches.Votes.Release(ctx, agentLockingScript, *vote.VoteTxID)
 			instrumentID, _ := protocol.InstrumentIDForRaw(vote.Result.InstrumentType,
 				vote.Result.InstrumentCode)
+			a.caches.Votes.Release(ctx, agentLockingScript, *vote.VoteTxID)
 			return errors.Wrap(a.sendRejection(ctx, transaction,
 				platform.NewRejectError(actions.RejectionsMsgMalformed,
 					fmt.Sprintf("RefTxID: Vote Result: Vote Not For This Instrument: %s",
@@ -342,12 +341,17 @@ func (a *Agent) processInstrumentModification(ctx context.Context, transaction *
 			}
 		}
 
+		voteTxID := *vote.VoteTxID
 		proposed = true
 		proposalType = vote.Proposal.Type
 		votingSystem = vote.Proposal.VoteSystem
 
+		logger.InfoWithFields(ctx, []logger.Field{
+			logger.Stringer("vote_txid", voteTxID),
+		}, "Verified amendments from vote")
+
 		vote.Unlock()
-		a.caches.Votes.Release(ctx, agentLockingScript, *vote.VoteTxID)
+		a.caches.Votes.Release(ctx, agentLockingScript, voteTxID)
 	}
 
 	// Copy creation to prevent modification of the original.
@@ -436,7 +440,7 @@ func (a *Agent) processInstrumentModification(ctx context.Context, transaction *
 	}
 	defer a.caches.Transactions.Release(ctx, creationTxID)
 
-	// Set creation tx as processed since all the balances were just settled.
+	// Set creation tx as processed since the instrument is now modified.
 	creationTransaction.Lock()
 	creationTransaction.SetProcessed()
 	creationTransaction.Unlock()
@@ -624,6 +628,7 @@ func applyInstrumentAmendments(instrumentCreation *actions.InstrumentCreation,
 	permissionBytes []byte, votingSystemsCount int, amendments []*actions.AmendmentField,
 	proposed bool, proposalType, votingSystem uint32, now uint64) error {
 
+	var instrumentPayload instruments.Instrument
 	perms, err := permissions.PermissionsFromBytes(permissionBytes, votingSystemsCount)
 	if err != nil {
 		return fmt.Errorf("Invalid contract permissions : %s", err)
@@ -639,16 +644,73 @@ func applyInstrumentAmendments(instrumentCreation *actions.InstrumentCreation,
 			return platform.NewRejectError(actions.RejectionsMsgMalformed,
 				fmt.Sprintf("Amendments %d: missing field index", i), now)
 		}
+		applied := false
+		var fieldPermissions permissions.Permissions
 
-		fieldPermissions, err := instrumentCreation.ApplyAmendment(fip, amendment.Operation,
-			amendment.Data, perms)
-		if err != nil {
-			return platform.NewRejectError(actions.RejectionsMsgMalformed,
-				fmt.Sprintf("Amendments %d: apply: %s", i, err), now)
+		switch fip[0] {
+		case actions.InstrumentFieldInstrumentType:
+			return platform.NewRejectError(actions.RejectionsInstrumentNotPermitted,
+				"Instrument type amendments prohibited", now)
+
+		case actions.InstrumentFieldInstrumentPermissions:
+			if _, err := permissions.PermissionsFromBytes(amendment.Data,
+				votingSystemsCount); err != nil {
+				return platform.NewRejectError(actions.RejectionsMsgMalformed,
+					fmt.Sprintf("Amendments %d: InstrumentPermissions amendment value is invalid : %s",
+						i, err), now)
+			}
+
+		case actions.InstrumentFieldInstrumentPayload:
+			if len(fip) == 1 {
+				return platform.NewRejectError(actions.RejectionsInstrumentNotPermitted,
+					"Amendments on complex fields (InstrumentPayload) prohibited", now)
+			}
+
+			if instrumentPayload == nil {
+				// Get payload object
+				instrumentPayload, err = instruments.Deserialize([]byte(instrumentCreation.InstrumentType),
+					instrumentCreation.InstrumentPayload)
+				if err != nil {
+					errors.Wrap(err, "payload deserialize")
+				}
+			}
+
+			payloadPermissions, err := perms.SubPermissions(
+				permissions.FieldIndexPath{actions.InstrumentFieldInstrumentPayload}, 0, false)
+
+			fieldPermissions, err = instrumentPayload.ApplyAmendment(fip[1:], amendment.Operation,
+				amendment.Data, payloadPermissions)
+			if err != nil {
+				return platform.NewRejectError(actions.RejectionsMsgMalformed,
+					fmt.Sprintf("Amendments %d: apply: %s", i, err), now)
+			}
+			if len(fieldPermissions) == 0 {
+				return platform.NewRejectError(actions.RejectionsMsgMalformed,
+					fmt.Sprintf("Amendments %d: permissions invalid", i), now)
+			}
+
+			switch instrumentPayload.(type) {
+			case *instruments.Membership:
+				if fip[1] == instruments.MembershipFieldMembershipClass {
+					return platform.NewRejectError(actions.RejectionsInstrumentNotPermitted,
+						"Amendments on MembershipClass prohibited", now)
+				}
+			}
+
+			applied = true // Amendment already applied
 		}
-		if len(fieldPermissions) == 0 {
-			return platform.NewRejectError(actions.RejectionsMsgMalformed,
-				fmt.Sprintf("Amendments %d: permissions invalid", i), now)
+
+		if !applied {
+			fieldPermissions, err = instrumentCreation.ApplyAmendment(fip, amendment.Operation,
+				amendment.Data, perms)
+			if err != nil {
+				return platform.NewRejectError(actions.RejectionsMsgMalformed,
+					fmt.Sprintf("Amendments %d: apply: %s", i, err), now)
+			}
+			if len(fieldPermissions) == 0 {
+				return platform.NewRejectError(actions.RejectionsMsgMalformed,
+					fmt.Sprintf("Amendments %d: permissions invalid", i), now)
+			}
 		}
 
 		// fieldPermissions are the permissions that apply to the field that was changed in the
@@ -694,6 +756,20 @@ func applyInstrumentAmendments(instrumentCreation *actions.InstrumentCreation,
 			return platform.NewRejectError(actions.RejectionsContractPermissions,
 				fmt.Sprintf("Amendments %d: Field %s: not permitted without proposal", i, fip), now)
 		}
+	}
+
+	if instrumentPayload != nil {
+		if err = instrumentPayload.Validate(); err != nil {
+			return platform.NewRejectError(actions.RejectionsMsgMalformed,
+				fmt.Sprintf("Instrument Payload invalid after amendments: %s", err), now)
+		}
+
+		newPayload, err := instrumentPayload.Bytes()
+		if err != nil {
+			return errors.Wrap(err, "serialize payload")
+		}
+
+		instrumentCreation.InstrumentPayload = newPayload
 	}
 
 	// Check validity of updated contract data

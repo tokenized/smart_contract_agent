@@ -232,7 +232,7 @@ func (a *Agent) processContractOffer(ctx context.Context, transaction *state.Tra
 	}
 	defer a.caches.Transactions.Release(ctx, formationTxID)
 
-	// Set formation tx as processed since all the balances were just settled.
+	// Set formation tx as processed since the contract is now formed.
 	formationTransaction.Lock()
 	formationTransaction.SetProcessed()
 	formationTransaction.Unlock()
@@ -362,12 +362,17 @@ func (a *Agent) processContractAmendment(ctx context.Context, transaction *state
 			}
 		}
 
+		voteTxID := *vote.VoteTxID
 		proposed = true
 		proposalType = vote.Proposal.Type
 		votingSystem = vote.Proposal.VoteSystem
 
+		logger.InfoWithFields(ctx, []logger.Field{
+			logger.Stringer("vote_txid", voteTxID),
+		}, "Verified amendments from vote")
+
 		vote.Unlock()
-		a.caches.Votes.Release(ctx, agentLockingScript, *vote.VoteTxID)
+		a.caches.Votes.Release(ctx, agentLockingScript, voteTxID)
 	}
 
 	if amendment.ChangeAdministrationAddress || amendment.ChangeOperatorAddress {
@@ -632,7 +637,7 @@ func (a *Agent) processContractAmendment(ctx context.Context, transaction *state
 	}
 	defer a.caches.Transactions.Release(ctx, formationTxID)
 
-	// Set formation tx as processed since all the balances were just settled.
+	// Set formation tx as processed since the contract is now amended.
 	formationTransaction.Lock()
 	formationTransaction.SetProcessed()
 	formationTransaction.Unlock()
