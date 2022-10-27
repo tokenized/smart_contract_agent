@@ -253,6 +253,13 @@ func (a *Agent) processContractAmendment(ctx context.Context, transaction *state
 
 	logger.Info(ctx, "Processing contract amendment")
 
+	if !amendment.ChangeAdministrationAddress && !amendment.ChangeOperatorAddress &&
+		len(amendment.Amendments) == 0 {
+		return errors.Wrap(a.sendRejection(ctx, transaction,
+			platform.NewRejectError(actions.RejectionsMsgMalformed, "missing amendments", now)),
+			"reject")
+	}
+
 	agentLockingScript := a.LockingScript()
 
 	// First output must be the agent's locking script
@@ -384,6 +391,7 @@ func (a *Agent) processContractAmendment(ctx context.Context, transaction *state
 		transaction.Lock()
 		inputCount := transaction.InputCount()
 		if len(contract.Formation.OperatorAddress) > 0 {
+			// Verify administrator and operator both signed.
 			if inputCount < 2 {
 				transaction.Unlock()
 				return errors.Wrap(a.sendRejection(ctx, transaction,
@@ -412,6 +420,7 @@ func (a *Agent) processContractAmendment(ctx context.Context, transaction *state
 						"wrong", now)), "reject")
 			}
 		} else {
+			// Verify administrator or operator signed.
 			firstInputOutput, err := transaction.InputOutput(0)
 			if err != nil {
 				transaction.Unlock()
@@ -446,13 +455,22 @@ func (a *Agent) processContractAmendment(ctx context.Context, transaction *state
 	}
 
 	// Pull from amendment tx.
-	// Administration change. New administration in second input
+	// Administration change. New administration in next input
 	inputIndex := 1
 	if len(contract.Formation.OperatorAddress) > 0 {
 		inputIndex++
 	}
 
-	var adminLockingScript bitcoin.Script
+	adminAddress, err := bitcoin.DecodeRawAddress(formation.AdminAddress)
+	if err != nil {
+		return errors.Wrap(err, "admin address")
+	}
+
+	adminLockingScript, err := adminAddress.LockingScript()
+	if err != nil {
+		return errors.Wrap(err, "admin locking script")
+	}
+
 	if amendment.ChangeAdministrationAddress {
 		transaction.Lock()
 		inputCount := transaction.InputCount()
@@ -469,7 +487,6 @@ func (a *Agent) processContractAmendment(ctx context.Context, transaction *state
 			return errors.Wrap(err, "new admin input output")
 		}
 
-		adminLockingScript = inputOutput.LockingScript
 		ra, err := bitcoin.RawAddressFromLockingScript(inputOutput.LockingScript)
 		if err != nil {
 			transaction.Unlock()
@@ -478,20 +495,26 @@ func (a *Agent) processContractAmendment(ctx context.Context, transaction *state
 					now)), "reject")
 		}
 
+		logger.InfoWithFields(ctx, []logger.Field{
+			logger.Stringer("previous_admin_locking_script", adminLockingScript),
+			logger.Stringer("new_admin_locking_script", inputOutput.LockingScript),
+		}, "Updating admin locking script")
+		adminLockingScript = inputOutput.LockingScript
 		formation.AdminAddress = ra.Bytes()
 		transaction.Unlock()
 		inputIndex++
 	}
 
-	if len(adminLockingScript) == 0 {
-		adminAddress, err := bitcoin.DecodeRawAddress(formation.AdminAddress)
+	var operatorLockingScript bitcoin.Script
+	if len(formation.OperatorAddress) > 0 {
+		operatorAddress, err := bitcoin.DecodeRawAddress(formation.OperatorAddress)
 		if err != nil {
-			return errors.Wrap(err, "admin address")
+			return errors.Wrap(err, "operator address")
 		}
 
-		adminLockingScript, err = adminAddress.LockingScript()
+		operatorLockingScript, err = operatorAddress.LockingScript()
 		if err != nil {
-			return errors.Wrap(err, "admin locking script")
+			return errors.Wrap(err, "operator locking script")
 		}
 	}
 
@@ -521,6 +544,11 @@ func (a *Agent) processContractAmendment(ctx context.Context, transaction *state
 					now)), "reject")
 		}
 
+		logger.InfoWithFields(ctx, []logger.Field{
+			logger.Stringer("previous_operator_locking_script", operatorLockingScript),
+			logger.Stringer("new_operator_locking_script", inputOutput.LockingScript),
+		}, "Updating operator locking script")
+		operatorLockingScript = inputOutput.LockingScript
 		formation.OperatorAddress = ra.Bytes()
 		transaction.Unlock()
 		inputIndex++
