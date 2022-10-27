@@ -29,14 +29,15 @@ type ContractServicesCache struct {
 }
 
 type ContractServices struct {
-	LockingScript bitcoin.Script             `bsor:"1" json:"locking_script"`
 	Formation     *actions.ContractFormation `bsor:"-" json:"formation"`
-	FormationTxID *bitcoin.Hash32            `bsor:"3" json:"formation_txid"`
+	FormationTxID *bitcoin.Hash32            `bsor:"2" json:"formation_txid"`
 
-	Services []*Service `bsor:"4" json:"service"`
+	Services []*Service `bsor:"3" json:"service"`
 
 	// FormationScript is only used by Serialize to save the Formation value in BSOR.
-	FormationScript bitcoin.Script `bsor:"5" json:"formation_script"`
+	FormationScript bitcoin.Script `bsor:"4" json:"formation_script"`
+
+	contractHash ContractHash `bsor:"-" json:"-"`
 
 	isModified bool
 	sync.Mutex `bsor:"-"`
@@ -72,13 +73,15 @@ func NewContractServicesCache(cache *cacher.Cache) (*ContractServicesCache, erro
 	}, nil
 }
 
-func (c *ContractServicesCache) Update(ctx context.Context, lockingScript bitcoin.Script,
+func (c *ContractServicesCache) Update(ctx context.Context, contractLockingScript bitcoin.Script,
 	formation *actions.ContractFormation, txid bitcoin.Hash32) error {
 
-	path := ContractServicesPath(lockingScript)
+	contractHash := CalculateContractHash(contractLockingScript)
+
+	path := ContractServicesPath(contractHash)
 
 	contractServices := &ContractServices{
-		LockingScript: lockingScript,
+		contractHash:  contractHash,
 		Formation:     formation,
 		FormationTxID: &txid,
 	}
@@ -87,7 +90,7 @@ func (c *ContractServicesCache) Update(ctx context.Context, lockingScript bitcoi
 		publicKey, err := bitcoin.PublicKeyFromBytes(service.PublicKey)
 		if err != nil {
 			logger.WarnWithFields(ctx, []logger.Field{
-				logger.Stringer("contract_locking_script", lockingScript),
+				logger.Stringer("contract_locking_script", contractLockingScript),
 			}, "Invalid public key for contract service %d : %s", i, err)
 			continue
 		}
@@ -108,15 +111,20 @@ func (c *ContractServicesCache) Update(ctx context.Context, lockingScript bitcoi
 	if addedContractServices != contractServices {
 		// Update existing contract services
 		logger.InfoWithFields(ctx, []logger.Field{
-			logger.Stringer("contract_locking_script", lockingScript),
+			logger.Stringer("contract_locking_script", contractLockingScript),
 		}, "Updating existing contract services")
 
 		addedContractServices.Lock()
+		addedContractServices.contractHash = contractHash
 		addedContractServices.Formation = formation
 		addedContractServices.FormationTxID = &txid
 		addedContractServices.Services = contractServices.Services
 		addedContractServices.MarkModified()
 		addedContractServices.Unlock()
+	} else {
+		logger.InfoWithFields(ctx, []logger.Field{
+			logger.Stringer("contract_locking_script", contractLockingScript),
+		}, "New contract services")
 	}
 
 	c.cacher.Release(ctx, path)
@@ -124,9 +132,11 @@ func (c *ContractServicesCache) Update(ctx context.Context, lockingScript bitcoi
 }
 
 func (c *ContractServicesCache) Get(ctx context.Context,
-	lockingScript bitcoin.Script) (*ContractServices, error) {
+	contractLockingScript bitcoin.Script) (*ContractServices, error) {
 
-	item, err := c.cacher.Get(ctx, c.typ, ContractServicesPath(lockingScript))
+	contractHash := CalculateContractHash(contractLockingScript)
+
+	item, err := c.cacher.Get(ctx, c.typ, ContractServicesPath(contractHash))
 	if err != nil {
 		return nil, errors.Wrap(err, "get")
 	}
@@ -135,19 +145,24 @@ func (c *ContractServicesCache) Get(ctx context.Context,
 		return nil, nil
 	}
 
-	return item.(*ContractServices), nil
+	contactServices := item.(*ContractServices)
+	contactServices.Lock()
+	contactServices.contractHash = contractHash
+	contactServices.Unlock()
+
+	return contactServices, nil
 }
 
-func (c *ContractServicesCache) Release(ctx context.Context, lockingScript bitcoin.Script) {
-	c.cacher.Release(ctx, ContractServicesPath(lockingScript))
+func (c *ContractServicesCache) Release(ctx context.Context, contractLockingScript bitcoin.Script) {
+	c.cacher.Release(ctx, ContractServicesPath(CalculateContractHash(contractLockingScript)))
 }
 
-func ContractServicesPath(lockingScript bitcoin.Script) string {
-	return fmt.Sprintf("%s/%s", contractServicesPath, CalculateContractHash(lockingScript))
+func ContractServicesPath(contractHash ContractHash) string {
+	return fmt.Sprintf("%s/%s", contractServicesPath, contractHash)
 }
 
 func (c *ContractServices) Path() string {
-	return ContractServicesPath(c.LockingScript)
+	return ContractServicesPath(c.contractHash)
 }
 
 func (c *ContractServices) MarkModified() {

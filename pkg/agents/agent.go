@@ -7,6 +7,7 @@ import (
 
 	"github.com/tokenized/logger"
 	"github.com/tokenized/pkg/bitcoin"
+	"github.com/tokenized/pkg/storage"
 	"github.com/tokenized/pkg/wire"
 	"github.com/tokenized/smart_contract_agent/internal/platform"
 	"github.com/tokenized/smart_contract_agent/internal/state"
@@ -44,6 +45,7 @@ type Agent struct {
 	lockingScript    bitcoin.Script
 	feeLockingScript bitcoin.Script
 
+	store  storage.CopyList
 	caches *state.Caches
 
 	broadcaster Broadcaster
@@ -79,8 +81,8 @@ type TransactionWithOutputs interface {
 }
 
 func NewAgent(key bitcoin.Key, config Config, contract *state.Contract,
-	feeLockingScript bitcoin.Script, caches *state.Caches, broadcaster Broadcaster,
-	fetcher Fetcher, headers BlockHeaders) (*Agent, error) {
+	feeLockingScript bitcoin.Script, caches *state.Caches, store storage.CopyList,
+	broadcaster Broadcaster, fetcher Fetcher, headers BlockHeaders) (*Agent, error) {
 
 	contract.Lock()
 	lockingScript := contract.LockingScript
@@ -93,6 +95,7 @@ func NewAgent(key bitcoin.Key, config Config, contract *state.Contract,
 		lockingScript:    lockingScript,
 		feeLockingScript: feeLockingScript,
 		caches:           caches,
+		store:            store,
 		broadcaster:      broadcaster,
 		fetcher:          fetcher,
 		headers:          headers,
@@ -135,6 +138,13 @@ func (a *Agent) ContractIsExpired(now uint64) bool {
 	defer a.contract.Unlock()
 
 	return a.contract.IsExpired(now)
+}
+
+func (a *Agent) MovedTxID() *bitcoin.Hash32 {
+	a.contract.Lock()
+	defer a.contract.Unlock()
+
+	return a.contract.MovedTxID
 }
 
 type IdentityOracle struct {
@@ -363,6 +373,7 @@ func (a *Agent) processAction(ctx context.Context, transaction *state.Transactio
 		return a.processContractFormation(ctx, transaction, act, now)
 
 	case *actions.ContractAddressChange:
+		return a.processContractAddressChange(ctx, transaction, act, now)
 
 	case *actions.BodyOfAgreementOffer:
 		return a.processBodyOfAgreementOffer(ctx, transaction, act, now)

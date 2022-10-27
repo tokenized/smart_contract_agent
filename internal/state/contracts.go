@@ -8,8 +8,10 @@ import (
 	"io"
 	"reflect"
 	"sync"
+	"time"
 
 	"github.com/tokenized/cacher"
+	"github.com/tokenized/logger"
 	"github.com/tokenized/pkg/bitcoin"
 	"github.com/tokenized/pkg/bsor"
 	"github.com/tokenized/pkg/storage"
@@ -40,12 +42,16 @@ type Contract struct {
 
 	InstrumentCount uint64 `bsor:"7" json:"instrument_count"`
 
+	MovedTxID *bitcoin.Hash32 `bsor:"8" json:"moved_txid"`
+
+	FrozenUntil *uint64 `bsor:"9" json:"frozen_until,omitempty"`
+
 	// FormationScript is only used by Serialize to save the Formation value in BSOR.
-	FormationScript bitcoin.Script `bsor:"8" json:"formation_script"`
+	FormationScript bitcoin.Script `bsor:"10" json:"formation_script"`
 
 	// BodyOfAgreementFormationScript is only used by Serialize to save the BodyOfAgreementFormation
 	// value in BSOR.
-	BodyOfAgreementFormationScript bitcoin.Script `bsor:"9" json:"body_of_agreement_formation_script"`
+	BodyOfAgreementFormationScript bitcoin.Script `bsor:"11" json:"body_of_agreement_formation_script"`
 
 	isModified bool
 	sync.Mutex `bsor:"-"`
@@ -80,9 +86,49 @@ func NewContractCache(cache *cacher.Cache) (*ContractCache, error) {
 	}, nil
 }
 
-func (c *ContractCache) List(ctx context.Context,
-	store storage.StreamStorage) ([]*ContractLookup, error) {
+func CopyContractData(ctx context.Context, store storage.CopyList,
+	fromScript, toScript bitcoin.Script) error {
 
+	// TODO Check if any of these objects are in the cache and modified. --ce
+
+	fromHash := CalculateContractHash(fromScript)
+	toHash := CalculateContractHash(toScript)
+
+	start := time.Now()
+
+	from := fmt.Sprintf("%s/%s", instrumentPath, fromHash)
+	to := fmt.Sprintf("%s/%s", instrumentPath, toHash)
+	if err := CopyRecursive(ctx, store, from, to); err != nil {
+		return errors.Wrap(err, "copy instruments")
+	}
+
+	from = fmt.Sprintf("%s/%s", balancePath, fromHash)
+	to = fmt.Sprintf("%s/%s", balancePath, toHash)
+	if err := CopyRecursive(ctx, store, from, to); err != nil {
+		return errors.Wrap(err, "copy balances")
+	}
+
+	from = fmt.Sprintf("%s/%s", votePath, fromHash)
+	to = fmt.Sprintf("%s/%s", votePath, toHash)
+	if err := CopyRecursive(ctx, store, from, to); err != nil {
+		return errors.Wrap(err, "copy votes")
+	}
+
+	from = fmt.Sprintf("%s/%s", subscriptionPath, fromHash)
+	to = fmt.Sprintf("%s/%s", subscriptionPath, toHash)
+	if err := CopyRecursive(ctx, store, from, to); err != nil {
+		return errors.Wrap(err, "copy subscriptions")
+	}
+
+	logger.InfoWithFields(ctx, []logger.Field{
+		logger.MillisecondsFromNano("elapsed_ms", time.Since(start).Nanoseconds()),
+		logger.Stringer("from_locking_script", fromScript),
+		logger.Stringer("to_locking_script", toScript),
+	}, "Copied contract data")
+	return nil
+}
+
+func (c *ContractCache) List(ctx context.Context, store storage.List) ([]*ContractLookup, error) {
 	paths, err := store.List(ctx, contractPath)
 	if err != nil {
 		return nil, errors.Wrap(err, "list")

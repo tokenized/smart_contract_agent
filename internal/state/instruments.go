@@ -30,19 +30,20 @@ type InstrumentCache struct {
 
 // Instrument represents the intruments created under a contract and are stored with the contract.
 type Instrument struct {
-	ContractHash   ContractHash                `bsor:"1" json:"contract_hash"`
-	InstrumentType [3]byte                     `bsor:"2" json:"instrument_type"`
-	InstrumentCode InstrumentCode              `bsor:"3" json:"instrument_id"`
+	InstrumentType [3]byte                     `bsor:"1" json:"instrument_type"`
+	InstrumentCode InstrumentCode              `bsor:"2" json:"instrument_id"`
 	Creation       *actions.InstrumentCreation `bsor:"-" json:"creation`
-	CreationTxID   *bitcoin.Hash32             `bsor:"5" json:"creation_txid"`
+	CreationTxID   *bitcoin.Hash32             `bsor:"4" json:"creation_txid"`
 
-	FrozenUntil uint64 `bsor:"6" json:"frozen_until,omitempty"`
+	FrozenUntil *uint64 `bsor:"5" json:"frozen_until,omitempty"`
 
 	// CreationScript is only used by Serialize to save the Creation value in BSOR.
-	CreationScript bitcoin.Script `bsor:"7" json:"creation_script"`
+	CreationScript bitcoin.Script `bsor:"6" json:"creation_script"`
 
 	// payload is used to cache the deserialized value of the payload in Creation.
 	payload instruments.Instrument `json:"instrument"`
+
+	contractHash ContractHash `bsor:"-" json:"-"`
 
 	isModified bool
 	sync.Mutex `bsor:"-"`
@@ -72,20 +73,32 @@ func NewInstrumentCache(cache *cacher.Cache) (*InstrumentCache, error) {
 	}, nil
 }
 
-func (c *InstrumentCache) Add(ctx context.Context, instrument *Instrument) (*Instrument, error) {
+func (c *InstrumentCache) Add(ctx context.Context, contractLockingScript bitcoin.Script,
+	instrument *Instrument) (*Instrument, error) {
+
+	instrument.contractHash = CalculateContractHash(contractLockingScript)
+
 	item, err := c.cacher.Add(ctx, c.typ, instrument)
 	if err != nil {
 		return nil, errors.Wrap(err, "add")
 	}
 
-	return item.(*Instrument), nil
+	result := item.(*Instrument)
+	if result != instrument {
+		result.Lock()
+		result.contractHash = instrument.contractHash
+		result.Unlock()
+	}
+
+	return result, nil
 }
 
 func (c *InstrumentCache) Get(ctx context.Context, contractLockingScript bitcoin.Script,
 	instrumentCode InstrumentCode) (*Instrument, error) {
 
-	item, err := c.cacher.Get(ctx, c.typ,
-		InstrumentPath(CalculateContractHash(contractLockingScript), instrumentCode))
+	contractHash := CalculateContractHash(contractLockingScript)
+
+	item, err := c.cacher.Get(ctx, c.typ, InstrumentPath(contractHash, instrumentCode))
 	if err != nil {
 		return nil, errors.Wrap(err, "get")
 	}
@@ -94,7 +107,12 @@ func (c *InstrumentCache) Get(ctx context.Context, contractLockingScript bitcoin
 		return nil, nil
 	}
 
-	return item.(*Instrument), nil
+	instrument := item.(*Instrument)
+	instrument.Lock()
+	instrument.contractHash = contractHash
+	instrument.Unlock()
+
+	return instrument, nil
 }
 
 func (c *InstrumentCache) Release(ctx context.Context, contractLockingScript bitcoin.Script,
@@ -151,7 +169,7 @@ func (i *Instrument) TransfersPermitted() bool {
 }
 
 func (i *Instrument) IsFrozen(now uint64) bool {
-	return i.FrozenUntil >= now
+	return i.FrozenUntil != nil && (*i.FrozenUntil == 0 || *i.FrozenUntil >= now)
 }
 
 func (i *Instrument) IsExpired(now uint64) bool {
@@ -219,7 +237,7 @@ func InstrumentPath(contractHash ContractHash, instrumentCode InstrumentCode) st
 }
 
 func (i *Instrument) Path() string {
-	return InstrumentPath(i.ContractHash, i.InstrumentCode)
+	return InstrumentPath(i.contractHash, i.InstrumentCode)
 }
 
 func (i *Instrument) MarkModified() {

@@ -2,13 +2,16 @@ package state
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/binary"
 	"sync"
 
-	"github.com/pkg/errors"
 	"github.com/tokenized/cacher"
 	"github.com/tokenized/pkg/bitcoin"
+	"github.com/tokenized/pkg/storage"
+
+	"github.com/pkg/errors"
 )
 
 var (
@@ -152,5 +155,26 @@ func (id *InstrumentCode) UnmarshalText(text []byte) error {
 	}
 
 	*id = InstrumentCode(*h)
+	return nil
+}
+
+func CopyRecursive(ctx context.Context, store storage.CopyList, fromPrefix, toPrefix string) error {
+	items, err := store.List(ctx, fromPrefix)
+	if err != nil {
+		return errors.Wrap(err, "list")
+	}
+
+	println("Listed", len(items), "items")
+
+	fromPrefixLength := len(fromPrefix)
+
+	for i, from := range items {
+		to := toPrefix + from[fromPrefixLength:]
+		println("copy from", from, to)
+		if err := store.Copy(ctx, from, to); err != nil {
+			return errors.Wrapf(err, "copy %d/%d", i, len(items))
+		}
+	}
+
 	return nil
 }

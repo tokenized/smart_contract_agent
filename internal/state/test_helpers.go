@@ -172,7 +172,6 @@ func MockInstrumentOnly(ctx context.Context, caches *TestCaches,
 	authorizedQuantity := uint64(1000000)
 
 	instrument := &Instrument{
-		ContractHash: CalculateContractHash(contractLockingScript),
 		Creation: &actions.InstrumentCreation{
 			// InstrumentIndex                  uint64   `protobuf:"varint,2,opt,name=InstrumentIndex,proto3" json:"InstrumentIndex,omitempty"`
 			// InstrumentPermissions            []byte   `protobuf:"bytes,3,opt,name=InstrumentPermissions,proto3" json:"InstrumentPermissions,omitempty"`
@@ -196,7 +195,7 @@ func MockInstrumentOnly(ctx context.Context, caches *TestCaches,
 	rand.Read(instrument.CreationTxID[:])
 	copy(instrument.InstrumentType[:], []byte(instruments.CodeCurrency))
 
-	addedInstrument, err := caches.Caches.Instruments.Add(ctx, instrument)
+	addedInstrument, err := caches.Caches.Instruments.Add(ctx, contractLockingScript, instrument)
 	if err != nil {
 		panic(fmt.Sprintf("Failed to add instrument : %s", err))
 	}
@@ -242,7 +241,6 @@ func MockInstrument(ctx context.Context,
 	authorizedQuantity := uint64(1000000)
 
 	instrument := &Instrument{
-		ContractHash: CalculateContractHash(contractLockingScript),
 		Creation: &actions.InstrumentCreation{
 			// InstrumentIndex                  uint64   `protobuf:"varint,2,opt,name=InstrumentIndex,proto3" json:"InstrumentIndex,omitempty"`
 			// InstrumentPermissions            []byte   `protobuf:"bytes,3,opt,name=InstrumentPermissions,proto3" json:"InstrumentPermissions,omitempty"`
@@ -266,7 +264,7 @@ func MockInstrument(ctx context.Context,
 	rand.Read(instrument.CreationTxID[:])
 	copy(instrument.InstrumentType[:], []byte(instruments.CodeCurrency))
 
-	addedInstrument, err := caches.Caches.Instruments.Add(ctx, instrument)
+	addedInstrument, err := caches.Caches.Instruments.Add(ctx, contractLockingScript, instrument)
 	if err != nil {
 		panic(fmt.Sprintf("Failed to add instrument : %s", err))
 	}
@@ -340,7 +338,6 @@ func MockInstrumentWithOracle(ctx context.Context,
 	authorizedQuantity := uint64(1000000)
 
 	instrument := &Instrument{
-		ContractHash: CalculateContractHash(contractLockingScript),
 		Creation: &actions.InstrumentCreation{
 			// InstrumentIndex                  uint64   `protobuf:"varint,2,opt,name=InstrumentIndex,proto3" json:"InstrumentIndex,omitempty"`
 			// InstrumentPermissions            []byte   `protobuf:"bytes,3,opt,name=InstrumentPermissions,proto3" json:"InstrumentPermissions,omitempty"`
@@ -364,7 +361,7 @@ func MockInstrumentWithOracle(ctx context.Context,
 	rand.Read(instrument.CreationTxID[:])
 	copy(instrument.InstrumentType[:], []byte(instruments.CodeCurrency))
 
-	addedInstrument, err := caches.Caches.Instruments.Add(ctx, instrument)
+	addedInstrument, err := caches.Caches.Instruments.Add(ctx, contractLockingScript, instrument)
 	if err != nil {
 		panic(fmt.Sprintf("Failed to add instrument : %s", err))
 	}
@@ -487,7 +484,6 @@ func MockVoteContractAmendmentCompleted(ctx context.Context, caches *TestCaches,
 	now := uint64(time.Now().UnixNano())
 
 	vote := &Vote{
-		ContractLockingScript: contractLockingScript,
 		Proposal: &actions.Proposal{
 			Type: 0, // Referendum
 			// InstrumentType       string
@@ -589,7 +585,7 @@ func MockVoteContractAmendmentCompleted(ctx context.Context, caches *TestCaches,
 		panic(fmt.Sprintf("Failed to add result tx : %s", err))
 	}
 
-	addedVote, err := caches.Caches.Votes.Add(ctx, vote)
+	addedVote, err := caches.Caches.Votes.Add(ctx, contractLockingScript, vote)
 	if err != nil {
 		panic(fmt.Sprintf("Failed to add contract : %s", err))
 	}
@@ -609,7 +605,6 @@ func MockVoteInstrumentAmendmentCompleted(ctx context.Context, caches *TestCache
 	now := uint64(time.Now().UnixNano())
 
 	vote := &Vote{
-		ContractLockingScript: contractLockingScript,
 		Proposal: &actions.Proposal{
 			Type:                0, // Referendum
 			InstrumentType:      instrumentType,
@@ -711,7 +706,7 @@ func MockVoteInstrumentAmendmentCompleted(ctx context.Context, caches *TestCache
 		panic(fmt.Sprintf("Failed to add result tx : %s", err))
 	}
 
-	addedVote, err := caches.Caches.Votes.Add(ctx, vote)
+	addedVote, err := caches.Caches.Votes.Add(ctx, contractLockingScript, vote)
 	if err != nil {
 		panic(fmt.Sprintf("Failed to add contract : %s", err))
 	}

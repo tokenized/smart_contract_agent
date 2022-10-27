@@ -47,6 +47,12 @@ func (a *Agent) processBodyOfAgreementOffer(ctx context.Context, transaction *st
 			platform.NewRejectError(actions.RejectionsContractDoesNotExist, "", now)), "reject")
 	}
 
+	if contract.MovedTxID != nil {
+		return errors.Wrap(a.sendRejection(ctx, transaction,
+			platform.NewRejectError(actions.RejectionsContractMoved, contract.MovedTxID.String(),
+				now)), "reject")
+	}
+
 	if contract.Formation.ContractExpiration != 0 && contract.Formation.ContractExpiration < now {
 		return errors.Wrap(a.sendRejection(ctx, transaction,
 			platform.NewRejectError(actions.RejectionsContractExpired, "", now)), "reject")
@@ -201,6 +207,12 @@ func (a *Agent) processBodyOfAgreementAmendment(ctx context.Context, transaction
 			platform.NewRejectError(actions.RejectionsContractDoesNotExist, "", now)), "reject")
 	}
 
+	if contract.MovedTxID != nil {
+		return errors.Wrap(a.sendRejection(ctx, transaction,
+			platform.NewRejectError(actions.RejectionsContractMoved, contract.MovedTxID.String(),
+				now)), "reject")
+	}
+
 	if contract.BodyOfAgreementFormation == nil {
 		return errors.Wrap(a.sendRejection(ctx, transaction,
 			platform.NewRejectError(actions.RejectionsAgreementDoesNotExist, "", now)), "reject")
@@ -208,7 +220,6 @@ func (a *Agent) processBodyOfAgreementAmendment(ctx context.Context, transaction
 
 	authorizingAddress, err := bitcoin.RawAddressFromLockingScript(authorizingLockingScript)
 	if err != nil {
-		transaction.Unlock()
 		return errors.Wrap(err, "authorizing address")
 	}
 

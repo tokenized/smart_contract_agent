@@ -120,6 +120,12 @@ func (a *Agent) processSettlementRequest(ctx context.Context, transaction *state
 				"settlement request not from previous contract", now)), "reject")
 	}
 
+	if movedTxID := a.MovedTxID(); movedTxID != nil {
+		return errors.Wrap(a.sendRejection(ctx, transaction,
+			platform.NewRejectError(actions.RejectionsContractMoved, movedTxID.String(), now)),
+			"reject")
+	}
+
 	isFinalContract := transferContracts.IsFinalContract()
 
 	headers := platform.NewHeadersCache(a.headers)

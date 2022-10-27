@@ -103,7 +103,7 @@ func main() {
 	}
 
 	conductor := conductor.NewConductor(cfg.BaseKey, cfg.Agents, feeLockingScript, spyNode,
-		caches, NewSpyNodeBroadcaster(spyNode), spyNode, platform.NewHeaders(spyNode))
+		caches, store, NewSpyNodeBroadcaster(spyNode), spyNode, platform.NewHeaders(spyNode))
 	spyNode.RegisterHandler(conductor)
 
 	var spyNodeWait, cacheWait sync.WaitGroup

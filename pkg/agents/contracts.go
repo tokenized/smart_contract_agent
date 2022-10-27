@@ -287,9 +287,14 @@ func (a *Agent) processContractAmendment(ctx context.Context, transaction *state
 			platform.NewRejectError(actions.RejectionsContractDoesNotExist, "", now)), "reject")
 	}
 
+	if contract.MovedTxID != nil {
+		return errors.Wrap(a.sendRejection(ctx, transaction,
+			platform.NewRejectError(actions.RejectionsContractMoved, contract.MovedTxID.String(),
+				now)), "reject")
+	}
+
 	authorizingAddress, err := bitcoin.RawAddressFromLockingScript(authorizingLockingScript)
 	if err != nil {
-		transaction.Unlock()
 		return errors.Wrap(err, "authorizing address")
 	}
 
@@ -712,6 +717,177 @@ func (a *Agent) processContractFormation(ctx context.Context, transaction *state
 			logger.Timestamp("timestamp", int64(formation.Timestamp)),
 			logger.Timestamp("previous_timestamp", previousTimeStamp),
 		}, "Updating contract formation")
+	}
+
+	return nil
+}
+
+func (a *Agent) processContractAddressChange(ctx context.Context, transaction *state.Transaction,
+	addressChange *actions.ContractAddressChange, now uint64) error {
+
+	logger.Info(ctx, "Processing contract address change")
+
+	agentLockingScript := a.LockingScript()
+
+	transaction.Lock()
+
+	txid := transaction.TxID()
+
+	contractOutput := transaction.Output(0)
+	if !agentLockingScript.Equal(contractOutput.LockingScript) {
+		transaction.Unlock()
+		logger.WarnWithFields(ctx, []logger.Field{
+			logger.Stringer("contract_locking_script", contractOutput.LockingScript),
+		}, "Contract output locking script is wrong")
+		return nil // Not for this agent's contract
+	}
+
+	if transaction.OutputCount() < 2 {
+		transaction.Unlock()
+		return errors.Wrap(a.sendRejection(ctx, transaction,
+			platform.NewRejectError(actions.RejectionsMsgMalformed,
+				"second output must be new contract locking script", now)), "reject")
+	}
+	contractOutput2 := transaction.Output(1)
+	newContractLockingScript := contractOutput2.LockingScript
+
+	inputOutput, err := transaction.InputOutput(0)
+	if err != nil {
+		transaction.Unlock()
+		return errors.Wrapf(err, "input locking script %d", 0)
+	}
+	authorizingLockingScript := inputOutput.LockingScript
+
+	transaction.Unlock()
+
+	contract := a.Contract()
+	defer a.caches.Contracts.Save(ctx, contract)
+	contract.Lock()
+	defer contract.Unlock()
+
+	if contract.Formation == nil {
+		return errors.Wrap(a.sendRejection(ctx, transaction,
+			platform.NewRejectError(actions.RejectionsContractDoesNotExist, "", now)), "reject")
+	}
+
+	if contract.MovedTxID != nil {
+		return errors.Wrap(a.sendRejection(ctx, transaction,
+			platform.NewRejectError(actions.RejectionsContractMoved, contract.MovedTxID.String(),
+				now)), "reject")
+	}
+
+	authorizingAddress, err := bitcoin.RawAddressFromLockingScript(authorizingLockingScript)
+	if err != nil {
+		return errors.Wrap(err, "authorizing address")
+	}
+
+	if len(contract.Formation.MasterAddress) == 0 ||
+		!bytes.Equal(contract.Formation.MasterAddress, authorizingAddress.Bytes()) {
+		return errors.Wrap(a.sendRejection(ctx, transaction,
+			platform.NewRejectError(actions.RejectionsUnauthorizedAddress, "", now)), "reject")
+	}
+
+	newAddress, err := bitcoin.DecodeRawAddress(addressChange.NewContractAddress)
+	if err != nil {
+		return errors.Wrap(a.sendRejection(ctx, transaction,
+			platform.NewRejectError(actions.RejectionsMsgMalformed,
+				fmt.Sprintf("NewContractAddress: %s", err), now)), "reject")
+	}
+
+	newLockingScript, err := newAddress.LockingScript()
+	if err != nil {
+		return errors.Wrap(err, "new locking script")
+	}
+
+	if !newContractLockingScript.Equal(newLockingScript) {
+		return errors.Wrap(a.sendRejection(ctx, transaction,
+			platform.NewRejectError(actions.RejectionsMsgMalformed,
+				"second output must be new contract locking script", now)), "reject")
+	}
+
+	newContract, err := a.caches.Contracts.Get(ctx, newLockingScript)
+	if err != nil {
+		return errors.Wrap(err, "get new contract")
+	}
+
+	if newContract != nil {
+		defer a.caches.Contracts.Release(ctx, newLockingScript)
+		defer a.caches.Contracts.Save(ctx, newContract)
+		newContract.Lock()
+		defer newContract.Unlock()
+
+		if newContract.Formation != nil {
+			return errors.Wrap(a.sendRejection(ctx, transaction,
+				platform.NewRejectError(actions.RejectionsContractExists,
+					"second output must be new contract locking script", now)), "reject")
+		}
+	}
+
+	logger.InfoWithFields(ctx, []logger.Field{
+		logger.Stringer("new_contract_locking_script", newLockingScript),
+	}, "Accepting contract address change")
+
+	contract.MovedTxID = &txid
+
+	if newContract == nil {
+		logger.InfoWithFields(ctx, []logger.Field{
+			logger.Stringer("new_contract_locking_script", newLockingScript),
+		}, "New contract not found in this system")
+		return nil
+	}
+
+	logger.InfoWithFields(ctx, []logger.Field{
+		logger.Stringer("new_contract_locking_script", newLockingScript),
+	}, "Moving contract data to new contract in this system")
+
+	isTest := a.IsTest()
+	copyScript, err := protocol.Serialize(contract.Formation, isTest)
+	if err != nil {
+		return errors.Wrap(err, "serialize contract formation")
+	}
+
+	action, err := protocol.Deserialize(copyScript, isTest)
+	if err != nil {
+		return errors.Wrap(err, "deserialize contract formation")
+	}
+
+	formation, ok := action.(*actions.ContractFormation)
+	if !ok {
+		return errors.New("ContractFormation script is wrong type")
+	}
+	newContract.Formation = formation
+	newContract.FormationTxID = contract.FormationTxID
+
+	copyBodyScript, err := protocol.Serialize(contract.BodyOfAgreementFormation, isTest)
+	if err != nil {
+		return errors.Wrap(err, "serialize body of agreement formation")
+	}
+
+	bodyAction, err := protocol.Deserialize(copyBodyScript, isTest)
+	if err != nil {
+		return errors.Wrap(err, "deserialize body of agreement formation")
+	}
+
+	bodyFormation, ok := bodyAction.(*actions.BodyOfAgreementFormation)
+	if !ok {
+		return errors.New("BodyOfAgreementFormation script is wrong type")
+	}
+	newContract.BodyOfAgreementFormation = bodyFormation
+	newContract.BodyOfAgreementFormationTxID = contract.BodyOfAgreementFormationTxID
+
+	newContract.InstrumentCount = contract.InstrumentCount
+	newContract.FrozenUntil = contract.FrozenUntil
+
+	if newContract.Formation != nil && newContract.FormationTxID != nil {
+		if err := a.caches.Services.Update(ctx, newLockingScript, newContract.Formation,
+			*newContract.FormationTxID); err != nil {
+			return errors.Wrap(err, "update services")
+		}
+	}
+
+	if err := state.CopyContractData(ctx, a.store, agentLockingScript,
+		newLockingScript); err != nil {
+		return errors.Wrap(err, "copy contract data")
 	}
 
 	return nil

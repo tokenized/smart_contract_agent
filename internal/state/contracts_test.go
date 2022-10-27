@@ -21,7 +21,6 @@ func Test_Contracts(t *testing.T) {
 	store := storage.NewMockStorage()
 
 	_, contractLockingScript, contractAddress := MockKey()
-	contractHash := CalculateContractHash(contractLockingScript)
 
 	cacherConfig := cacher.DefaultConfig()
 	cacherConfig.Expiration = config.Duration{time.Millisecond * 50}
@@ -108,7 +107,6 @@ func Test_Contracts(t *testing.T) {
 
 		instrument := &Instrument{
 			InstrumentCode: code,
-			ContractHash:   contractHash,
 			Creation: &actions.InstrumentCreation{
 				InstrumentCode:    []byte(code[:]),
 				InstrumentIndex:   uint64(i),
@@ -122,7 +120,7 @@ func Test_Contracts(t *testing.T) {
 		copy(instrument.InstrumentType[:], []byte(instruments.CodeCurrency))
 		rand.Read(instrument.CreationTxID[:])
 
-		addedInstrument, err := instrumentCache.Add(ctx, instrument)
+		addedInstrument, err := instrumentCache.Add(ctx, contractLockingScript, instrument)
 		if err != nil {
 			t.Fatalf("Failed to add instrument : %s", err)
 		}

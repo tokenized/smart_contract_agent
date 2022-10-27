@@ -68,6 +68,12 @@ func (a *Agent) processInstrumentDefinition(ctx context.Context, transaction *st
 			platform.NewRejectError(actions.RejectionsContractDoesNotExist, "", now)), "reject")
 	}
 
+	if contract.MovedTxID != nil {
+		return errors.Wrap(a.sendRejection(ctx, transaction,
+			platform.NewRejectError(actions.RejectionsContractMoved, contract.MovedTxID.String(),
+				now)), "reject")
+	}
+
 	// Verify instrument payload is valid.
 	payload, err := instruments.Deserialize([]byte(definition.InstrumentType),
 		definition.InstrumentPayload)
@@ -113,7 +119,6 @@ func (a *Agent) processInstrumentDefinition(ctx context.Context, transaction *st
 	creation.InstrumentRevision = 0
 
 	newInstrument := &state.Instrument{
-		ContractHash:   state.CalculateContractHash(agentLockingScript),
 		InstrumentType: instrumentType,
 		InstrumentCode: instrumentCode,
 		Creation:       creation,
@@ -121,7 +126,7 @@ func (a *Agent) processInstrumentDefinition(ctx context.Context, transaction *st
 	}
 
 	// Add instrument
-	instrument, err := a.caches.Instruments.Add(ctx, newInstrument)
+	instrument, err := a.caches.Instruments.Add(ctx, agentLockingScript, newInstrument)
 	if err != nil {
 		return errors.Wrap(err, "add instrument")
 	}
@@ -241,6 +246,13 @@ func (a *Agent) processInstrumentModification(ctx context.Context, transaction *
 		contract.Unlock()
 		return errors.Wrap(a.sendRejection(ctx, transaction,
 			platform.NewRejectError(actions.RejectionsContractDoesNotExist, "", now)), "reject")
+	}
+
+	if contract.MovedTxID != nil {
+		contract.Unlock()
+		return errors.Wrap(a.sendRejection(ctx, transaction,
+			platform.NewRejectError(actions.RejectionsContractMoved, contract.MovedTxID.String(),
+				now)), "reject")
 	}
 
 	adminAddressBytes := contract.Formation.AdminAddress
@@ -485,7 +497,6 @@ func (a *Agent) processInstrumentCreation(ctx context.Context, transaction *stat
 	copy(instrumentCode[:], creation.InstrumentCode)
 
 	newInstrument := &state.Instrument{
-		ContractHash:   state.CalculateContractHash(agentLockingScript),
 		InstrumentType: instrumentType,
 		InstrumentCode: instrumentCode,
 		Creation:       creation,
@@ -496,7 +507,7 @@ func (a *Agent) processInstrumentCreation(ctx context.Context, transaction *stat
 	defer a.contract.Unlock()
 
 	// Find existing matching instrument
-	instrument, err := a.caches.Instruments.Add(ctx, newInstrument)
+	instrument, err := a.caches.Instruments.Add(ctx, agentLockingScript, newInstrument)
 	if err != nil {
 		return errors.Wrap(err, "add instrument")
 	}
@@ -509,23 +520,31 @@ func (a *Agent) processInstrumentCreation(ctx context.Context, transaction *stat
 
 	if instrument == newInstrument {
 		// Instrument was created by Add.
-		logger.WarnWithFields(ctx, []logger.Field{
+		logger.InfoWithFields(ctx, []logger.Field{
 			logger.Timestamp("timestamp", int64(creation.Timestamp)),
 		}, "Initial instrument creation")
+	} else if instrument.Creation == nil {
+		logger.WarnWithFields(ctx, []logger.Field{
+			logger.Timestamp("timestamp", int64(creation.Timestamp)),
+		}, "Replacing empty instrument creation")
+
+		instrument.Creation = creation
+		instrument.CreationTxID = &txid
+		instrument.MarkModified()
 	} else if creation.Timestamp < instrument.Creation.Timestamp {
-		// Instrument already existed.
+		// Newer version of instrument already existed.
 		logger.WarnWithFields(ctx, []logger.Field{
 			logger.Timestamp("timestamp", int64(creation.Timestamp)),
 			logger.Timestamp("existing_timestamp", int64(instrument.Creation.Timestamp)),
 		}, "Older instrument creation")
 		return nil
-	} else if creation.Timestamp < instrument.Creation.Timestamp {
+	} else if creation.Timestamp == instrument.Creation.Timestamp {
 		logger.InfoWithFields(ctx, []logger.Field{
 			logger.Timestamp("timestamp", int64(creation.Timestamp)),
 		}, "Already processed instrument creation")
 		return nil
 	} else {
-		logger.WarnWithFields(ctx, []logger.Field{
+		logger.InfoWithFields(ctx, []logger.Field{
 			logger.Timestamp("timestamp", int64(creation.Timestamp)),
 			logger.Timestamp("previous_timestamp", int64(instrument.Creation.Timestamp)),
 		}, "Updating instrument creation")
@@ -533,6 +552,7 @@ func (a *Agent) processInstrumentCreation(ctx context.Context, transaction *stat
 
 		instrument.Creation = creation
 		instrument.CreationTxID = &txid
+		instrument.MarkModified()
 	}
 
 	if err := a.updateAdminBalance(ctx, transaction, creation, txid,

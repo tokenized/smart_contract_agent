@@ -100,7 +100,7 @@ func main() {
 	broadcaster := NewNoopBroadcaster()
 
 	conductor := conductor.NewConductor(cfg.BaseKey, cfg.Agents, feeLockingScript, nil, caches,
-		broadcaster, woc, woc)
+		store, broadcaster, woc, woc)
 
 	var cacheWait, loadWait sync.WaitGroup
 

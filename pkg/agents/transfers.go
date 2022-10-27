@@ -53,11 +53,14 @@ func (a *Agent) processTransfer(ctx context.Context, transaction *state.Transact
 		return nil // Wait for settlement request message
 	}
 
+	if movedTxID := a.MovedTxID(); movedTxID != nil {
+		return errors.Wrap(a.sendRejection(ctx, transaction,
+			platform.NewRejectError(actions.RejectionsContractMoved, movedTxID.String(), now)),
+			"reject")
+	}
+
 	// Check if contract is frozen.
 	if a.ContractIsExpired(now) {
-		logger.WarnWithFields(ctx, []logger.Field{
-			logger.Timestamp("now", int64(now)),
-		}, "Contract is expired")
 		return errors.Wrap(a.sendRejection(ctx, transaction,
 			platform.NewRejectErrorWithOutputIndex(actions.RejectionsContractExpired, "", now,
 				transferContracts.FirstContractOutputIndex)), "reject")

@@ -41,8 +41,8 @@ func Test_Contracts_Offer_Invalid(t *testing.T) {
 		t.Fatalf("Failed to add contract : %s", err)
 	}
 
-	agent, err := NewAgent(contractKey, DefaultConfig(), contract, feeLockingScript,
-		caches.Caches, broadcaster, nil, nil)
+	agent, err := NewAgent(contractKey, DefaultConfig(), contract, feeLockingScript, caches.Caches,
+		store, broadcaster, nil, nil)
 	if err != nil {
 		t.Fatalf("Failed to create agent : %s", err)
 	}
@@ -185,8 +185,8 @@ func Test_Contracts_Offer_Valid(t *testing.T) {
 		t.Fatalf("Failed to add contract : %s", err)
 	}
 
-	agent, err := NewAgent(contractKey, DefaultConfig(), contract, feeLockingScript,
-		caches.Caches, broadcaster, nil, nil)
+	agent, err := NewAgent(contractKey, DefaultConfig(), contract, feeLockingScript, caches.Caches,
+		store, broadcaster, nil, nil)
 	if err != nil {
 		t.Fatalf("Failed to create agent : %s", err)
 	}
@@ -377,8 +377,8 @@ func Test_Contracts_Offer_AlreadyExists(t *testing.T) {
 		t.Fatalf("Failed to add contract : %s", err)
 	}
 
-	agent, err := NewAgent(contractKey, DefaultConfig(), contract, feeLockingScript,
-		caches.Caches, broadcaster, nil, nil)
+	agent, err := NewAgent(contractKey, DefaultConfig(), contract, feeLockingScript, caches.Caches,
+		store, broadcaster, nil, nil)
 	if err != nil {
 		t.Fatalf("Failed to create agent : %s", err)
 	}
@@ -509,8 +509,8 @@ func Test_Contracts_Amendment_Valid(t *testing.T) {
 	rand.Read(keyHash[:])
 	_, feeLockingScript, _ := state.MockKey()
 
-	agent, err := NewAgent(contractKey, DefaultConfig(), contract, feeLockingScript,
-		caches.Caches, broadcaster, nil, nil)
+	agent, err := NewAgent(contractKey, DefaultConfig(), contract, feeLockingScript, caches.Caches,
+		store, broadcaster, nil, nil)
 	if err != nil {
 		t.Fatalf("Failed to create agent : %s", err)
 	}
@@ -695,8 +695,8 @@ func Test_Contracts_Amendment_Proposal(t *testing.T) {
 	rand.Read(keyHash[:])
 	_, feeLockingScript, _ := state.MockKey()
 
-	agent, err := NewAgent(contractKey, DefaultConfig(), contract, feeLockingScript,
-		caches.Caches, broadcaster, nil, nil)
+	agent, err := NewAgent(contractKey, DefaultConfig(), contract, feeLockingScript, caches.Caches,
+		store, broadcaster, nil, nil)
 	if err != nil {
 		t.Fatalf("Failed to create agent : %s", err)
 	}

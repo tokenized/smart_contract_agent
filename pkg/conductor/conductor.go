@@ -28,6 +28,7 @@ type Conductor struct {
 
 	spyNodeClient spynode.Client
 	caches        *state.Caches
+	store         storage.CopyList
 
 	broadcaster agents.Broadcaster
 	fetcher     agents.Fetcher
@@ -41,8 +42,9 @@ type Conductor struct {
 }
 
 func NewConductor(baseKey bitcoin.Key, config agents.Config, feeLockingScript bitcoin.Script,
-	spyNodeClient spynode.Client, caches *state.Caches, broadcaster agents.Broadcaster,
-	fetcher agents.Fetcher, headers agents.BlockHeaders) *Conductor {
+	spyNodeClient spynode.Client, caches *state.Caches, store storage.CopyList,
+	broadcaster agents.Broadcaster, fetcher agents.Fetcher,
+	headers agents.BlockHeaders) *Conductor {
 
 	return &Conductor{
 		baseKey:              baseKey,
@@ -50,6 +52,7 @@ func NewConductor(baseKey bitcoin.Key, config agents.Config, feeLockingScript bi
 		feeLockingScript:     feeLockingScript,
 		spyNodeClient:        spyNodeClient,
 		caches:               caches,
+		store:                store,
 		broadcaster:          broadcaster,
 		fetcher:              fetcher,
 		headers:              headers,
@@ -178,7 +181,7 @@ func (c *Conductor) AddAgent(ctx context.Context,
 	}
 
 	agent, err := agents.NewAgent(key, c.config, addedContract, c.feeLockingScript, c.caches,
-		c.broadcaster, c.fetcher, c.headers)
+		c.store, c.broadcaster, c.fetcher, c.headers)
 	if err != nil {
 		return nil, errors.Wrap(err, "new agent")
 	}
@@ -223,7 +226,7 @@ func (c *Conductor) GetAgent(ctx context.Context,
 		return nil, nil
 	}
 
-	agent, err := agents.NewAgent(key, c.config, contract, c.feeLockingScript, c.caches,
+	agent, err := agents.NewAgent(key, c.config, contract, c.feeLockingScript, c.caches, c.store,
 		c.broadcaster, c.fetcher, c.headers)
 	if err != nil {
 		return nil, errors.Wrap(err, "new agent")

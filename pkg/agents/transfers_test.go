@@ -33,8 +33,8 @@ func Test_Transfers_Basic(t *testing.T) {
 		caches)
 	_, feeLockingScript, _ := state.MockKey()
 
-	agent, err := NewAgent(contractKey, DefaultConfig(), contract, feeLockingScript,
-		caches.Caches, broadcaster, nil, nil)
+	agent, err := NewAgent(contractKey, DefaultConfig(), contract, feeLockingScript, caches.Caches,
+		store, broadcaster, nil, nil)
 	if err != nil {
 		t.Fatalf("Failed to create agent : %s", err)
 	}
@@ -373,8 +373,8 @@ func Test_Transfers_InsufficientQuantity(t *testing.T) {
 	contractKey, contractLockingScript, _, _, contract, instrument := state.MockInstrument(ctx, caches)
 	_, feeLockingScript, _ := state.MockKey()
 
-	agent, err := NewAgent(contractKey, DefaultConfig(), contract, feeLockingScript,
-		caches.Caches, broadcaster, nil, nil)
+	agent, err := NewAgent(contractKey, DefaultConfig(), contract, feeLockingScript, caches.Caches,
+		store, broadcaster, nil, nil)
 	if err != nil {
 		t.Fatalf("Failed to create agent : %s", err)
 	}
@@ -551,8 +551,8 @@ func Test_Transfers_IdentityOracle_MissingSignature(t *testing.T) {
 	contractKey, contractLockingScript, adminKey, adminLockingScript, contract, instrument, _ := state.MockInstrumentWithOracle(ctx, caches)
 	_, feeLockingScript, _ := state.MockKey()
 
-	agent, err := NewAgent(contractKey, DefaultConfig(), contract, feeLockingScript,
-		caches.Caches, broadcaster, nil, nil)
+	agent, err := NewAgent(contractKey, DefaultConfig(), contract, feeLockingScript, caches.Caches,
+		store, broadcaster, nil, nil)
 	if err != nil {
 		t.Fatalf("Failed to create agent : %s", err)
 	}
@@ -732,8 +732,8 @@ func Test_Transfers_IdentityOracle_Valid(t *testing.T) {
 	rand.Read(headerHash[:])
 	headers.AddHash(headerHeight, headerHash)
 
-	agent, err := NewAgent(contractKey, DefaultConfig(), contract, feeLockingScript,
-		caches.Caches, broadcaster, nil, headers)
+	agent, err := NewAgent(contractKey, DefaultConfig(), contract, feeLockingScript, caches.Caches,
+		store, broadcaster, nil, headers)
 	if err != nil {
 		t.Fatalf("Failed to create agent : %s", err)
 	}
@@ -921,8 +921,8 @@ func Test_Transfers_IdentityOracle_BadSignature(t *testing.T) {
 	rand.Read(headerHash[:])
 	headers.AddHash(headerHeight, headerHash)
 
-	agent, err := NewAgent(contractKey, DefaultConfig(), contract, feeLockingScript,
-		caches.Caches, broadcaster, nil, headers)
+	agent, err := NewAgent(contractKey, DefaultConfig(), contract, feeLockingScript, caches.Caches,
+		store, broadcaster, nil, headers)
 	if err != nil {
 		t.Fatalf("Failed to create agent : %s", err)
 	}
@@ -1110,7 +1110,7 @@ func Test_Transfers_Multi_Basic(t *testing.T) {
 	_, feeLockingScript1, _ := state.MockKey()
 
 	agent1, err := NewAgent(contractKey1, DefaultConfig(), contract1, feeLockingScript1,
-		caches.Caches, broadcaster1, nil, nil)
+		caches.Caches, store, broadcaster1, nil, nil)
 	if err != nil {
 		t.Fatalf("Failed to create agent : %s", err)
 	}
@@ -1120,7 +1120,7 @@ func Test_Transfers_Multi_Basic(t *testing.T) {
 	_, feeLockingScript2, _ := state.MockKey()
 
 	agent2, err := NewAgent(contractKey2, DefaultConfig(), contract2, feeLockingScript2,
-		caches.Caches, broadcaster2, nil, nil)
+		caches.Caches, store, broadcaster2, nil, nil)
 	if err != nil {
 		t.Fatalf("Failed to create agent : %s", err)
 	}
@@ -1511,7 +1511,7 @@ func Test_Transfers_Multi_Reject_First(t *testing.T) {
 	_, feeLockingScript1, _ := state.MockKey()
 
 	agent1, err := NewAgent(contractKey1, DefaultConfig(), contract1, feeLockingScript1,
-		caches.Caches, broadcaster1, nil, nil)
+		caches.Caches, store, broadcaster1, nil, nil)
 	if err != nil {
 		t.Fatalf("Failed to create agent : %s", err)
 	}
@@ -1521,7 +1521,7 @@ func Test_Transfers_Multi_Reject_First(t *testing.T) {
 	_, feeLockingScript2, _ := state.MockKey()
 
 	agent2, err := NewAgent(contractKey2, DefaultConfig(), contract2, feeLockingScript2,
-		caches.Caches, broadcaster2, nil, nil)
+		caches.Caches, store, broadcaster2, nil, nil)
 	if err != nil {
 		t.Fatalf("Failed to create agent : %s", err)
 	}
@@ -1743,7 +1743,7 @@ func Test_Transfers_Multi_Reject_Second(t *testing.T) {
 	_, feeLockingScript1, _ := state.MockKey()
 
 	agent1, err := NewAgent(contractKey1, DefaultConfig(), contract1, feeLockingScript1,
-		caches.Caches, broadcaster1, nil, nil)
+		caches.Caches, store, broadcaster1, nil, nil)
 	if err != nil {
 		t.Fatalf("Failed to create agent : %s", err)
 	}
@@ -1753,7 +1753,7 @@ func Test_Transfers_Multi_Reject_Second(t *testing.T) {
 	_, feeLockingScript2, _ := state.MockKey()
 
 	agent2, err := NewAgent(contractKey2, DefaultConfig(), contract2, feeLockingScript2,
-		caches.Caches, broadcaster2, nil, nil)
+		caches.Caches, store, broadcaster2, nil, nil)
 	if err != nil {
 		t.Fatalf("Failed to create agent : %s", err)
 	}
