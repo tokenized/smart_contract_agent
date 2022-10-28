@@ -13,7 +13,6 @@ import (
 	"github.com/tokenized/pkg/bsor"
 	"github.com/tokenized/smart_contract_agent/internal/platform"
 	"github.com/tokenized/specification/dist/golang/actions"
-	"github.com/tokenized/specification/dist/golang/protocol"
 
 	"github.com/pkg/errors"
 )
@@ -56,10 +55,10 @@ type BalanceAdjustmentCode byte
 type BalanceAdjustment struct {
 	Code BalanceAdjustmentCode `bsor:"1" json:"code,omitempty"`
 
-	Expires         protocol.Timestamp `bsor:"2" json:"expires,omitempty"`
-	Quantity        uint64             `bsor:"3" json:"quantity,omitempty"`
-	TxID            *bitcoin.Hash32    `bsor:"4" json:"txID,omitempty"`
-	SettledQuantity uint64             `bsor:"5" json:"settled_quantity,omitempty"`
+	Expires         uint64          `bsor:"2" json:"expires,omitempty"`
+	Quantity        uint64          `bsor:"3" json:"quantity,omitempty"`
+	TxID            *bitcoin.Hash32 `bsor:"4" json:"txID,omitempty"`
+	SettledQuantity uint64          `bsor:"5" json:"settled_quantity,omitempty"`
 }
 
 func NewBalanceCache(cache *cacher.Cache) (*BalanceCache, error) {
@@ -433,6 +432,40 @@ func (b *Balance) ClearModified() {
 
 func (b *Balance) Hash() bitcoin.Hash32 {
 	return LockingScriptHash(b.LockingScript)
+}
+
+func (b *Balance) CacheSetCopy() cacher.CacheSetValue {
+	result := &Balance{
+		Quantity:    b.Quantity,
+		Timestamp:   b.Timestamp,
+		Adjustments: make([]*BalanceAdjustment, len(b.Adjustments)),
+	}
+
+	result.LockingScript = make(bitcoin.Script, len(b.LockingScript))
+	copy(result.LockingScript, b.LockingScript)
+
+	if b.TxID != nil {
+		result.TxID = &bitcoin.Hash32{}
+		copy(result.TxID[:], b.TxID[:])
+	}
+
+	for i, adjustment := range b.Adjustments {
+		newAdjustment := &BalanceAdjustment{
+			Code:            adjustment.Code,
+			Expires:         adjustment.Expires,
+			Quantity:        adjustment.Quantity,
+			SettledQuantity: adjustment.SettledQuantity,
+		}
+
+		if adjustment.TxID != nil {
+			newAdjustment.TxID = &bitcoin.Hash32{}
+			copy(newAdjustment.TxID[:], adjustment.TxID[:])
+		}
+
+		result.Adjustments[i] = newAdjustment
+	}
+
+	return result
 }
 
 func (b *Balance) Serialize(w io.Writer) error {

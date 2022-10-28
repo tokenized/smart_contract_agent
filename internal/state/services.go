@@ -102,7 +102,7 @@ func (c *ContractServicesCache) Update(ctx context.Context, contractLockingScrip
 		})
 	}
 
-	item, err := c.cacher.Add(ctx, c.typ, contractServices)
+	item, err := c.cacher.Add(ctx, c.typ, path, contractServices)
 	if err != nil {
 		return errors.Wrap(err, "add")
 	}
@@ -175,6 +175,35 @@ func (c *ContractServices) ClearModified() {
 
 func (c *ContractServices) IsModified() bool {
 	return c.isModified
+}
+
+func (s *ContractServices) CacheCopy() cacher.CacheValue {
+	result := &ContractServices{
+		Services: make([]*Service, len(s.Services)),
+	}
+
+	isTest := IsTest()
+
+	if s.Formation != nil {
+		copyScript, _ := protocol.Serialize(s.Formation, isTest)
+		action, _ := protocol.Deserialize(copyScript, isTest)
+		result.Formation, _ = action.(*actions.ContractFormation)
+	}
+
+	if s.FormationTxID != nil {
+		result.FormationTxID = &bitcoin.Hash32{}
+		copy(result.FormationTxID[:], s.FormationTxID[:])
+	}
+
+	for i, service := range s.Services {
+		result.Services[i] = &Service{
+			Type:      service.Type,
+			URL:       service.URL,
+			PublicKey: service.PublicKey,
+		}
+	}
+
+	return result
 }
 
 func (c *ContractServices) Serialize(w io.Writer) error {

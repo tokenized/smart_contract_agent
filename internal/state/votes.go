@@ -51,12 +51,6 @@ type Vote struct {
 	ContractWideVote bool   `bsor:"10" json:"contract_wide_vote"`
 	TokenQuantity    uint64 `bsor:"11" json:"token_quantity"`
 
-	// OptionTally []uint64           `json:"OptionTally,omitempty"`
-	// Ballots    map[bitcoin.Hash20]Ballot `json:"-"` // json can only encode string maps
-	// BallotList []Ballot                  `json:"Ballots,omitempty"`
-
-	contractHash ContractHash `bsor:"-" json:"-"`
-
 	isModified bool
 	sync.Mutex `bsor:"-"`
 }
@@ -121,7 +115,6 @@ func (c *VoteCache) ListActive(ctx context.Context, store storage.List,
 
 		vote := item.(*Vote)
 		vote.Lock()
-		vote.contractHash = contractHash
 		isActive := vote.Result == nil
 		vote.Unlock()
 
@@ -139,22 +132,17 @@ func (c *VoteCache) Add(ctx context.Context, contractLockingScript bitcoin.Scrip
 	vote *Vote) (*Vote, error) {
 
 	vote.Lock()
-	vote.contractHash = CalculateContractHash(contractLockingScript)
+	voteTxID := *vote.VoteTxID
 	vote.Unlock()
 
-	item, err := c.cacher.Add(ctx, c.typ, vote)
+	path := VotePath(CalculateContractHash(contractLockingScript), voteTxID)
+
+	item, err := c.cacher.Add(ctx, c.typ, path, vote)
 	if err != nil {
 		return nil, errors.Wrap(err, "add")
 	}
 
-	result := item.(*Vote)
-	if result != vote {
-		result.Lock()
-		result.contractHash = vote.contractHash
-		result.Unlock()
-	}
-
-	return result, nil
+	return item.(*Vote), nil
 }
 
 func (c *VoteCache) Get(ctx context.Context, contractLockingScript bitcoin.Script,
@@ -171,12 +159,7 @@ func (c *VoteCache) Get(ctx context.Context, contractLockingScript bitcoin.Scrip
 		return nil, nil
 	}
 
-	vote := item.(*Vote)
-	vote.Lock()
-	vote.contractHash = contractHash
-	vote.Unlock()
-
-	return vote, nil
+	return item.(*Vote), nil
 }
 
 func (c *VoteCache) Release(ctx context.Context, contractLockingScript bitcoin.Script,
@@ -362,10 +345,6 @@ func VotePath(contractHash ContractHash, voteTxID bitcoin.Hash32) string {
 	return fmt.Sprintf("%s/%s/%s", votePath, contractHash, voteTxID)
 }
 
-func (v *Vote) Path() string {
-	return VotePath(v.contractHash, *v.VoteTxID)
-}
-
 func (v *Vote) MarkModified() {
 	v.isModified = true
 }
@@ -376,6 +355,50 @@ func (v *Vote) ClearModified() {
 
 func (v *Vote) IsModified() bool {
 	return v.isModified
+}
+
+func (v *Vote) CacheCopy() cacher.CacheValue {
+	result := &Vote{
+		ContractWideVote: v.ContractWideVote,
+		TokenQuantity:    v.TokenQuantity,
+	}
+
+	isTest := IsTest()
+
+	if v.Proposal != nil {
+		copyScript, _ := protocol.Serialize(v.Proposal, isTest)
+		action, _ := protocol.Deserialize(copyScript, isTest)
+		result.Proposal, _ = action.(*actions.Proposal)
+	}
+
+	if v.ProposalTxID != nil {
+		result.ProposalTxID = &bitcoin.Hash32{}
+		copy(result.ProposalTxID[:], v.ProposalTxID[:])
+	}
+
+	if v.Vote != nil {
+		copyScript, _ := protocol.Serialize(v.Vote, isTest)
+		action, _ := protocol.Deserialize(copyScript, isTest)
+		result.Vote, _ = action.(*actions.Vote)
+	}
+
+	if v.VoteTxID != nil {
+		result.VoteTxID = &bitcoin.Hash32{}
+		copy(result.VoteTxID[:], v.VoteTxID[:])
+	}
+
+	if v.Result != nil {
+		copyScript, _ := protocol.Serialize(v.Result, isTest)
+		action, _ := protocol.Deserialize(copyScript, isTest)
+		result.Result, _ = action.(*actions.Result)
+	}
+
+	if v.ResultTxID != nil {
+		result.ResultTxID = &bitcoin.Hash32{}
+		copy(result.ResultTxID[:], v.ResultTxID[:])
+	}
+
+	return result
 }
 
 func (v *Vote) Serialize(w io.Writer) error {

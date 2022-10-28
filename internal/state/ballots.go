@@ -237,6 +237,23 @@ func (b *Ballot) Hash() bitcoin.Hash32 {
 	return LockingScriptHash(b.LockingScript)
 }
 
+func (b *Ballot) CacheSetCopy() cacher.CacheSetValue {
+	result := &Ballot{
+		Quantity: b.Quantity,
+		Vote:     b.Vote,
+	}
+
+	result.LockingScript = make(bitcoin.Script, len(b.LockingScript))
+	copy(result.LockingScript, b.LockingScript)
+
+	if b.TxID != nil {
+		result.TxID = &bitcoin.Hash32{}
+		copy(result.TxID[:], b.TxID[:])
+	}
+
+	return result
+}
+
 func (b *Ballot) Serialize(w io.Writer) error {
 	bs, err := bsor.MarshalBinary(b)
 	if err != nil {

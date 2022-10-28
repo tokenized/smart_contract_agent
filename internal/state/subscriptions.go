@@ -48,6 +48,8 @@ type SubscriptionValue interface {
 	Serialize(w io.Writer) error
 	Deserialize(r io.Reader) error
 
+	CacheSetCopy() cacher.CacheSetValue
+
 	// All functions will be called by cache while the object is locked.
 	Lock()
 	Unlock()
@@ -249,6 +251,10 @@ func (s *Subscription) Hash() bitcoin.Hash32 {
 	return s.value.Hash()
 }
 
+func (s *Subscription) CacheSetCopy() cacher.CacheSetValue {
+	return s.value.CacheSetCopy()
+}
+
 func (s *Subscription) Serialize(w io.Writer) error {
 	typ := s.Type()
 	if typ == 0 {
@@ -306,6 +312,17 @@ func (s *LockingScriptSubscription) IsModified() bool {
 
 func (s *LockingScriptSubscription) ClearModified() {
 	s.isModified = false
+}
+
+func (s *LockingScriptSubscription) CacheSetCopy() cacher.CacheSetValue {
+	result := &LockingScriptSubscription{
+		LockingScript: make(bitcoin.Script, len(s.LockingScript)),
+	}
+
+	copy(result.LockingScript, s.LockingScript)
+	copy(result.ChannelHash[:], s.ChannelHash[:])
+
+	return result
 }
 
 func (s *LockingScriptSubscription) Serialize(w io.Writer) error {

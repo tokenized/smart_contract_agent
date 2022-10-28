@@ -163,11 +163,19 @@ func (c *ContractCache) List(ctx context.Context, store storage.List) ([]*Contra
 }
 
 func (c *ContractCache) Save(ctx context.Context, contract *Contract) {
-	c.cacher.Save(ctx, contract)
+	contract.Lock()
+	lockingScript := contract.LockingScript
+	contract.Unlock()
+
+	c.cacher.Save(ctx, ContractPath(lockingScript), contract)
 }
 
 func (c *ContractCache) Add(ctx context.Context, contract *Contract) (*Contract, error) {
-	item, err := c.cacher.Add(ctx, c.typ, contract)
+	contract.Lock()
+	lockingScript := contract.LockingScript
+	contract.Unlock()
+
+	item, err := c.cacher.Add(ctx, c.typ, ContractPath(lockingScript), contract)
 	if err != nil {
 		return nil, errors.Wrap(err, "add")
 	}
@@ -247,10 +255,6 @@ func (c *Contract) IsExpired(now uint64) bool {
 		c.Formation.ContractExpiration < now
 }
 
-func (c *Contract) Path() string {
-	return ContractPath(c.LockingScript)
-}
-
 func (c *Contract) MarkModified() {
 	c.isModified = true
 }
@@ -261,6 +265,53 @@ func (c *Contract) ClearModified() {
 
 func (c *Contract) IsModified() bool {
 	return c.isModified
+}
+
+func (c *Contract) CacheCopy() cacher.CacheValue {
+	result := &Contract{
+		InstrumentCount: c.InstrumentCount,
+	}
+
+	copy(result.KeyHash[:], c.KeyHash[:])
+
+	result.LockingScript = make(bitcoin.Script, len(c.LockingScript))
+	copy(result.LockingScript, c.LockingScript)
+
+	isTest := IsTest()
+
+	if c.Formation != nil {
+		copyScript, _ := protocol.Serialize(c.Formation, isTest)
+		action, _ := protocol.Deserialize(copyScript, isTest)
+		result.Formation, _ = action.(*actions.ContractFormation)
+	}
+
+	if c.FormationTxID != nil {
+		result.FormationTxID = &bitcoin.Hash32{}
+		copy(result.FormationTxID[:], c.FormationTxID[:])
+	}
+
+	if c.BodyOfAgreementFormation != nil {
+		copyScript, _ := protocol.Serialize(c.BodyOfAgreementFormation, isTest)
+		action, _ := protocol.Deserialize(copyScript, isTest)
+		result.BodyOfAgreementFormation, _ = action.(*actions.BodyOfAgreementFormation)
+	}
+
+	if c.BodyOfAgreementFormationTxID != nil {
+		result.BodyOfAgreementFormationTxID = &bitcoin.Hash32{}
+		copy(result.BodyOfAgreementFormationTxID[:], c.BodyOfAgreementFormationTxID[:])
+	}
+
+	if c.MovedTxID != nil {
+		result.MovedTxID = &bitcoin.Hash32{}
+		copy(result.MovedTxID[:], c.MovedTxID[:])
+	}
+
+	if c.FrozenUntil != nil {
+		frozenUntil := *c.FrozenUntil
+		result.FrozenUntil = &frozenUntil
+	}
+
+	return result
 }
 
 func (c *Contract) Serialize(w io.Writer) error {

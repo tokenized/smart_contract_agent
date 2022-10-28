@@ -43,8 +43,6 @@ type Instrument struct {
 	// payload is used to cache the deserialized value of the payload in Creation.
 	payload instruments.Instrument `json:"instrument"`
 
-	contractHash ContractHash `bsor:"-" json:"-"`
-
 	isModified bool
 	sync.Mutex `bsor:"-"`
 }
@@ -76,29 +74,26 @@ func NewInstrumentCache(cache *cacher.Cache) (*InstrumentCache, error) {
 func (c *InstrumentCache) Add(ctx context.Context, contractLockingScript bitcoin.Script,
 	instrument *Instrument) (*Instrument, error) {
 
-	instrument.contractHash = CalculateContractHash(contractLockingScript)
+	instrument.Lock()
+	instrumentCode := instrument.InstrumentCode
+	instrument.Unlock()
 
-	item, err := c.cacher.Add(ctx, c.typ, instrument)
+	path := InstrumentPath(CalculateContractHash(contractLockingScript), instrumentCode)
+
+	item, err := c.cacher.Add(ctx, c.typ, path, instrument)
 	if err != nil {
 		return nil, errors.Wrap(err, "add")
 	}
 
-	result := item.(*Instrument)
-	if result != instrument {
-		result.Lock()
-		result.contractHash = instrument.contractHash
-		result.Unlock()
-	}
-
-	return result, nil
+	return item.(*Instrument), nil
 }
 
 func (c *InstrumentCache) Get(ctx context.Context, contractLockingScript bitcoin.Script,
 	instrumentCode InstrumentCode) (*Instrument, error) {
 
-	contractHash := CalculateContractHash(contractLockingScript)
+	path := InstrumentPath(CalculateContractHash(contractLockingScript), instrumentCode)
 
-	item, err := c.cacher.Get(ctx, c.typ, InstrumentPath(contractHash, instrumentCode))
+	item, err := c.cacher.Get(ctx, c.typ, path)
 	if err != nil {
 		return nil, errors.Wrap(err, "get")
 	}
@@ -107,12 +102,7 @@ func (c *InstrumentCache) Get(ctx context.Context, contractLockingScript bitcoin
 		return nil, nil
 	}
 
-	instrument := item.(*Instrument)
-	instrument.Lock()
-	instrument.contractHash = contractHash
-	instrument.Unlock()
-
-	return instrument, nil
+	return item.(*Instrument), nil
 }
 
 func (c *InstrumentCache) Release(ctx context.Context, contractLockingScript bitcoin.Script,
@@ -236,10 +226,6 @@ func InstrumentPath(contractHash ContractHash, instrumentCode InstrumentCode) st
 	return fmt.Sprintf("%s/%s/%s", instrumentPath, contractHash, instrumentCode)
 }
 
-func (i *Instrument) Path() string {
-	return InstrumentPath(i.contractHash, i.InstrumentCode)
-}
-
 func (i *Instrument) MarkModified() {
 	i.isModified = true
 }
@@ -250,6 +236,33 @@ func (i *Instrument) ClearModified() {
 
 func (i *Instrument) IsModified() bool {
 	return i.isModified
+}
+
+func (i *Instrument) CacheCopy() cacher.CacheValue {
+	result := &Instrument{}
+
+	copy(result.InstrumentType[:], i.InstrumentType[:])
+	copy(result.InstrumentCode[:], i.InstrumentCode[:])
+
+	isTest := IsTest()
+
+	if i.Creation != nil {
+		copyScript, _ := protocol.Serialize(i.Creation, isTest)
+		action, _ := protocol.Deserialize(copyScript, isTest)
+		result.Creation, _ = action.(*actions.InstrumentCreation)
+	}
+
+	if i.CreationTxID != nil {
+		result.CreationTxID = &bitcoin.Hash32{}
+		copy(result.CreationTxID[:], i.CreationTxID[:])
+	}
+
+	if i.FrozenUntil != nil {
+		frozenUntil := *i.FrozenUntil
+		result.FrozenUntil = &frozenUntil
+	}
+
+	return result
 }
 
 func (i *Instrument) Serialize(w io.Writer) error {

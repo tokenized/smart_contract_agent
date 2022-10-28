@@ -72,11 +72,11 @@ func NewTransactionCache(cache *cacher.Cache) (*TransactionCache, error) {
 }
 
 func (c *TransactionCache) Save(ctx context.Context, tx *Transaction) {
-	c.cacher.Save(ctx, tx)
+	c.cacher.Save(ctx, TransactionPath(tx.GetTxID()), tx)
 }
 
 func (c *TransactionCache) Add(ctx context.Context, tx *Transaction) (*Transaction, error) {
-	item, err := c.cacher.Add(ctx, c.typ, tx)
+	item, err := c.cacher.Add(ctx, c.typ, TransactionPath(tx.GetTxID()), tx)
 	if err != nil {
 		return nil, errors.Wrap(err, "add")
 	}
@@ -128,7 +128,7 @@ func (c *TransactionCache) AddRaw(ctx context.Context, tx *wire.MsgTx,
 		MerkleProofs: merkleProofs,
 	}
 
-	item, err := c.cacher.Add(ctx, c.typ, itx)
+	item, err := c.cacher.Add(ctx, c.typ, TransactionPath(itx.GetTxID()), itx)
 	if err != nil {
 		return nil, errors.Wrap(err, "add")
 	}
@@ -298,10 +298,6 @@ func (tx *Transaction) TxID() bitcoin.Hash32 {
 	return *tx.Tx.TxHash()
 }
 
-func (tx *Transaction) Path() string {
-	return TransactionPath(*tx.Tx.TxHash())
-}
-
 func (tx *Transaction) MarkModified() {
 	tx.isModified = true
 }
@@ -312,6 +308,42 @@ func (tx *Transaction) ClearModified() {
 
 func (tx *Transaction) IsModified() bool {
 	return tx.isModified
+}
+
+func (t *Transaction) CacheCopy() cacher.CacheValue {
+	result := &Transaction{
+		State:         t.State,
+		MerkleProofs:  make([]*merkle_proof.MerkleProof, len(t.MerkleProofs)),
+		SpentOutputs:  make([]*expanded_tx.Output, len(t.SpentOutputs)),
+		IsProcessed:   t.IsProcessed,
+		ResponseTxIDs: make([]bitcoin.Hash32, len(t.ResponseTxIDs)),
+		Ancestors:     make(expanded_tx.AncestorTxs, len(t.Ancestors)),
+	}
+
+	if t.Tx != nil {
+		result.Tx = t.Tx.Copy()
+	}
+
+	for i, merkleProof := range t.MerkleProofs {
+		mp := *merkleProof
+		result.MerkleProofs[i] = &mp
+	}
+
+	for i, spentOutput := range t.SpentOutputs {
+		so := *spentOutput
+		result.SpentOutputs[i] = &so
+	}
+
+	for i, responseTxID := range t.ResponseTxIDs {
+		result.ResponseTxIDs[i] = responseTxID
+	}
+
+	for i, ancestor := range t.Ancestors {
+		a := *ancestor
+		result.Ancestors[i] = &a
+	}
+
+	return result
 }
 
 func (tx *Transaction) Serialize(w io.Writer) error {
