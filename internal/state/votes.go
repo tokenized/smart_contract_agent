@@ -9,8 +9,10 @@ import (
 	"sync"
 
 	"github.com/tokenized/cacher"
+	"github.com/tokenized/logger"
 	"github.com/tokenized/pkg/bitcoin"
 	"github.com/tokenized/pkg/bsor"
+	"github.com/tokenized/pkg/storage"
 	"github.com/tokenized/specification/dist/golang/actions"
 	"github.com/tokenized/specification/dist/golang/protocol"
 
@@ -46,20 +48,10 @@ type Vote struct {
 	// ResultScript is only used by Serialize to save the Result value in BSOR.
 	ResultScript bitcoin.Script `bsor:"9" json:"result_script"`
 
-	// ContractWideVote bool `json:"ContractWideVote,omitempty"`
-
-	// VoteTxId  *bitcoin.Hash32    `json:"VoteTxId,omitempty"`
-	// TokenQty  uint64             `json:"TokenQty,omitempty"`
-	// Expires   protocol.Timestamp `json:"Expires,omitempty"`
-	// Timestamp protocol.Timestamp `json:"Timestamp,omitempty"`
-	// CreatedAt protocol.Timestamp `json:"CreatedAt,omitempty"`
-	// UpdatedAt protocol.Timestamp `json:"UpdatedAt,omitempty"`
+	ContractWideVote bool   `bsor:"10" json:"contract_wide_vote"`
+	TokenQuantity    uint64 `bsor:"11" json:"token_quantity"`
 
 	// OptionTally []uint64           `json:"OptionTally,omitempty"`
-	// Result      string             `json:"Result,omitempty"`
-	// AppliedTxId *bitcoin.Hash32    `json:"AppliedTxId,omitempty"`
-	// CompletedAt protocol.Timestamp `json:"CompletedAt,omitempty"`
-
 	// Ballots    map[bitcoin.Hash20]Ballot `json:"-"` // json can only encode string maps
 	// BallotList []Ballot                  `json:"Ballots,omitempty"`
 
@@ -91,6 +83,56 @@ func NewVoteCache(cache *cacher.Cache) (*VoteCache, error) {
 		cacher: cache,
 		typ:    typ,
 	}, nil
+}
+
+func (c *VoteCache) ListActive(ctx context.Context, store storage.List,
+	contractLockingScript bitcoin.Script) ([]*Vote, error) {
+
+	contractHash := CalculateContractHash(contractLockingScript)
+	pathPrefix := fmt.Sprintf("%s/%s", votePath, contractHash)
+
+	paths, err := store.List(ctx, pathPrefix)
+	if err != nil {
+		return nil, errors.Wrap(err, "list")
+	}
+
+	var result []*Vote
+	for _, path := range paths {
+		item, err := c.cacher.Get(ctx, c.typ, path)
+		if err != nil {
+			for _, v := range result {
+				v.Lock()
+				voteTxID := *v.VoteTxID
+				v.Unlock()
+				c.Release(ctx, contractLockingScript, voteTxID)
+			}
+			return nil, errors.Wrap(err, "get")
+		}
+
+		if item == nil {
+			for _, v := range result {
+				v.Lock()
+				voteTxID := *v.VoteTxID
+				v.Unlock()
+				c.Release(ctx, contractLockingScript, voteTxID)
+			}
+			return nil, fmt.Errorf("Not found: %s", path)
+		}
+
+		vote := item.(*Vote)
+		vote.Lock()
+		vote.contractHash = contractHash
+		isActive := vote.Result == nil
+		vote.Unlock()
+
+		if !isActive {
+			c.cacher.Release(ctx, path)
+		} else {
+			result = append(result, vote)
+		}
+	}
+
+	return result, nil
 }
 
 func (c *VoteCache) Add(ctx context.Context, contractLockingScript bitcoin.Script,
@@ -140,6 +182,180 @@ func (c *VoteCache) Get(ctx context.Context, contractLockingScript bitcoin.Scrip
 func (c *VoteCache) Release(ctx context.Context, contractLockingScript bitcoin.Script,
 	voteTxID bitcoin.Hash32) {
 	c.cacher.Release(ctx, VotePath(CalculateContractHash(contractLockingScript), voteTxID))
+}
+
+func (v *Vote) Prepare(ctx context.Context, caches *Caches, contract *Contract,
+	votingSystem *actions.VotingSystemField) error {
+
+	contract.Lock()
+	contractLockingScript := contract.LockingScript
+	contract.Unlock()
+
+	if len(v.Proposal.InstrumentCode) > 0 {
+		instrumentHash20, err := bitcoin.NewHash20(v.Proposal.InstrumentCode)
+		if err != nil {
+			logger.Error(ctx, "Invalid proposal instrument code : %s", err)
+			return nil
+		}
+		instrumentCode := InstrumentCode(*instrumentHash20)
+
+		instrument, err := caches.Instruments.Get(ctx, contractLockingScript, instrumentCode)
+		if err != nil {
+			return errors.Wrap(err, "get instrument")
+		}
+
+		if instrument == nil {
+			logger.Error(ctx, "Proposal instrument not found")
+			return nil
+		}
+		defer caches.Instruments.Release(ctx, contractLockingScript, instrumentCode)
+
+		instrument.Lock()
+		v.ContractWideVote = instrument.Creation.InstrumentModificationGovernance == 1
+		instrument.Unlock()
+		v.MarkModified()
+	}
+
+	if len(v.Proposal.InstrumentCode) == 0 || v.ContractWideVote {
+		if err := v.BuildContractBallots(ctx, caches, contract, votingSystem); err != nil {
+			return errors.Wrap(err, "build contract ballots")
+		}
+	} else {
+		if err := v.BuildInstrumentBallots(ctx, caches, contract, votingSystem); err != nil {
+			return errors.Wrap(err, "instrument ballots")
+		}
+	}
+
+	return nil
+}
+
+func (v *Vote) BuildInstrumentBallots(ctx context.Context, caches *Caches, contract *Contract,
+	votingSystem *actions.VotingSystemField) error {
+
+	// instrumentHash20, err := bitcoin.NewHash20(v.Proposal.InstrumentCode)
+	// if err != nil {
+	// 	logger.Error(ctx, "Invalid proposal instrument code : %s", err)
+	// 	return nil
+	// }
+	// instrumentCode := InstrumentCode(*instrumentHash20)
+
+	return nil
+}
+
+func (v *Vote) BuildContractBallots(ctx context.Context, caches *Caches, contract *Contract,
+	votingSystem *actions.VotingSystemField) error {
+
+	contract.Lock()
+	contractLockingScript := contract.LockingScript
+	instrumentCount := contract.InstrumentCount
+	adminMemberInstrument := contract.AdminMemberInstrumentCode
+	contract.Unlock()
+
+	contractAddress, err := bitcoin.RawAddressFromLockingScript(contractLockingScript)
+	if err != nil {
+		return errors.Wrap(err, "contract address")
+	}
+
+	tokenQuantity := uint64(0)
+	for i := uint64(0); i < instrumentCount; i++ {
+		instrumentCode := InstrumentCode(protocol.InstrumentCodeFromContract(contractAddress, i))
+
+		if v.Proposal.Type == 1 && instrumentCode.Equal(adminMemberInstrument) {
+			continue // Administrative tokens don't count for holder votes.
+		}
+
+		instrument, err := caches.Instruments.Get(ctx, contractLockingScript, instrumentCode)
+		if err != nil {
+			return errors.Wrap(err, "get instrument")
+		}
+
+		if instrument == nil {
+			continue
+		}
+
+		instrument.Lock()
+		if instrument.Creation == nil {
+			instrument.Unlock()
+			caches.Instruments.Release(ctx, contractLockingScript, instrumentCode)
+			continue
+		}
+
+		if !instrument.Creation.VotingRights {
+			instrument.Unlock()
+			caches.Instruments.Release(ctx, contractLockingScript, instrumentCode)
+			continue
+		}
+
+		quantity := instrument.Creation.AuthorizedTokenQty
+		multiplier := uint64(instrument.Creation.VoteMultiplier)
+		instrument.Unlock()
+		caches.Instruments.Release(ctx, contractLockingScript, instrumentCode)
+
+		if votingSystem.VoteMultiplierPermitted {
+			tokenQuantity += quantity * multiplier
+		} else {
+			tokenQuantity += quantity
+		}
+
+		ballots := make(map[bitcoin.Hash32]*Ballot)
+		balances, err := caches.Balances.List(ctx, contractLockingScript, instrumentCode)
+		if err != nil {
+			return errors.Wrap(err, "list balances")
+		}
+
+		for _, balance := range balances {
+			balance.Lock()
+			hash := LockingScriptHash(balance.LockingScript)
+			balanceQuantity := balance.Quantity
+			balance.Unlock()
+
+			if votingSystem.VoteMultiplierPermitted {
+				balanceQuantity *= multiplier
+			}
+
+			ballot, exists := ballots[hash]
+			if exists {
+				ballot.Quantity += balanceQuantity
+			} else {
+				ballots[hash] = &Ballot{
+					LockingScript: balance.LockingScript,
+					Quantity:      balanceQuantity,
+				}
+			}
+		}
+
+		addedBallots, err := caches.Ballots.AddMulti(ctx, contractLockingScript, *v.VoteTxID,
+			ballots)
+		if err != nil {
+			caches.Balances.ReleaseMulti(ctx, contractLockingScript, instrumentCode, balances)
+			return errors.Wrap(err, "add ballots")
+		}
+
+		for hash, ballot := range ballots {
+			addedBallot, exists := addedBallots[hash]
+			if !exists {
+				ballot.Lock()
+				logger.ErrorWithFields(ctx, []logger.Field{
+					logger.Stringer("locking_script", ballot.LockingScript),
+				}, "Ballot failed to add")
+				ballot.Unlock()
+				continue
+			}
+
+			if addedBallot != ballot {
+				// Pre-existing ballot, so update it.
+				addedBallot.Quantity += ballot.Quantity
+				addedBallot.MarkModified()
+			}
+		}
+
+		caches.Ballots.ReleaseMulti(ctx, contractLockingScript, *v.VoteTxID, addedBallots)
+		caches.Balances.ReleaseMulti(ctx, contractLockingScript, instrumentCode, balances)
+	}
+
+	v.TokenQuantity = tokenQuantity
+	v.MarkModified()
+	return nil
 }
 
 func VotePath(contractHash ContractHash, voteTxID bitcoin.Hash32) string {

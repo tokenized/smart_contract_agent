@@ -38,7 +38,7 @@ type Balance struct {
 	LockingScript bitcoin.Script  `bsor:"1" json:"locking_script"`
 	Quantity      uint64          `bsor:"2" json:"quantity"`
 	Timestamp     uint64          `bsor:"3" json:"timestamp"`
-	TxID          *bitcoin.Hash32 `bsor:"4" json:"txID,omitempty"`
+	TxID          *bitcoin.Hash32 `bsor:"4" json:"txid,omitempty"`
 
 	Adjustments []*BalanceAdjustment `bsor:"5" json:"adjustments,omitempty"`
 
@@ -166,6 +166,29 @@ func (c *BalanceCache) GetMulti(ctx context.Context, contractLockingScript bitco
 	return result, nil
 }
 
+func (c *BalanceCache) List(ctx context.Context, contractLockingScript bitcoin.Script,
+	instrumentCode InstrumentCode) (Balances, error) {
+
+	// TODO Implement this --ce
+	// pathPrefix := balancePathPrefix(contractLockingScript, instrumentCode)
+	// values, err := c.cacher.ListMultiSetValue(ctx, c.typ, pathPrefix)
+	// if err != nil {
+	// 	return nil, errors.Wrap(err, "list set multi")
+	// }
+
+	// result := make(Balances, len(values))
+	// for i, value := range values {
+	// 	if value == nil {
+	// 		continue
+	// 	}
+
+	// 	result[i] = value.(*Balance)
+	// }
+
+	// return result, nil
+	return nil, nil
+}
+
 func (c *BalanceCache) Release(ctx context.Context, contractLockingScript bitcoin.Script,
 	instrumentCode InstrumentCode, balance *Balance) error {
 
@@ -184,6 +207,10 @@ func (c *BalanceCache) Release(ctx context.Context, contractLockingScript bitcoi
 
 func (c *BalanceCache) ReleaseMulti(ctx context.Context, contractLockingScript bitcoin.Script,
 	instrumentCode InstrumentCode, balances Balances) error {
+
+	if len(balances) == 0 {
+		return nil
+	}
 
 	pathPrefix := balancePathPrefix(contractLockingScript, instrumentCode)
 	hashes := make([]bitcoin.Hash32, len(balances))

@@ -46,12 +46,15 @@ type Contract struct {
 
 	FrozenUntil *uint64 `bsor:"9" json:"frozen_until,omitempty"`
 
+	// TODO Populate AdminMemberInstrumentCode value. --ce
+	AdminMemberInstrumentCode InstrumentCode `bsor:"10" json:"admin_member_instrument_code"`
+
 	// FormationScript is only used by Serialize to save the Formation value in BSOR.
-	FormationScript bitcoin.Script `bsor:"10" json:"formation_script"`
+	FormationScript bitcoin.Script `bsor:"11" json:"formation_script"`
 
 	// BodyOfAgreementFormationScript is only used by Serialize to save the BodyOfAgreementFormation
 	// value in BSOR.
-	BodyOfAgreementFormationScript bitcoin.Script `bsor:"11" json:"body_of_agreement_formation_script"`
+	BodyOfAgreementFormationScript bitcoin.Script `bsor:"12" json:"body_of_agreement_formation_script"`
 
 	isModified bool
 	sync.Mutex `bsor:"-"`
@@ -211,6 +214,20 @@ func (c *Contract) AdminLockingScript() bitcoin.Script {
 	return lockingScript
 }
 
+func (c *Contract) IsAdmin(lockingScript bitcoin.Script) bool {
+	if c.Formation == nil {
+		return false
+	}
+
+	ra, err := bitcoin.RawAddressFromLockingScript(lockingScript)
+	if err != nil {
+		return false
+	}
+	b := ra.Bytes()
+
+	return bytes.Equal(c.Formation.AdminAddress, b)
+}
+
 func (c *Contract) IsAdminOrOperator(lockingScript bitcoin.Script) bool {
 	if c.Formation == nil {
 		return false
@@ -340,4 +357,45 @@ func (c *Contract) Deserialize(r io.Reader) error {
 	}
 
 	return nil
+}
+
+// HasAnyContractBalance returns true if the specified locking script has any non-zero settled
+// balance with the specified contract.
+func HasAnyContractBalance(ctx context.Context, caches *Caches, contract *Contract,
+	lockingScript bitcoin.Script) (bool, error) {
+
+	contract.Lock()
+	contractLockingScript := contract.LockingScript
+	instrumentCount := contract.InstrumentCount
+	contract.Unlock()
+
+	contractAddress, err := bitcoin.RawAddressFromLockingScript(contractLockingScript)
+	if err != nil {
+		return false, errors.Wrap(err, "contract address")
+	}
+
+	for i := uint64(0); i < instrumentCount; i++ {
+		instrumentCode := InstrumentCode(protocol.InstrumentCodeFromContract(contractAddress, i))
+
+		balance, err := caches.Balances.Get(ctx, contractLockingScript, instrumentCode,
+			lockingScript)
+		if err != nil {
+			return false, errors.Wrap(err, "get balance")
+		}
+
+		if balance == nil {
+			continue
+		}
+
+		balance.Lock()
+		quantity := balance.Quantity
+		balance.Unlock()
+		caches.Balances.Release(ctx, contractLockingScript, instrumentCode, balance)
+
+		if quantity > 0 {
+			return true, nil
+		}
+	}
+
+	return false, nil
 }

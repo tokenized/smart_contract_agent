@@ -185,6 +185,10 @@ func (c *SubscriptionCache) Release(ctx context.Context, contractLockingScript b
 func (c *SubscriptionCache) ReleaseMulti(ctx context.Context, contractLockingScript bitcoin.Script,
 	subscriptions Subscriptions) error {
 
+	if len(subscriptions) == 0 {
+		return nil
+	}
+
 	pathPrefix := subscriptionPathPrefix(contractLockingScript)
 	var hashes []bitcoin.Hash32
 	var isModified []bool

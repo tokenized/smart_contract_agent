@@ -29,6 +29,7 @@ type Caches struct {
 	Subscriptions *SubscriptionCache
 	Services      *ContractServicesCache
 	Votes         *VoteCache
+	Ballots       *BallotCache
 }
 
 func NewCaches(cache *cacher.Cache) (*Caches, error) {
@@ -75,6 +76,12 @@ func NewCaches(cache *cacher.Cache) (*Caches, error) {
 		return nil, errors.Wrap(err, "votes")
 	}
 	result.Votes = votes
+
+	ballots, err := NewBallotCache(cache)
+	if err != nil {
+		return nil, errors.Wrap(err, "ballots")
+	}
+	result.Ballots = ballots
 
 	return result, nil
 }

@@ -133,6 +133,13 @@ func (a *Agent) AdminLockingScript() bitcoin.Script {
 	return a.contract.AdminLockingScript()
 }
 
+func (a *Agent) ContractExists() bool {
+	a.contract.Lock()
+	defer a.contract.Unlock()
+
+	return a.contract.Formation != nil
+}
+
 func (a *Agent) ContractIsExpired(now uint64) bool {
 	a.contract.Lock()
 	defer a.contract.Unlock()
@@ -400,6 +407,7 @@ func (a *Agent) processAction(ctx context.Context, transaction *state.Transactio
 		return a.processSettlement(ctx, transaction, act, now)
 
 	case *actions.Proposal:
+		return a.processProposal(ctx, transaction, act, now)
 
 	case *actions.Vote:
 		return a.processVote(ctx, transaction, act, now)
@@ -410,7 +418,7 @@ func (a *Agent) processAction(ctx context.Context, transaction *state.Transactio
 		return a.processBallotCounted(ctx, transaction, act, now)
 
 	case *actions.Result:
-		return a.processGovernanceResult(ctx, transaction, act, now)
+		return a.processVoteResult(ctx, transaction, act, now)
 
 	case *actions.Order:
 
