@@ -16,6 +16,7 @@ import (
 	"github.com/tokenized/specification/dist/golang/actions"
 	"github.com/tokenized/specification/dist/golang/protocol"
 
+	"github.com/golang/protobuf/proto"
 	"github.com/pkg/errors"
 )
 
@@ -33,23 +34,32 @@ type Vote struct {
 	Proposal     *actions.Proposal `bsor:"-" json:"proposal"`
 	ProposalTxID *bitcoin.Hash32   `bsor:"2" json:"proposal_txid"`
 
+	VotingSystem *actions.VotingSystemField `bsor:"-" json:"voting_system"`
+
 	Vote     *actions.Vote   `bsor:"-" json:"vote"`
-	VoteTxID *bitcoin.Hash32 `bsor:"4" json:"vote_txid"`
+	VoteTxID *bitcoin.Hash32 `bsor:"5" json:"vote_txid"`
 
 	Result     *actions.Result `bsor:"-" json:"result"`
-	ResultTxID *bitcoin.Hash32 `bsor:"6" json:"result_txid"`
+	ResultTxID *bitcoin.Hash32 `bsor:"7" json:"result_txid"`
+
+	ContractWideVote bool      `bsor:"8" json:"contract_wide_vote"`
+	TokenQuantity    uint64    `bsor:"9" json:"token_quantity"`
+	BallotCount      uint64    `bsor:"10" json:"ballot_count"`
+	BallotsCounted   uint64    `bsor:"11" json:"ballots_counted"`
+	OptionTally      []float64 `bsor:"12" json:"option_tally"`
+	VotedQuantity    uint64    `bsor:"13" json:"voted_quantity"`
 
 	// ProposalScript is only used by Serialize to save the Proposal value in BSOR.
-	ProposalScript bitcoin.Script `bsor:"7" json:"proposal_script"`
+	ProposalScript bitcoin.Script `bsor:"14" json:"proposal_script"`
 
 	// VoteScript is only used by Serialize to save the Vote value in BSOR.
-	VoteScript bitcoin.Script `bsor:"8" json:"vote_script"`
+	VoteScript bitcoin.Script `bsor:"15" json:"vote_script"`
 
 	// ResultScript is only used by Serialize to save the Result value in BSOR.
-	ResultScript bitcoin.Script `bsor:"9" json:"result_script"`
+	ResultScript bitcoin.Script `bsor:"16" json:"result_script"`
 
-	ContractWideVote bool   `bsor:"10" json:"contract_wide_vote"`
-	TokenQuantity    uint64 `bsor:"11" json:"token_quantity"`
+	// VotingSystemData is only used by Serialize to save the VotingSystem value in BSOR.
+	VotingSystemData []byte `bsor:"17" json:"result_script"`
 
 	isModified bool
 	sync.Mutex `bsor:"-"`
@@ -167,12 +177,30 @@ func (c *VoteCache) Release(ctx context.Context, contractLockingScript bitcoin.S
 	c.cacher.Release(ctx, VotePath(CalculateContractHash(contractLockingScript), voteTxID))
 }
 
+func (c *VoteCache) ReleaseMulti(ctx context.Context, contractLockingScript bitcoin.Script,
+	votes []*Vote) {
+
+	if len(votes) == 0 {
+		return
+	}
+
+	for _, vote := range votes {
+		vote.Lock()
+		voteTxID := *vote.VoteTxID
+		vote.Unlock()
+		c.cacher.Release(ctx, VotePath(CalculateContractHash(contractLockingScript), voteTxID))
+	}
+}
+
 func (v *Vote) Prepare(ctx context.Context, caches *Caches, contract *Contract,
 	votingSystem *actions.VotingSystemField) error {
 
 	contract.Lock()
 	contractLockingScript := contract.LockingScript
 	contract.Unlock()
+
+	v.OptionTally = make([]float64, len(v.Proposal.VoteOptions))
+	v.VotingSystem = votingSystem
 
 	if len(v.Proposal.InstrumentCode) > 0 {
 		instrumentHash20, err := bitcoin.NewHash20(v.Proposal.InstrumentCode)
@@ -212,16 +240,222 @@ func (v *Vote) Prepare(ctx context.Context, caches *Caches, contract *Contract,
 	return nil
 }
 
+func (v *Vote) ApplyVote(choices string, quantity uint64) error {
+	voteOptions := make([]byte, len(v.Proposal.VoteOptions))
+	copy(voteOptions, []byte(v.Proposal.VoteOptions))
+
+	quantityFloat := float64(quantity)
+	voteMaxFloat := float64(v.Proposal.VoteMax)
+	voteMax := int(v.Proposal.VoteMax)
+	for i, choice := range []byte(choices) {
+		var score float64
+		switch v.VotingSystem.TallyLogic {
+		case 0: // Standard
+			score = quantityFloat
+		case 1: // Weighted
+			score = quantityFloat * (float64(voteMax-i) / voteMaxFloat)
+		default:
+			return fmt.Errorf("Unsupported tally logic : %d", v.VotingSystem.TallyLogic)
+		}
+
+		for j, option := range voteOptions {
+			if option == choice {
+				v.OptionTally[j] += score
+				break
+			}
+		}
+	}
+
+	v.BallotsCounted++
+	v.VotedQuantity += quantity
+	return nil
+}
+
+type VoteResultDisplay struct {
+	Results map[string]float64
+}
+
+// CalculateResults calculates the result of a completed vote.
+func (v *Vote) CalculateResults(ctx context.Context) ([]uint64, string) {
+	voteOptions := make([]byte, len(v.Proposal.VoteOptions))
+	copy(voteOptions, []byte(v.Proposal.VoteOptions))
+
+	var result []byte
+	var highestIndex int
+	var highestScore float64
+	resultDisplay := make(map[string]float64)
+	scored := make(map[int]bool)
+	for {
+		highestIndex = -1
+		highestScore = 0.0
+		for i, tally := range v.OptionTally {
+			if _, exists := scored[i]; exists {
+				continue
+			}
+
+			if tally <= highestScore {
+				continue
+			}
+
+			switch v.VotingSystem.VoteType {
+			case "R": // Relative
+				if tally/float64(v.VotedQuantity) >= float64(v.VotingSystem.ThresholdPercentage)/100.0 {
+					highestIndex = i
+					highestScore = tally
+				}
+			case "A": // Absolute
+				if tally/float64(v.TokenQuantity) >= float64(v.VotingSystem.ThresholdPercentage)/100.0 {
+					highestIndex = i
+					highestScore = tally
+				}
+			case "P": // Plurality
+				highestIndex = i
+				highestScore = tally
+			}
+		}
+
+		if highestIndex == -1 {
+			break // No more valid tallys
+		}
+		result = append(result, voteOptions[highestIndex])
+		resultDisplay[string(voteOptions[highestIndex])] = highestScore
+		scored[highestIndex] = true
+	}
+
+	// Convert tallys back to integers
+	tallys := make([]uint64, len(v.OptionTally))
+	for i, tally := range v.OptionTally {
+		logger.Info(ctx, "Vote result %c : %f", voteOptions[i], tally)
+		tallys[i] = uint64(tally)
+	}
+
+	logger.InfoWithFields(ctx, []logger.Field{
+		logger.JSON("results", resultDisplay),
+	}, "Vote results calculated")
+	return tallys, string(result)
+}
+
 func (v *Vote) BuildInstrumentBallots(ctx context.Context, caches *Caches, contract *Contract,
 	votingSystem *actions.VotingSystemField) error {
 
-	// instrumentHash20, err := bitcoin.NewHash20(v.Proposal.InstrumentCode)
-	// if err != nil {
-	// 	logger.Error(ctx, "Invalid proposal instrument code : %s", err)
-	// 	return nil
-	// }
-	// instrumentCode := InstrumentCode(*instrumentHash20)
+	instrumentHash20, err := bitcoin.NewHash20(v.Proposal.InstrumentCode)
+	if err != nil {
+		logger.Error(ctx, "Invalid proposal instrument code : %s", err)
+		return nil
+	}
+	instrumentCode := InstrumentCode(*instrumentHash20)
 
+	contract.Lock()
+	contractLockingScript := contract.LockingScript
+	adminAddress, err := bitcoin.DecodeRawAddress(contract.Formation.AdminAddress)
+	if err != nil {
+		contract.Unlock()
+		return errors.Wrap(err, "admin address")
+	}
+	contract.Unlock()
+
+	adminLockingScript, err := adminAddress.LockingScript()
+	if err != nil {
+		return errors.Wrap(err, "admin locking script")
+	}
+
+	instrument, err := caches.Instruments.Get(ctx, contractLockingScript, instrumentCode)
+	if err != nil {
+		return errors.Wrap(err, "get instrument")
+	}
+
+	if instrument == nil {
+		return errors.New("Instrument not found")
+	}
+
+	instrument.Lock()
+	if instrument.Creation == nil {
+		instrument.Unlock()
+		caches.Instruments.Release(ctx, contractLockingScript, instrumentCode)
+		return errors.New("Instrument creation missing")
+	}
+
+	if !instrument.Creation.VotingRights {
+		instrument.Unlock()
+		caches.Instruments.Release(ctx, contractLockingScript, instrumentCode)
+		return nil
+	}
+
+	multiplier := uint64(instrument.Creation.VoteMultiplier)
+	instrument.Unlock()
+	caches.Instruments.Release(ctx, contractLockingScript, instrumentCode)
+
+	tokenQuantity := uint64(0)
+	ballotCount := uint64(0)
+	ballots := make(map[bitcoin.Hash32]*Ballot)
+	balances, err := caches.Balances.List(ctx, contractLockingScript, instrumentCode)
+	if err != nil {
+		return errors.Wrap(err, "list balances")
+	}
+
+	for _, balance := range balances {
+		balance.Lock()
+		if adminLockingScript.Equal(balance.LockingScript) {
+			balance.Unlock()
+			continue
+		}
+		hash := LockingScriptHash(balance.LockingScript)
+		balanceQuantity := balance.Quantity
+		balance.Unlock()
+
+		tokenQuantity += balanceQuantity
+		if votingSystem.VoteMultiplierPermitted {
+			balanceQuantity *= multiplier
+		}
+
+		ballot, exists := ballots[hash]
+		if exists {
+			ballot.Quantity += balanceQuantity
+		} else {
+			ballots[hash] = &Ballot{
+				LockingScript: balance.LockingScript,
+				Quantity:      balanceQuantity,
+			}
+		}
+	}
+
+	if votingSystem.VoteMultiplierPermitted {
+		tokenQuantity *= multiplier
+	}
+
+	addedBallots, err := caches.Ballots.AddMulti(ctx, contractLockingScript, *v.VoteTxID,
+		ballots)
+	if err != nil {
+		caches.Balances.ReleaseMulti(ctx, contractLockingScript, instrumentCode, balances)
+		return errors.Wrap(err, "add ballots")
+	}
+
+	for hash, ballot := range ballots {
+		addedBallot, exists := addedBallots[hash]
+		if !exists {
+			ballot.Lock()
+			logger.ErrorWithFields(ctx, []logger.Field{
+				logger.Stringer("locking_script", ballot.LockingScript),
+			}, "Ballot failed to add")
+			ballot.Unlock()
+			continue
+		}
+
+		if addedBallot != ballot {
+			// Pre-existing ballot, so update it.
+			addedBallot.Quantity += ballot.Quantity
+			addedBallot.MarkModified()
+		} else {
+			ballotCount++
+		}
+	}
+
+	caches.Ballots.ReleaseMulti(ctx, contractLockingScript, *v.VoteTxID, addedBallots)
+	caches.Balances.ReleaseMulti(ctx, contractLockingScript, instrumentCode, balances)
+
+	v.TokenQuantity = tokenQuantity
+	v.BallotCount = ballotCount
+	v.MarkModified()
 	return nil
 }
 
@@ -229,7 +463,16 @@ func (v *Vote) BuildContractBallots(ctx context.Context, caches *Caches, contrac
 	votingSystem *actions.VotingSystemField) error {
 
 	contract.Lock()
+	if contract.Formation == nil {
+		contract.Unlock()
+		return errors.New("Missing contract formation")
+	}
 	contractLockingScript := contract.LockingScript
+	adminAddress, err := bitcoin.DecodeRawAddress(contract.Formation.AdminAddress)
+	if err != nil {
+		contract.Unlock()
+		return errors.Wrap(err, "admin address")
+	}
 	instrumentCount := contract.InstrumentCount
 	adminMemberInstrument := contract.AdminMemberInstrumentCode
 	contract.Unlock()
@@ -239,7 +482,13 @@ func (v *Vote) BuildContractBallots(ctx context.Context, caches *Caches, contrac
 		return errors.Wrap(err, "contract address")
 	}
 
-	tokenQuantity := uint64(0)
+	adminLockingScript, err := adminAddress.LockingScript()
+	if err != nil {
+		return errors.Wrap(err, "admin locking script")
+	}
+
+	totalTokenQuantity := uint64(0)
+	totalBallotCount := uint64(0)
 	for i := uint64(0); i < instrumentCount; i++ {
 		instrumentCode := InstrumentCode(protocol.InstrumentCodeFromContract(contractAddress, i))
 
@@ -269,16 +518,10 @@ func (v *Vote) BuildContractBallots(ctx context.Context, caches *Caches, contrac
 			continue
 		}
 
-		quantity := instrument.Creation.AuthorizedTokenQty
+		tokenQuantity := uint64(0)
 		multiplier := uint64(instrument.Creation.VoteMultiplier)
 		instrument.Unlock()
 		caches.Instruments.Release(ctx, contractLockingScript, instrumentCode)
-
-		if votingSystem.VoteMultiplierPermitted {
-			tokenQuantity += quantity * multiplier
-		} else {
-			tokenQuantity += quantity
-		}
 
 		ballots := make(map[bitcoin.Hash32]*Ballot)
 		balances, err := caches.Balances.List(ctx, contractLockingScript, instrumentCode)
@@ -288,10 +531,15 @@ func (v *Vote) BuildContractBallots(ctx context.Context, caches *Caches, contrac
 
 		for _, balance := range balances {
 			balance.Lock()
+			if adminLockingScript.Equal(balance.LockingScript) {
+				balance.Unlock()
+				continue
+			}
 			hash := LockingScriptHash(balance.LockingScript)
 			balanceQuantity := balance.Quantity
 			balance.Unlock()
 
+			tokenQuantity += balanceQuantity
 			if votingSystem.VoteMultiplierPermitted {
 				balanceQuantity *= multiplier
 			}
@@ -306,6 +554,11 @@ func (v *Vote) BuildContractBallots(ctx context.Context, caches *Caches, contrac
 				}
 			}
 		}
+
+		if votingSystem.VoteMultiplierPermitted {
+			tokenQuantity *= multiplier
+		}
+		totalTokenQuantity += tokenQuantity
 
 		addedBallots, err := caches.Ballots.AddMulti(ctx, contractLockingScript, *v.VoteTxID,
 			ballots)
@@ -329,6 +582,8 @@ func (v *Vote) BuildContractBallots(ctx context.Context, caches *Caches, contrac
 				// Pre-existing ballot, so update it.
 				addedBallot.Quantity += ballot.Quantity
 				addedBallot.MarkModified()
+			} else {
+				totalBallotCount++
 			}
 		}
 
@@ -336,7 +591,8 @@ func (v *Vote) BuildContractBallots(ctx context.Context, caches *Caches, contrac
 		caches.Balances.ReleaseMulti(ctx, contractLockingScript, instrumentCode, balances)
 	}
 
-	v.TokenQuantity = tokenQuantity
+	v.TokenQuantity = totalTokenQuantity
+	v.BallotCount = totalBallotCount
 	v.MarkModified()
 	return nil
 }
@@ -429,6 +685,15 @@ func (v *Vote) Serialize(w io.Writer) error {
 		v.ResultScript = script
 	}
 
+	if v.VotingSystem != nil {
+		data, err := proto.Marshal(v.VotingSystem)
+		if err != nil {
+			return errors.Wrap(err, "serialize voting system")
+		}
+
+		v.VotingSystemData = data
+	}
+
 	b, err := bsor.MarshalBinary(v)
 	if err != nil {
 		return errors.Wrap(err, "marshal")
@@ -515,6 +780,13 @@ func (v *Vote) Deserialize(r io.Reader) error {
 		}
 
 		v.Result = result
+	}
+
+	if len(v.VotingSystemData) != 0 {
+		v.VotingSystem = &actions.VotingSystemField{}
+		if err := proto.Unmarshal(v.VotingSystemData, v.VotingSystem); err != nil {
+			return errors.Wrap(err, "unmarshal voting system")
+		}
 	}
 
 	return nil

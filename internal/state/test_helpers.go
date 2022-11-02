@@ -133,12 +133,14 @@ func MockContract(ctx context.Context,
 		KeyHash:       keyHash,
 		LockingScript: contractLockingScript,
 		Formation: &actions.ContractFormation{
-			ContractName:   "Test",
-			AdminAddress:   adminAddress.Bytes(),
-			ContractFee:    100,
-			ContractType:   actions.ContractTypeInstrument,
-			EntityContract: entityAddress.Bytes(),
-			Timestamp:      uint64(time.Now().UnixNano()),
+			ContractName:           "Test",
+			AdminAddress:           adminAddress.Bytes(),
+			ContractFee:            100,
+			ContractType:           actions.ContractTypeInstrument,
+			EntityContract:         entityAddress.Bytes(),
+			AdministrationProposal: true,
+			HolderProposal:         true,
+			Timestamp:              uint64(time.Now().UnixNano()),
 		},
 		FormationTxID: &bitcoin.Hash32{},
 	}
@@ -156,9 +158,7 @@ func MockContract(ctx context.Context,
 	return contractKey, contractLockingScript, adminKey, adminLockingScript, contract
 }
 
-func MockInstrumentOnly(ctx context.Context, caches *TestCaches,
-	contractLockingScript, adminLockingScript bitcoin.Script) *Instrument {
-
+func MockInstrumentOnly(ctx context.Context, caches *TestCaches, contract *Contract) *Instrument {
 	currency := &instruments.Currency{
 		CurrencyCode: instruments.CurrenciesUnitedStatesDollar,
 		Precision:    2,
@@ -171,12 +171,35 @@ func MockInstrumentOnly(ctx context.Context, caches *TestCaches,
 
 	authorizedQuantity := uint64(1000000)
 
+	contract.Lock()
+	contractLockingScript := contract.LockingScript
+	adminAddress, err := bitcoin.DecodeRawAddress(contract.Formation.AdminAddress)
+	if err != nil {
+		panic(fmt.Sprintf("Failed to create admin address : %s", err))
+	}
+
+	adminLockingScript, err := adminAddress.LockingScript()
+	if err != nil {
+		panic(fmt.Sprintf("Failed to create admin locking script : %s", err))
+	}
+
+	contractAddress, err := bitcoin.RawAddressFromLockingScript(contractLockingScript)
+	if err != nil {
+		panic(fmt.Sprintf("Failed to create contract address : %s", err))
+	}
+	nextInstrumentCode := protocol.InstrumentCodeFromContract(contractAddress,
+		contract.InstrumentCount)
+	contract.InstrumentCount++
+	contract.Unlock()
+
 	instrument := &Instrument{
+		InstrumentCode: InstrumentCode(nextInstrumentCode),
 		Creation: &actions.InstrumentCreation{
 			// InstrumentIndex                  uint64   `protobuf:"varint,2,opt,name=InstrumentIndex,proto3" json:"InstrumentIndex,omitempty"`
+			InstrumentCode: nextInstrumentCode[:],
 			// InstrumentPermissions            []byte   `protobuf:"bytes,3,opt,name=InstrumentPermissions,proto3" json:"InstrumentPermissions,omitempty"`
 			// EnforcementOrdersPermitted       bool     `protobuf:"varint,6,opt,name=EnforcementOrdersPermitted,proto3" json:"EnforcementOrdersPermitted,omitempty"`
-			// VotingRights                     bool     `protobuf:"varint,7,opt,name=VotingRights,proto3" json:"VotingRights,omitempty"`
+			VotingRights: true,
 			// VoteMultiplier                   uint32   `protobuf:"varint,8,opt,name=VoteMultiplier,proto3" json:"VoteMultiplier,omitempty"`
 			// AdministrationProposal           bool     `protobuf:"varint,9,opt,name=AdministrationProposal,proto3" json:"AdministrationProposal,omitempty"`
 			// HolderProposal                   bool     `protobuf:"varint,10,opt,name=HolderProposal,proto3" json:"HolderProposal,omitempty"`
@@ -190,8 +213,6 @@ func MockInstrumentOnly(ctx context.Context, caches *TestCaches,
 		},
 		CreationTxID: &bitcoin.Hash32{},
 	}
-	rand.Read(instrument.InstrumentCode[:])
-	instrument.Creation.InstrumentCode = instrument.InstrumentCode[:]
 	rand.Read(instrument.CreationTxID[:])
 	copy(instrument.InstrumentType[:], []byte(instruments.CodeCurrency))
 
@@ -226,7 +247,8 @@ func MockInstrumentOnly(ctx context.Context, caches *TestCaches,
 func MockInstrument(ctx context.Context,
 	caches *TestCaches) (bitcoin.Key, bitcoin.Script, bitcoin.Key, bitcoin.Script, *Contract, *Instrument) {
 
-	contractKey, contractLockingScript, adminKey, adminLockingScript, contract := MockContract(ctx, caches)
+	contractKey, contractLockingScript, adminKey, adminLockingScript, contract := MockContract(ctx,
+		caches)
 
 	currency := &instruments.Currency{
 		CurrencyCode: instruments.CurrenciesUnitedStatesDollar,
@@ -240,9 +262,21 @@ func MockInstrument(ctx context.Context,
 
 	authorizedQuantity := uint64(1000000)
 
+	contract.Lock()
+	contractAddress, err := bitcoin.RawAddressFromLockingScript(contractLockingScript)
+	if err != nil {
+		panic(fmt.Sprintf("Failed to create contract address : %s", err))
+	}
+	nextInstrumentCode := protocol.InstrumentCodeFromContract(contractAddress,
+		contract.InstrumentCount)
+	contract.InstrumentCount++
+	contract.Unlock()
+
 	instrument := &Instrument{
+		InstrumentCode: InstrumentCode(nextInstrumentCode),
 		Creation: &actions.InstrumentCreation{
 			// InstrumentIndex                  uint64   `protobuf:"varint,2,opt,name=InstrumentIndex,proto3" json:"InstrumentIndex,omitempty"`
+			InstrumentCode: nextInstrumentCode[:],
 			// InstrumentPermissions            []byte   `protobuf:"bytes,3,opt,name=InstrumentPermissions,proto3" json:"InstrumentPermissions,omitempty"`
 			// EnforcementOrdersPermitted       bool     `protobuf:"varint,6,opt,name=EnforcementOrdersPermitted,proto3" json:"EnforcementOrdersPermitted,omitempty"`
 			// VotingRights                     bool     `protobuf:"varint,7,opt,name=VotingRights,proto3" json:"VotingRights,omitempty"`
@@ -297,7 +331,7 @@ func MockInstrumentWithOracle(ctx context.Context,
 
 	identityContractAddress, identityKey := MockIdentityOracle(ctx, caches)
 
-	contractKey, contractLockingScript, _ := MockKey()
+	contractKey, contractLockingScript, contractAddress := MockKey()
 	adminKey, adminLockingScript, adminAddress := MockKey()
 	_, _, entityAddress := MockKey()
 
@@ -337,9 +371,17 @@ func MockInstrumentWithOracle(ctx context.Context,
 
 	authorizedQuantity := uint64(1000000)
 
+	contract.Lock()
+	nextInstrumentCode := protocol.InstrumentCodeFromContract(contractAddress,
+		contract.InstrumentCount)
+	contract.InstrumentCount++
+	contract.Unlock()
+
 	instrument := &Instrument{
+		InstrumentCode: InstrumentCode(nextInstrumentCode),
 		Creation: &actions.InstrumentCreation{
 			// InstrumentIndex                  uint64   `protobuf:"varint,2,opt,name=InstrumentIndex,proto3" json:"InstrumentIndex,omitempty"`
+			InstrumentCode: nextInstrumentCode[:],
 			// InstrumentPermissions            []byte   `protobuf:"bytes,3,opt,name=InstrumentPermissions,proto3" json:"InstrumentPermissions,omitempty"`
 			// EnforcementOrdersPermitted       bool     `protobuf:"varint,6,opt,name=EnforcementOrdersPermitted,proto3" json:"EnforcementOrdersPermitted,omitempty"`
 			// VotingRights                     bool     `protobuf:"varint,7,opt,name=VotingRights,proto3" json:"VotingRights,omitempty"`
@@ -716,6 +758,164 @@ func MockVoteInstrumentAmendmentCompleted(ctx context.Context, caches *TestCache
 	}
 
 	return vote
+}
+
+func MockProposal(ctx context.Context, caches *TestCaches, contract *Contract,
+	voteSystemIndex uint32) *Vote {
+
+	contract.Lock()
+
+	contractLockingScript := contract.LockingScript
+
+	adminAddress, err := bitcoin.DecodeRawAddress(contract.Formation.AdminAddress)
+	if err != nil {
+		panic(fmt.Sprintf("Failed to create admin address : %s", err))
+	}
+
+	adminLockingScript, err := adminAddress.LockingScript()
+	if err != nil {
+		panic(fmt.Sprintf("Failed to create admin locking script : %s", err))
+	}
+
+	votingSystem := contract.Formation.VotingSystems[voteSystemIndex]
+
+	contract.Unlock()
+
+	now := uint64(time.Now().UnixNano())
+
+	vote := &Vote{
+		Proposal: &actions.Proposal{
+			Type: 0, // Referendum
+			// InstrumentType       string
+			// InstrumentCode       []byte
+			VoteSystem:          voteSystemIndex,
+			VoteOptions:         "AR",
+			VoteMax:             1,
+			ProposalDescription: "Vote on something",
+			VoteCutOffTimestamp: now + 2000000,
+		},
+		VotingSystem: votingSystem,
+		Vote: &actions.Vote{
+			Timestamp: now - 1000,
+		},
+	}
+
+	var fundingTxID bitcoin.Hash32
+	rand.Read(fundingTxID[:])
+
+	proposalTx := wire.NewMsgTx(1)
+	proposalTx.AddTxIn(wire.NewTxIn(wire.NewOutPoint(&fundingTxID, 0), nil))
+	proposalTx.AddTxOut(wire.NewTxOut(200, contractLockingScript)) // For Vote
+	proposalTx.AddTxOut(wire.NewTxOut(200, contractLockingScript)) // For Result
+
+	proposalScript, err := protocol.Serialize(vote.Proposal, IsTest())
+	if err != nil {
+		panic(fmt.Sprintf("Failed to serialize proposal : %s", err))
+	}
+	proposalTx.AddTxOut(wire.NewTxOut(0, proposalScript))
+
+	vote.ProposalTxID = proposalTx.TxHash()
+
+	if _, err := caches.Caches.Transactions.AddExpandedTx(ctx, &expanded_tx.ExpandedTx{
+		Tx: proposalTx,
+		SpentOutputs: []*expanded_tx.Output{
+			{
+				Value:         200,
+				LockingScript: adminLockingScript,
+			},
+		},
+	}); err != nil {
+		panic(fmt.Sprintf("Failed to add proposal tx : %s", err))
+	}
+
+	voteTx := wire.NewMsgTx(1)
+	voteTx.AddTxIn(wire.NewTxIn(wire.NewOutPoint(vote.ProposalTxID, 0), contractLockingScript))
+	voteTx.AddTxOut(wire.NewTxOut(200, contractLockingScript))
+
+	voteScript, err := protocol.Serialize(vote.Vote, IsTest())
+	if err != nil {
+		panic(fmt.Sprintf("Failed to serialize vote : %s", err))
+	}
+	voteTx.AddTxOut(wire.NewTxOut(0, voteScript))
+
+	vote.VoteTxID = voteTx.TxHash()
+
+	if _, err := caches.Caches.Transactions.AddExpandedTx(ctx, &expanded_tx.ExpandedTx{
+		Tx: voteTx,
+		SpentOutputs: []*expanded_tx.Output{
+			{
+				Value:         200,
+				LockingScript: contractLockingScript,
+			},
+		},
+	}); err != nil {
+		panic(fmt.Sprintf("Failed to add vote tx : %s", err))
+	}
+
+	addedVote, err := caches.Caches.Votes.Add(ctx, contractLockingScript, vote)
+	if err != nil {
+		panic(fmt.Sprintf("Failed to add contract : %s", err))
+	}
+
+	if addedVote != vote {
+		panic("Created vote is not new")
+	}
+
+	return vote
+}
+
+type MockBalance struct {
+	Key           bitcoin.Key
+	LockingScript bitcoin.Script
+	Quantity      uint64
+}
+
+func MockBalances(ctx context.Context, caches *TestCaches, contract *Contract,
+	instrument *Instrument, count int) []*MockBalance {
+
+	balances := make([]*MockBalance, count)
+	balancesToAdd := make(Balances, count)
+	for i := 0; i < count; i++ {
+		key, lockingScript, _ := MockKey()
+		quantity := uint64(rand.Intn(1000))
+
+		balance := &Balance{
+			LockingScript: lockingScript,
+			Quantity:      quantity,
+			Timestamp:     uint64(time.Now().UnixNano()),
+			TxID:          &bitcoin.Hash32{},
+		}
+		rand.Read(balance.TxID[:])
+
+		balances[i] = &MockBalance{
+			Key:           key,
+			LockingScript: lockingScript,
+			Quantity:      quantity,
+		}
+
+		balancesToAdd[i] = balance
+	}
+
+	contract.Lock()
+	contractLockingScript := contract.LockingScript
+	contract.Unlock()
+
+	instrument.Lock()
+	instrumentCode := instrument.InstrumentCode
+	instrument.Unlock()
+
+	addedBalances, err := caches.Caches.Balances.AddMulti(ctx, contractLockingScript,
+		instrumentCode, balancesToAdd)
+	if err != nil {
+		panic(fmt.Sprintf("Failed to add balances : %s", err))
+	}
+
+	if err := caches.Caches.Balances.ReleaseMulti(ctx, contractLockingScript, instrumentCode,
+		addedBalances); err != nil {
+		panic(fmt.Sprintf("Failed to release balances : %s", err))
+	}
+
+	return balances
 }
 
 func MockKey() (bitcoin.Key, bitcoin.Script, bitcoin.RawAddress) {

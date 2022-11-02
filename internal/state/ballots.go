@@ -8,10 +8,11 @@ import (
 	"reflect"
 	"sync"
 
-	"github.com/pkg/errors"
 	"github.com/tokenized/cacher"
 	"github.com/tokenized/pkg/bitcoin"
 	"github.com/tokenized/pkg/bsor"
+
+	"github.com/pkg/errors"
 )
 
 const (
@@ -149,26 +150,24 @@ func (c *BallotCache) GetMulti(ctx context.Context, contractLockingScript bitcoi
 func (c *BallotCache) List(ctx context.Context, contractLockingScript bitcoin.Script,
 	voteTxID bitcoin.Hash32) (Ballots, error) {
 
-	// TODO Implement this --ce
-	// pathPrefix := ballotPathPrefix(contractLockingScript, voteTxID)
-	// values, err := c.cacher.ListMultiSetValue(ctx, c.typ, pathPrefix)
-	// if err != nil {
-	// 	return nil, errors.Wrap(err, "list set multi")
-	// }
+	pathPrefix := ballotPathPrefix(contractLockingScript, voteTxID)
+	values, err := c.cacher.ListMultiSetValue(ctx, c.typ, pathPrefix)
+	if err != nil {
+		return nil, errors.Wrap(err, "list set multi")
+	}
 
-	// result := make(Ballots, len(values))
-	// for _, value := range values {
-	// 	if value == nil {
-	// 		continue
-	// 	}
+	result := make(Ballots, len(values))
+	for _, value := range values {
+		if value == nil {
+			continue
+		}
 
-	// 	ballot := value.(*Ballot)
-	// 	hash := LockingScriptHash(ballot.LockingScript)
-	// 	result[hash] = ballot
-	// }
+		ballot := value.(*Ballot)
+		hash := LockingScriptHash(ballot.LockingScript)
+		result[hash] = ballot
+	}
 
-	// return result, nil
-	return nil, nil
+	return result, nil
 }
 
 func (c *BallotCache) Release(ctx context.Context, contractLockingScript bitcoin.Script,

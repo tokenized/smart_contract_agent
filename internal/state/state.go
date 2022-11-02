@@ -171,13 +171,10 @@ func CopyRecursive(ctx context.Context, store storage.CopyList, fromPrefix, toPr
 		return errors.Wrap(err, "list")
 	}
 
-	println("Listed", len(items), "items")
-
 	fromPrefixLength := len(fromPrefix)
 
 	for i, from := range items {
 		to := toPrefix + from[fromPrefixLength:]
-		println("copy from", from, to)
 		if err := store.Copy(ctx, from, to); err != nil {
 			return errors.Wrapf(err, "copy %d/%d", i, len(items))
 		}

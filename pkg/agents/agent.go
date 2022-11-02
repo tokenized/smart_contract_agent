@@ -413,6 +413,7 @@ func (a *Agent) processAction(ctx context.Context, transaction *state.Transactio
 		return a.processVote(ctx, transaction, act, now)
 
 	case *actions.BallotCast:
+		return a.processBallotCast(ctx, transaction, act, now)
 
 	case *actions.BallotCounted:
 		return a.processBallotCounted(ctx, transaction, act, now)

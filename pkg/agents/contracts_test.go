@@ -16,6 +16,7 @@ import (
 	"github.com/tokenized/pkg/txbuilder"
 	"github.com/tokenized/smart_contract_agent/internal/state"
 	"github.com/tokenized/specification/dist/golang/actions"
+	"github.com/tokenized/specification/dist/golang/permissions"
 	"github.com/tokenized/specification/dist/golang/protocol"
 )
 
@@ -539,10 +540,12 @@ func Test_Contracts_Amendment_Valid(t *testing.T) {
 	t.Logf("Original ContractFormation : %s", js)
 
 	newOffer := &actions.ContractOffer{
-		ContractName:   "New Test Name",
-		ContractFee:    contract.Formation.ContractFee,
-		ContractType:   contract.Formation.ContractType,
-		EntityContract: contract.Formation.EntityContract,
+		ContractName:           "New Test Name",
+		ContractFee:            contract.Formation.ContractFee,
+		ContractType:           contract.Formation.ContractType,
+		AdministrationProposal: contract.Formation.AdministrationProposal,
+		HolderProposal:         contract.Formation.HolderProposal,
+		EntityContract:         contract.Formation.EntityContract,
 	}
 
 	amendments, err := contract.Formation.CreateAmendments(newOffer)
@@ -550,12 +553,21 @@ func Test_Contracts_Amendment_Valid(t *testing.T) {
 		t.Fatalf("Failed to create amendments : %s", err)
 	}
 
-	if len(amendments) != 1 {
-		t.Fatalf("Wrong amendment count : %s", err)
-	}
-
 	js, _ = json.MarshalIndent(amendments, "", "  ")
 	t.Logf("Amendments : %s", js)
+
+	for _, amendment := range amendments {
+		path, err := permissions.FieldIndexPathFromBytes(amendment.FieldIndexPath)
+		if err != nil {
+			t.Fatalf("Invalid field index path : %s", err)
+		}
+
+		t.Logf("Field Index Path : %v", path)
+	}
+
+	if len(amendments) != 1 {
+		t.Fatalf("Wrong amendment count : got %d, want %d", len(amendments), 1)
+	}
 
 	contractAmendment := &actions.ContractAmendment{
 		// ChangeAdministrationAddress bool
@@ -892,12 +904,14 @@ func Test_Contracts_Amendment_Proposal(t *testing.T) {
 	t.Logf("Original ContractFormation : %s", js)
 
 	newOffer := &actions.ContractOffer{
-		ContractName:        "New Test Name",
-		ContractFee:         contract.Formation.ContractFee,
-		ContractType:        contract.Formation.ContractType,
-		EntityContract:      contract.Formation.EntityContract,
-		VotingSystems:       contract.Formation.VotingSystems,
-		ContractPermissions: contract.Formation.ContractPermissions,
+		ContractName:           "New Test Name",
+		ContractFee:            contract.Formation.ContractFee,
+		ContractType:           contract.Formation.ContractType,
+		EntityContract:         contract.Formation.EntityContract,
+		VotingSystems:          contract.Formation.VotingSystems,
+		AdministrationProposal: contract.Formation.AdministrationProposal,
+		HolderProposal:         contract.Formation.HolderProposal,
+		ContractPermissions:    contract.Formation.ContractPermissions,
 	}
 
 	amendments, err := contract.Formation.CreateAmendments(newOffer)

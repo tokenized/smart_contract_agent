@@ -551,7 +551,7 @@ func Test_Instruments_Amendment_Proposal(t *testing.T) {
 		caches, votingSystems)
 	_, feeLockingScript, _ := state.MockKey()
 
-	instrument := state.MockInstrumentOnly(ctx, caches, contractLockingScript, adminLockingScript)
+	instrument := state.MockInstrumentOnly(ctx, caches, contract)
 
 	agent, err := NewAgent(contractKey, DefaultConfig(), contract, feeLockingScript, caches.Caches,
 		store, broadcaster, nil, nil)
@@ -563,6 +563,7 @@ func Test_Instruments_Amendment_Proposal(t *testing.T) {
 		AuthorizedTokenQty: instrument.Creation.AuthorizedTokenQty + 10,
 		InstrumentType:     instrument.Creation.InstrumentType,
 		InstrumentPayload:  instrument.Creation.InstrumentPayload,
+		VotingRights:       true,
 	}
 
 	amendments, err := instrument.Creation.CreateAmendments(newDefinition)

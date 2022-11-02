@@ -168,24 +168,22 @@ func (c *BalanceCache) GetMulti(ctx context.Context, contractLockingScript bitco
 func (c *BalanceCache) List(ctx context.Context, contractLockingScript bitcoin.Script,
 	instrumentCode InstrumentCode) (Balances, error) {
 
-	// TODO Implement this --ce
-	// pathPrefix := balancePathPrefix(contractLockingScript, instrumentCode)
-	// values, err := c.cacher.ListMultiSetValue(ctx, c.typ, pathPrefix)
-	// if err != nil {
-	// 	return nil, errors.Wrap(err, "list set multi")
-	// }
+	pathPrefix := balancePathPrefix(contractLockingScript, instrumentCode)
+	values, err := c.cacher.ListMultiSetValue(ctx, c.typ, pathPrefix)
+	if err != nil {
+		return nil, errors.Wrap(err, "list set multi")
+	}
 
-	// result := make(Balances, len(values))
-	// for i, value := range values {
-	// 	if value == nil {
-	// 		continue
-	// 	}
+	result := make(Balances, len(values))
+	for i, value := range values {
+		if value == nil {
+			continue
+		}
 
-	// 	result[i] = value.(*Balance)
-	// }
+		result[i] = value.(*Balance)
+	}
 
-	// return result, nil
-	return nil, nil
+	return result, nil
 }
 
 func (c *BalanceCache) Release(ctx context.Context, contractLockingScript bitcoin.Script,
