@@ -9,6 +9,7 @@ import (
 	"github.com/tokenized/logger"
 	"github.com/tokenized/pkg/bitcoin"
 	"github.com/tokenized/pkg/storage"
+	"github.com/tokenized/smart_contract_agent/internal/platform"
 	"github.com/tokenized/smart_contract_agent/internal/state"
 	"github.com/tokenized/smart_contract_agent/pkg/agents"
 	spynode "github.com/tokenized/spynode/pkg/client"
@@ -33,6 +34,7 @@ type Conductor struct {
 	broadcaster agents.Broadcaster
 	fetcher     agents.Fetcher
 	headers     agents.BlockHeaders
+	scheduler   *platform.Scheduler
 
 	lookup map[state.ContractHash]bitcoin.Hash32
 
@@ -44,7 +46,7 @@ type Conductor struct {
 func NewConductor(baseKey bitcoin.Key, config agents.Config, feeLockingScript bitcoin.Script,
 	spyNodeClient spynode.Client, caches *state.Caches, store storage.CopyList,
 	broadcaster agents.Broadcaster, fetcher agents.Fetcher,
-	headers agents.BlockHeaders) *Conductor {
+	headers agents.BlockHeaders, scheduler *platform.Scheduler) *Conductor {
 
 	return &Conductor{
 		baseKey:              baseKey,
@@ -56,6 +58,7 @@ func NewConductor(baseKey bitcoin.Key, config agents.Config, feeLockingScript bi
 		broadcaster:          broadcaster,
 		fetcher:              fetcher,
 		headers:              headers,
+		scheduler:            scheduler,
 		lookup:               make(map[state.ContractHash]bitcoin.Hash32),
 		nextSpyNodeMessageID: 1,
 	}
@@ -181,7 +184,7 @@ func (c *Conductor) AddAgent(ctx context.Context,
 	}
 
 	agent, err := agents.NewAgent(key, c.config, addedContract, c.feeLockingScript, c.caches,
-		c.store, c.broadcaster, c.fetcher, c.headers)
+		c.store, c.broadcaster, c.fetcher, c.headers, c.scheduler)
 	if err != nil {
 		return nil, errors.Wrap(err, "new agent")
 	}
@@ -227,7 +230,7 @@ func (c *Conductor) GetAgent(ctx context.Context,
 	}
 
 	agent, err := agents.NewAgent(key, c.config, contract, c.feeLockingScript, c.caches, c.store,
-		c.broadcaster, c.fetcher, c.headers)
+		c.broadcaster, c.fetcher, c.headers, c.scheduler)
 	if err != nil {
 		return nil, errors.Wrap(err, "new agent")
 	}

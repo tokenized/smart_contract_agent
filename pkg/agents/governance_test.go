@@ -45,7 +45,7 @@ func Test_Proposal_Valid(t *testing.T) {
 
 	_, feeLockingScript, _ := state.MockKey()
 	agent, err := NewAgent(contractKey, DefaultConfig(), contract, feeLockingScript, caches.Caches,
-		store, broadcaster, nil, nil)
+		store, broadcaster, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("Failed to create agent : %s", err)
 	}
@@ -222,7 +222,7 @@ func Test_Ballots_Valid(t *testing.T) {
 
 	_, feeLockingScript, _ := state.MockKey()
 	agent, err := NewAgent(contractKey, DefaultConfig(), contract, feeLockingScript, caches.Caches,
-		store, broadcaster, nil, nil)
+		store, broadcaster, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("Failed to create agent : %s", err)
 	}

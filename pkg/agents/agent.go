@@ -51,6 +51,7 @@ type Agent struct {
 	broadcaster Broadcaster
 	fetcher     Fetcher
 	headers     BlockHeaders
+	scheduler   *platform.Scheduler
 
 	lock sync.Mutex
 }
@@ -82,7 +83,8 @@ type TransactionWithOutputs interface {
 
 func NewAgent(key bitcoin.Key, config Config, contract *state.Contract,
 	feeLockingScript bitcoin.Script, caches *state.Caches, store storage.CopyList,
-	broadcaster Broadcaster, fetcher Fetcher, headers BlockHeaders) (*Agent, error) {
+	broadcaster Broadcaster, fetcher Fetcher, headers BlockHeaders,
+	scheduler *platform.Scheduler) (*Agent, error) {
 
 	contract.Lock()
 	lockingScript := contract.LockingScript
@@ -99,6 +101,7 @@ func NewAgent(key bitcoin.Key, config Config, contract *state.Contract,
 		broadcaster:      broadcaster,
 		fetcher:          fetcher,
 		headers:          headers,
+		scheduler:        scheduler,
 	}
 
 	return result, nil

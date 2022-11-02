@@ -87,6 +87,8 @@ func main() {
 		logger.Fatal(ctx, "main : Failed to create storage : %s", err)
 	}
 
+	scheduler := platform.NewScheduler()
+
 	if cfg.SpyNode.ConnectionType != spyNodeClient.ConnectionTypeFull {
 		logger.Fatal(ctx, "main : Spynode connection type must be full to receive data : %s", err)
 	}
@@ -103,10 +105,14 @@ func main() {
 	}
 
 	conductor := conductor.NewConductor(cfg.BaseKey, cfg.Agents, feeLockingScript, spyNode,
-		caches, store, NewSpyNodeBroadcaster(spyNode), spyNode, platform.NewHeaders(spyNode))
+		caches, store, NewSpyNodeBroadcaster(spyNode), spyNode, platform.NewHeaders(spyNode),
+		scheduler)
 	spyNode.RegisterHandler(conductor)
 
-	var spyNodeWait, cacheWait sync.WaitGroup
+	var spyNodeWait, cacheWait, schedulerWait sync.WaitGroup
+
+	schedulerThread, schedulerComplete := threads.NewInterruptableThreadComplete("Scheduler",
+		scheduler.Run, &schedulerWait)
 
 	cacheShutdown := make(chan error)
 	cacheThread, cacheComplete := threads.NewInterruptableThreadComplete("Cache",
@@ -117,6 +123,7 @@ func main() {
 	spyNodeThread, spyNodeComplete := threads.NewInterruptableThreadComplete("SpyNode", spyNode.Run,
 		&spyNodeWait)
 
+	schedulerThread.Start(ctx)
 	cacheThread.Start(ctx)
 	spyNodeThread.Start(ctx)
 
@@ -131,6 +138,9 @@ func main() {
 	//
 	// Blocking main and waiting for shutdown.
 	select {
+	case err := <-schedulerComplete:
+		logger.Error(ctx, "Scheduler shutting down : %s", err)
+
 	case err := <-cacheShutdown:
 		logger.Error(ctx, "Cache shutting down : %s", err)
 
@@ -143,6 +153,9 @@ func main() {
 	case <-osSignals:
 		logger.Info(ctx, "Start shutdown")
 	}
+
+	schedulerThread.Stop(ctx)
+	schedulerWait.Wait()
 
 	spyNodeThread.Stop(ctx)
 	spyNodeWait.Wait()
