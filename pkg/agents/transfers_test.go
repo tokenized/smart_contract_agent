@@ -34,7 +34,7 @@ func Test_Transfers_Basic(t *testing.T) {
 	_, feeLockingScript, _ := state.MockKey()
 
 	agent, err := NewAgent(contractKey, DefaultConfig(), contract, feeLockingScript, caches.Caches,
-		store, broadcaster, nil, nil, nil)
+		store, broadcaster, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("Failed to create agent : %s", err)
 	}
@@ -374,7 +374,7 @@ func Test_Transfers_InsufficientQuantity(t *testing.T) {
 	_, feeLockingScript, _ := state.MockKey()
 
 	agent, err := NewAgent(contractKey, DefaultConfig(), contract, feeLockingScript, caches.Caches,
-		store, broadcaster, nil, nil, nil)
+		store, broadcaster, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("Failed to create agent : %s", err)
 	}
@@ -552,7 +552,7 @@ func Test_Transfers_IdentityOracle_MissingSignature(t *testing.T) {
 	_, feeLockingScript, _ := state.MockKey()
 
 	agent, err := NewAgent(contractKey, DefaultConfig(), contract, feeLockingScript, caches.Caches,
-		store, broadcaster, nil, nil, nil)
+		store, broadcaster, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("Failed to create agent : %s", err)
 	}
@@ -733,7 +733,7 @@ func Test_Transfers_IdentityOracle_Valid(t *testing.T) {
 	headers.AddHash(headerHeight, headerHash)
 
 	agent, err := NewAgent(contractKey, DefaultConfig(), contract, feeLockingScript, caches.Caches,
-		store, broadcaster, nil, headers, nil)
+		store, broadcaster, nil, headers, nil, nil)
 	if err != nil {
 		t.Fatalf("Failed to create agent : %s", err)
 	}
@@ -922,7 +922,7 @@ func Test_Transfers_IdentityOracle_BadSignature(t *testing.T) {
 	headers.AddHash(headerHeight, headerHash)
 
 	agent, err := NewAgent(contractKey, DefaultConfig(), contract, feeLockingScript, caches.Caches,
-		store, broadcaster, nil, headers, nil)
+		store, broadcaster, nil, headers, nil, nil)
 	if err != nil {
 		t.Fatalf("Failed to create agent : %s", err)
 	}
@@ -1110,7 +1110,7 @@ func Test_Transfers_Multi_Basic(t *testing.T) {
 	_, feeLockingScript1, _ := state.MockKey()
 
 	agent1, err := NewAgent(contractKey1, DefaultConfig(), contract1, feeLockingScript1,
-		caches.Caches, store, broadcaster1, nil, nil, nil)
+		caches.Caches, store, broadcaster1, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("Failed to create agent : %s", err)
 	}
@@ -1120,7 +1120,7 @@ func Test_Transfers_Multi_Basic(t *testing.T) {
 	_, feeLockingScript2, _ := state.MockKey()
 
 	agent2, err := NewAgent(contractKey2, DefaultConfig(), contract2, feeLockingScript2,
-		caches.Caches, store, broadcaster2, nil, nil, nil)
+		caches.Caches, store, broadcaster2, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("Failed to create agent : %s", err)
 	}
@@ -1511,7 +1511,7 @@ func Test_Transfers_Multi_Reject_First(t *testing.T) {
 	_, feeLockingScript1, _ := state.MockKey()
 
 	agent1, err := NewAgent(contractKey1, DefaultConfig(), contract1, feeLockingScript1,
-		caches.Caches, store, broadcaster1, nil, nil, nil)
+		caches.Caches, store, broadcaster1, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("Failed to create agent : %s", err)
 	}
@@ -1521,7 +1521,7 @@ func Test_Transfers_Multi_Reject_First(t *testing.T) {
 	_, feeLockingScript2, _ := state.MockKey()
 
 	agent2, err := NewAgent(contractKey2, DefaultConfig(), contract2, feeLockingScript2,
-		caches.Caches, store, broadcaster2, nil, nil, nil)
+		caches.Caches, store, broadcaster2, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("Failed to create agent : %s", err)
 	}
@@ -1743,7 +1743,7 @@ func Test_Transfers_Multi_Reject_Second(t *testing.T) {
 	_, feeLockingScript1, _ := state.MockKey()
 
 	agent1, err := NewAgent(contractKey1, DefaultConfig(), contract1, feeLockingScript1,
-		caches.Caches, store, broadcaster1, nil, nil, nil)
+		caches.Caches, store, broadcaster1, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("Failed to create agent : %s", err)
 	}
@@ -1753,7 +1753,7 @@ func Test_Transfers_Multi_Reject_Second(t *testing.T) {
 	_, feeLockingScript2, _ := state.MockKey()
 
 	agent2, err := NewAgent(contractKey2, DefaultConfig(), contract2, feeLockingScript2,
-		caches.Caches, store, broadcaster2, nil, nil, nil)
+		caches.Caches, store, broadcaster2, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("Failed to create agent : %s", err)
 	}

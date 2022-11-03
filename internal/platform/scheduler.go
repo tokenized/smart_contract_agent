@@ -23,9 +23,16 @@ type Scheduler struct {
 }
 
 type Task struct {
+	typ      uint8
 	id       bitcoin.Hash32
 	start    time.Time
 	function threads.InterruptableFunction
+}
+
+type Task interface {
+	Equal(other Task) bool
+	Start() time.Time
+	Run(ctx context.Context, interrupt <-chan interface{}) error
 }
 
 func NewScheduler() *Scheduler {
@@ -38,6 +45,7 @@ func (s *Scheduler) Schedule(ctx context.Context, id bitcoin.Hash32, start time.
 	function threads.InterruptableFunction) {
 
 	tsk := &Task{
+		typ: typ,
 		id:       id,
 		start:    start,
 		function: function,
@@ -62,18 +70,23 @@ func (s *Scheduler) Schedule(ctx context.Context, id bitcoin.Hash32, start time.
 }
 
 func (s *Scheduler) Cancel(ctx context.Context, id bitcoin.Hash32) {
+	if s.remove(id) {
+		s.refreshNotify <- true
+	}
+}
+
+func (s *Scheduler) remove(id bitcoin.Hash32) bool {
 	s.lock.Lock()
+	defer s.lock.Unlock()
 
 	for i, task := range s.tasks {
 		if task.id.Equal(&id) {
 			s.tasks = append(s.tasks[:i], s.tasks[i+1:]...)
-			s.lock.Unlock()
-			s.refreshNotify <- true
-			return
+			return true
 		}
 	}
 
-	s.lock.Unlock()
+	return false
 }
 
 func (s *Scheduler) Run(ctx context.Context, interrupt <-chan interface{}) error {
@@ -101,6 +114,8 @@ func (s *Scheduler) Run(ctx context.Context, interrupt <-chan interface{}) error
 
 					return errors.Wrap(err, nextTask.id.String())
 				}
+
+				s.remove(nextTask.id)
 			}
 
 			durationToStart := nextTask.start.Sub(now)
@@ -114,7 +129,7 @@ func (s *Scheduler) Run(ctx context.Context, interrupt <-chan interface{}) error
 		selectIndex, _, _ := reflect.Select(selects)
 		switch selectIndex {
 		case 0: // interrupt
-			return threads.Interrupted
+			return nil
 
 		case 1: // new task notify
 			// continue to reset next task
@@ -127,6 +142,8 @@ func (s *Scheduler) Run(ctx context.Context, interrupt <-chan interface{}) error
 
 				return errors.Wrap(err, nextTask.id.String())
 			}
+
+			s.remove(nextTask.id)
 		}
 	}
 }

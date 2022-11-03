@@ -43,7 +43,7 @@ func Test_Contracts_Offer_Invalid(t *testing.T) {
 	}
 
 	agent, err := NewAgent(contractKey, DefaultConfig(), contract, feeLockingScript, caches.Caches,
-		store, broadcaster, nil, nil, nil)
+		store, broadcaster, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("Failed to create agent : %s", err)
 	}
@@ -187,7 +187,7 @@ func Test_Contracts_Offer_Valid(t *testing.T) {
 	}
 
 	agent, err := NewAgent(contractKey, DefaultConfig(), contract, feeLockingScript, caches.Caches,
-		store, broadcaster, nil, nil, nil)
+		store, broadcaster, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("Failed to create agent : %s", err)
 	}
@@ -379,7 +379,7 @@ func Test_Contracts_Offer_AlreadyExists(t *testing.T) {
 	}
 
 	agent, err := NewAgent(contractKey, DefaultConfig(), contract, feeLockingScript, caches.Caches,
-		store, broadcaster, nil, nil, nil)
+		store, broadcaster, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("Failed to create agent : %s", err)
 	}
@@ -511,7 +511,7 @@ func Test_Contracts_Amendment_Valid(t *testing.T) {
 	_, feeLockingScript, _ := state.MockKey()
 
 	agent, err := NewAgent(contractKey, DefaultConfig(), contract, feeLockingScript, caches.Caches,
-		store, broadcaster, nil, nil, nil)
+		store, broadcaster, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("Failed to create agent : %s", err)
 	}
@@ -697,7 +697,7 @@ func Test_Contracts_Amendment_AdminChange(t *testing.T) {
 	newAdminKey, newAdminLockingScript, newAdminAddress := state.MockKey()
 
 	agent, err := NewAgent(contractKey, DefaultConfig(), contract, feeLockingScript, caches.Caches,
-		store, broadcaster, nil, nil, nil)
+		store, broadcaster, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("Failed to create agent : %s", err)
 	}
@@ -875,7 +875,7 @@ func Test_Contracts_Amendment_Proposal(t *testing.T) {
 	_, feeLockingScript, _ := state.MockKey()
 
 	agent, err := NewAgent(contractKey, DefaultConfig(), contract, feeLockingScript, caches.Caches,
-		store, broadcaster, nil, nil, nil)
+		store, broadcaster, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("Failed to create agent : %s", err)
 	}

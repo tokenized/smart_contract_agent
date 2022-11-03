@@ -184,7 +184,7 @@ func (c *Conductor) AddAgent(ctx context.Context,
 	}
 
 	agent, err := agents.NewAgent(key, c.config, addedContract, c.feeLockingScript, c.caches,
-		c.store, c.broadcaster, c.fetcher, c.headers, c.scheduler)
+		c.store, c.broadcaster, c.fetcher, c.headers, c.scheduler, c)
 	if err != nil {
 		return nil, errors.Wrap(err, "new agent")
 	}
@@ -230,7 +230,7 @@ func (c *Conductor) GetAgent(ctx context.Context,
 	}
 
 	agent, err := agents.NewAgent(key, c.config, contract, c.feeLockingScript, c.caches, c.store,
-		c.broadcaster, c.fetcher, c.headers, c.scheduler)
+		c.broadcaster, c.fetcher, c.headers, c.scheduler, c)
 	if err != nil {
 		return nil, errors.Wrap(err, "new agent")
 	}

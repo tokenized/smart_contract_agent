@@ -7,23 +7,43 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pkg/errors"
 	"github.com/tokenized/cacher"
 	"github.com/tokenized/logger"
 	"github.com/tokenized/pkg/bitcoin"
 	"github.com/tokenized/pkg/expanded_tx"
 	"github.com/tokenized/pkg/storage"
 	"github.com/tokenized/pkg/txbuilder"
+	"github.com/tokenized/smart_contract_agent/internal/platform"
 	"github.com/tokenized/smart_contract_agent/internal/state"
 	"github.com/tokenized/specification/dist/golang/actions"
 	"github.com/tokenized/specification/dist/golang/protocol"
+	"github.com/tokenized/threads"
 )
 
 func Test_Proposal_Valid(t *testing.T) {
 	ctx := logger.ContextWithLogger(context.Background(), true, true, "")
 	store := storage.NewMockStorage()
 	broadcaster := state.NewMockTxBroadcaster()
-
+	scheduler := platform.NewScheduler()
 	caches := state.StartTestCaches(ctx, t, store, cacher.DefaultConfig(), time.Second)
+	_, feeLockingScript, _ := state.MockKey()
+	mockAgentFactory := NewMockAgentFactory(DefaultConfig(), feeLockingScript, caches.Caches, store,
+		broadcaster, nil, nil, scheduler)
+
+	schedulerInterrupt := make(chan interface{})
+	go func() {
+		defer func() {
+			if err := recover(); err != nil {
+				t.Errorf("Scheduler panic : %s", err)
+			}
+		}()
+
+		if err := scheduler.Run(ctx, schedulerInterrupt); err != nil &&
+			errors.Cause(err) != threads.Interrupted {
+			t.Errorf("Scheduler returned an error : %s", err)
+		}
+	}()
 
 	votingSystems := []*actions.VotingSystemField{
 		{
@@ -39,13 +59,14 @@ func Test_Proposal_Valid(t *testing.T) {
 	contractKey, contractLockingScript, adminKey, adminLockingScript, contract := state.MockContractWithVoteSystems(ctx,
 		caches, votingSystems)
 
+	mockAgentFactory.AddKey(contractKey)
+
 	instrument := state.MockInstrumentOnly(ctx, caches, contract)
 
 	balances := state.MockBalances(ctx, caches, contract, instrument, 1000)
 
-	_, feeLockingScript, _ := state.MockKey()
 	agent, err := NewAgent(contractKey, DefaultConfig(), contract, feeLockingScript, caches.Caches,
-		store, broadcaster, nil, nil, nil)
+		store, broadcaster, nil, nil, scheduler, mockAgentFactory)
 	if err != nil {
 		t.Fatalf("Failed to create agent : %s", err)
 	}
@@ -60,7 +81,7 @@ func Test_Proposal_Valid(t *testing.T) {
 		VoteMax:             1,
 		ProposalDescription: "Add John Bitcoin as board member",
 		// ProposalDocumentHash []byte
-		VoteCutOffTimestamp: uint64(time.Now().Add(time.Hour).UnixNano()),
+		VoteCutOffTimestamp: uint64(time.Now().Add(time.Millisecond * 250).UnixNano()),
 	}
 
 	tx := txbuilder.NewTxBuilder(0.05, 0.0)
@@ -188,6 +209,58 @@ func Test_Proposal_Valid(t *testing.T) {
 
 	caches.Caches.Transactions.Release(ctx, transaction.GetTxID())
 
+	time.Sleep(time.Millisecond * 250)
+
+	responseTx2 := broadcaster.GetLastTx()
+	if responseTx2 == nil {
+		t.Fatalf("No response tx")
+	}
+
+	t.Logf("Response Tx 2 : %s", responseTx2)
+
+	// Find vote result action
+	var voteResult *actions.Result
+	for _, txout := range responseTx2.TxOut {
+		action, err := protocol.Deserialize(txout.LockingScript, true)
+		if err != nil {
+			continue
+		}
+
+		if a, ok := action.(*actions.Result); ok {
+			voteResult = a
+		} else {
+			if r, ok := action.(*actions.Rejection); ok {
+				rejectData := actions.RejectionsData(r.RejectionCode)
+				if rejectData != nil {
+					t.Errorf("Reject label : %s", rejectData.Label)
+				}
+
+				js, _ := json.MarshalIndent(r, "", "  ")
+				t.Logf("Rejection : %s", js)
+			}
+		}
+	}
+
+	if voteResult == nil {
+		t.Fatalf("Missing vote result action")
+	}
+
+	js, _ = json.MarshalIndent(voteResult, "", "  ")
+	t.Logf("Result : %s", js)
+
+	if len(voteResult.OptionTally) != 2 {
+		t.Errorf("Wrong option tally count : got %d, want %d", len(voteResult.OptionTally), 2)
+	} else {
+		if voteResult.OptionTally[0] != 0 {
+			t.Errorf("Wrong option tally 0 : got %d, want %d", voteResult.OptionTally[0], 0)
+		}
+
+		if voteResult.OptionTally[1] != 0 {
+			t.Errorf("Wrong option tally 1 : got %d, want %d", voteResult.OptionTally[1], 0)
+		}
+	}
+
+	close(schedulerInterrupt)
 	caches.Caches.Instruments.Release(ctx, contractLockingScript, instrument.InstrumentCode)
 	caches.Caches.Contracts.Release(ctx, contractLockingScript)
 	caches.StopTestCaches()
@@ -222,7 +295,7 @@ func Test_Ballots_Valid(t *testing.T) {
 
 	_, feeLockingScript, _ := state.MockKey()
 	agent, err := NewAgent(contractKey, DefaultConfig(), contract, feeLockingScript, caches.Caches,
-		store, broadcaster, nil, nil, nil)
+		store, broadcaster, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("Failed to create agent : %s", err)
 	}
@@ -355,6 +428,60 @@ func Test_Ballots_Valid(t *testing.T) {
 		votedQuantity += balance.Quantity
 		if votedQuantity > tokenQuantity/2 {
 			break
+		}
+	}
+
+	if err := agent.finalizeVote(ctx, voteTxID, uint64(time.Now().UnixNano())); err != nil {
+		t.Fatalf("Failed to finalize vote : %s", err)
+	}
+
+	responseTx2 := broadcaster.GetLastTx()
+	if responseTx2 == nil {
+		t.Fatalf("No response tx")
+	}
+
+	t.Logf("Response Tx 2 : %s", responseTx2)
+
+	// Find vote result action
+	var voteResult *actions.Result
+	for _, txout := range responseTx2.TxOut {
+		action, err := protocol.Deserialize(txout.LockingScript, true)
+		if err != nil {
+			continue
+		}
+
+		if a, ok := action.(*actions.Result); ok {
+			voteResult = a
+		} else {
+			if r, ok := action.(*actions.Rejection); ok {
+				rejectData := actions.RejectionsData(r.RejectionCode)
+				if rejectData != nil {
+					t.Errorf("Reject label : %s", rejectData.Label)
+				}
+
+				js, _ := json.MarshalIndent(r, "", "  ")
+				t.Logf("Rejection : %s", js)
+			}
+		}
+	}
+
+	if voteResult == nil {
+		t.Fatalf("Missing vote result action")
+	}
+
+	js, _ := json.MarshalIndent(voteResult, "", "  ")
+	t.Logf("Result : %s", js)
+
+	if len(voteResult.OptionTally) != 2 {
+		t.Errorf("Wrong option tally count : got %d, want %d", len(voteResult.OptionTally), 2)
+	} else {
+		if voteResult.OptionTally[0] != votedQuantity {
+			t.Errorf("Wrong option tally 0 : got %d, want %d", voteResult.OptionTally[0],
+				votedQuantity)
+		}
+
+		if voteResult.OptionTally[1] != 0 {
+			t.Errorf("Wrong option tally 1 : got %d, want %d", voteResult.OptionTally[1], 0)
 		}
 	}
 

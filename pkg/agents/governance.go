@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/tokenized/logger"
 	"github.com/tokenized/pkg/bitcoin"
@@ -468,6 +469,15 @@ func (a *Agent) processProposal(ctx context.Context, transaction *state.Transact
 		return errors.Wrap(err, "post vote")
 	}
 
+	if a.scheduler != nil {
+		cutOffTime := time.Unix(0, int64(proposal.VoteCutOffTimestamp))
+		a.scheduler.Schedule(ctx, voteTxID, cutOffTime,
+			func(ctx context.Context, interrupt <-chan interface{}) error {
+				return FinalizeVote(ctx, a.factory, agentLockingScript, voteTxID,
+					proposal.VoteCutOffTimestamp)
+			})
+	}
+
 	return nil
 }
 
@@ -897,6 +907,22 @@ func (a *Agent) processBallotCounted(ctx context.Context, transaction *state.Tra
 	vote.Unlock()
 
 	return nil
+}
+
+func FinalizeVote(ctx context.Context, factory AgentFactory, contractLockingScript bitcoin.Script,
+	voteTxID bitcoin.Hash32, now uint64) error {
+
+	agent, err := factory.GetAgent(ctx, contractLockingScript)
+	if err != nil {
+		return errors.Wrap(err, "get agent")
+	}
+
+	if agent == nil {
+		return errors.New("Agent not found")
+	}
+	defer factory.ReleaseAgent(ctx, agent)
+
+	return agent.finalizeVote(ctx, voteTxID, now)
 }
 
 func (a *Agent) finalizeVote(ctx context.Context, voteTxID bitcoin.Hash32, now uint64) error {

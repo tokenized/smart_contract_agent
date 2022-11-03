@@ -51,7 +51,11 @@ type Agent struct {
 	broadcaster Broadcaster
 	fetcher     Fetcher
 	headers     BlockHeaders
-	scheduler   *platform.Scheduler
+
+	// scheduler and factory are used to schedule tasks that spawn a new agent and perform a
+	// function. For example, vote finalization and multi-contract transfer expiration.
+	scheduler *platform.Scheduler
+	factory   AgentFactory
 
 	lock sync.Mutex
 }
@@ -81,10 +85,15 @@ type TransactionWithOutputs interface {
 	Output(index int) *wire.TxOut
 }
 
+type AgentFactory interface {
+	GetAgent(ctx context.Context, lockingScript bitcoin.Script) (*Agent, error)
+	ReleaseAgent(ctx context.Context, agent *Agent)
+}
+
 func NewAgent(key bitcoin.Key, config Config, contract *state.Contract,
 	feeLockingScript bitcoin.Script, caches *state.Caches, store storage.CopyList,
 	broadcaster Broadcaster, fetcher Fetcher, headers BlockHeaders,
-	scheduler *platform.Scheduler) (*Agent, error) {
+	scheduler *platform.Scheduler, factory AgentFactory) (*Agent, error) {
 
 	contract.Lock()
 	lockingScript := contract.LockingScript
@@ -102,6 +111,7 @@ func NewAgent(key bitcoin.Key, config Config, contract *state.Contract,
 		fetcher:          fetcher,
 		headers:          headers,
 		scheduler:        scheduler,
+		factory:          factory,
 	}
 
 	return result, nil
