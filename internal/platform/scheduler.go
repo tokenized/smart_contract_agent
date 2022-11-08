@@ -23,17 +23,16 @@ type Scheduler struct {
 }
 
 type Task struct {
-	typ      uint8
 	id       bitcoin.Hash32
 	start    time.Time
 	function threads.InterruptableFunction
 }
 
-type Task interface {
-	Equal(other Task) bool
-	Start() time.Time
-	Run(ctx context.Context, interrupt <-chan interface{}) error
-}
+// type Task interface {
+// 	Equal(other Task) bool
+// 	Start() time.Time
+// 	Run(ctx context.Context, interrupt <-chan interface{}) error
+// }
 
 func NewScheduler() *Scheduler {
 	return &Scheduler{
@@ -45,7 +44,6 @@ func (s *Scheduler) Schedule(ctx context.Context, id bitcoin.Hash32, start time.
 	function threads.InterruptableFunction) {
 
 	tsk := &Task{
-		typ: typ,
 		id:       id,
 		start:    start,
 		function: function,

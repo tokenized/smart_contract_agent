@@ -35,9 +35,9 @@ type Contract struct {
 	// KeyHash is the hash that is added to the root key to derive the contract's key.
 	KeyHash                      bitcoin.Hash32                    `bsor:"1" json:"key_hash"`
 	LockingScript                bitcoin.Script                    `bsor:"2" json:"locking_script"`
-	Formation                    *actions.ContractFormation        `bsor:"-" json:"formation"`
+	Formation                    *actions.ContractFormation        `bsor:"3" json:"formation"`
 	FormationTxID                *bitcoin.Hash32                   `bsor:"4" json:"formation_txid"`
-	BodyOfAgreementFormation     *actions.BodyOfAgreementFormation `bsor:"-" json:"body_of_agreement_formation"`
+	BodyOfAgreementFormation     *actions.BodyOfAgreementFormation `bsor:"5" json:"body_of_agreement_formation"`
 	BodyOfAgreementFormationTxID *bitcoin.Hash32                   `bsor:"6" json:"body_of_agreement_formation_txid"`
 
 	InstrumentCount uint64 `bsor:"7" json:"instrument_count"`
@@ -48,13 +48,6 @@ type Contract struct {
 
 	// TODO Populate AdminMemberInstrumentCode value. --ce
 	AdminMemberInstrumentCode InstrumentCode `bsor:"10" json:"admin_member_instrument_code"`
-
-	// FormationScript is only used by Serialize to save the Formation value in BSOR.
-	FormationScript bitcoin.Script `bsor:"11" json:"formation_script"`
-
-	// BodyOfAgreementFormationScript is only used by Serialize to save the BodyOfAgreementFormation
-	// value in BSOR.
-	BodyOfAgreementFormationScript bitcoin.Script `bsor:"12" json:"body_of_agreement_formation_script"`
 
 	isModified bool
 	sync.Mutex `bsor:"-"`
@@ -277,12 +270,8 @@ func (c *Contract) CacheCopy() cacher.CacheValue {
 	result.LockingScript = make(bitcoin.Script, len(c.LockingScript))
 	copy(result.LockingScript, c.LockingScript)
 
-	isTest := IsTest()
-
 	if c.Formation != nil {
-		copyScript, _ := protocol.Serialize(c.Formation, isTest)
-		action, _ := protocol.Deserialize(copyScript, isTest)
-		result.Formation, _ = action.(*actions.ContractFormation)
+		result.Formation = c.Formation.Copy()
 	}
 
 	if c.FormationTxID != nil {
@@ -291,9 +280,7 @@ func (c *Contract) CacheCopy() cacher.CacheValue {
 	}
 
 	if c.BodyOfAgreementFormation != nil {
-		copyScript, _ := protocol.Serialize(c.BodyOfAgreementFormation, isTest)
-		action, _ := protocol.Deserialize(copyScript, isTest)
-		result.BodyOfAgreementFormation, _ = action.(*actions.BodyOfAgreementFormation)
+		result.BodyOfAgreementFormation = c.BodyOfAgreementFormation.Copy()
 	}
 
 	if c.BodyOfAgreementFormationTxID != nil {
@@ -315,24 +302,6 @@ func (c *Contract) CacheCopy() cacher.CacheValue {
 }
 
 func (c *Contract) Serialize(w io.Writer) error {
-	if c.Formation != nil {
-		script, err := protocol.Serialize(c.Formation, IsTest())
-		if err != nil {
-			return errors.Wrap(err, "serialize contract formation")
-		}
-
-		c.FormationScript = script
-	}
-
-	if c.BodyOfAgreementFormation != nil {
-		script, err := protocol.Serialize(c.BodyOfAgreementFormation, IsTest())
-		if err != nil {
-			return errors.Wrap(err, "serialize body of agreement formation")
-		}
-
-		c.BodyOfAgreementFormationScript = script
-	}
-
 	b, err := bsor.MarshalBinary(c)
 	if err != nil {
 		return errors.Wrap(err, "marshal")
@@ -377,34 +346,6 @@ func (c *Contract) Deserialize(r io.Reader) error {
 	defer c.Unlock()
 	if _, err := bsor.UnmarshalBinary(b, c); err != nil {
 		return errors.Wrap(err, "unmarshal")
-	}
-
-	if len(c.FormationScript) != 0 {
-		action, err := protocol.Deserialize(c.FormationScript, IsTest())
-		if err != nil {
-			return errors.Wrap(err, "deserialize contract formation")
-		}
-
-		formation, ok := action.(*actions.ContractFormation)
-		if !ok {
-			return errors.New("FormationScript is wrong type")
-		}
-
-		c.Formation = formation
-	}
-
-	if len(c.BodyOfAgreementFormationScript) != 0 {
-		action, err := protocol.Deserialize(c.BodyOfAgreementFormationScript, IsTest())
-		if err != nil {
-			return errors.Wrap(err, "deserialize body of agreement formation")
-		}
-
-		bodyOfAgreementFormation, ok := action.(*actions.BodyOfAgreementFormation)
-		if !ok {
-			return errors.New("BodyOfAgreementFormationScript is wrong type")
-		}
-
-		c.BodyOfAgreementFormation = bodyOfAgreementFormation
 	}
 
 	return nil

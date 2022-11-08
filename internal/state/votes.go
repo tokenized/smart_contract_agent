@@ -16,7 +16,6 @@ import (
 	"github.com/tokenized/specification/dist/golang/actions"
 	"github.com/tokenized/specification/dist/golang/protocol"
 
-	"github.com/golang/protobuf/proto"
 	"github.com/pkg/errors"
 )
 
@@ -31,15 +30,15 @@ type VoteCache struct {
 }
 
 type Vote struct {
-	Proposal     *actions.Proposal `bsor:"-" json:"proposal"`
+	Proposal     *actions.Proposal `bsor:"1" json:"proposal"`
 	ProposalTxID *bitcoin.Hash32   `bsor:"2" json:"proposal_txid"`
 
-	VotingSystem *actions.VotingSystemField `bsor:"-" json:"voting_system"`
+	VotingSystem *actions.VotingSystemField `bsor:"3" json:"voting_system"`
 
-	Vote     *actions.Vote   `bsor:"-" json:"vote"`
+	Vote     *actions.Vote   `bsor:"4" json:"vote"`
 	VoteTxID *bitcoin.Hash32 `bsor:"5" json:"vote_txid"`
 
-	Result     *actions.Result `bsor:"-" json:"result"`
+	Result     *actions.Result `bsor:"5" json:"result"`
 	ResultTxID *bitcoin.Hash32 `bsor:"7" json:"result_txid"`
 
 	ContractWideVote bool      `bsor:"8" json:"contract_wide_vote"`
@@ -48,18 +47,6 @@ type Vote struct {
 	BallotsCounted   uint64    `bsor:"11" json:"ballots_counted"`
 	OptionTally      []float64 `bsor:"12" json:"option_tally"`
 	VotedQuantity    uint64    `bsor:"13" json:"voted_quantity"`
-
-	// ProposalScript is only used by Serialize to save the Proposal value in BSOR.
-	ProposalScript bitcoin.Script `bsor:"14" json:"proposal_script"`
-
-	// VoteScript is only used by Serialize to save the Vote value in BSOR.
-	VoteScript bitcoin.Script `bsor:"15" json:"vote_script"`
-
-	// ResultScript is only used by Serialize to save the Result value in BSOR.
-	ResultScript bitcoin.Script `bsor:"16" json:"result_script"`
-
-	// VotingSystemData is only used by Serialize to save the VotingSystem value in BSOR.
-	VotingSystemData []byte `bsor:"17" json:"result_script"`
 
 	isModified bool
 	sync.Mutex `bsor:"-"`
@@ -619,12 +606,8 @@ func (v *Vote) CacheCopy() cacher.CacheValue {
 		TokenQuantity:    v.TokenQuantity,
 	}
 
-	isTest := IsTest()
-
 	if v.Proposal != nil {
-		copyScript, _ := protocol.Serialize(v.Proposal, isTest)
-		action, _ := protocol.Deserialize(copyScript, isTest)
-		result.Proposal, _ = action.(*actions.Proposal)
+		result.Proposal = v.Proposal.Copy()
 	}
 
 	if v.ProposalTxID != nil {
@@ -633,9 +616,7 @@ func (v *Vote) CacheCopy() cacher.CacheValue {
 	}
 
 	if v.Vote != nil {
-		copyScript, _ := protocol.Serialize(v.Vote, isTest)
-		action, _ := protocol.Deserialize(copyScript, isTest)
-		result.Vote, _ = action.(*actions.Vote)
+		result.Vote = v.Vote.Copy()
 	}
 
 	if v.VoteTxID != nil {
@@ -644,9 +625,7 @@ func (v *Vote) CacheCopy() cacher.CacheValue {
 	}
 
 	if v.Result != nil {
-		copyScript, _ := protocol.Serialize(v.Result, isTest)
-		action, _ := protocol.Deserialize(copyScript, isTest)
-		result.Result, _ = action.(*actions.Result)
+		result.Result = v.Result.Copy()
 	}
 
 	if v.ResultTxID != nil {
@@ -654,46 +633,14 @@ func (v *Vote) CacheCopy() cacher.CacheValue {
 		copy(result.ResultTxID[:], v.ResultTxID[:])
 	}
 
+	if v.VotingSystem != nil {
+		result.VotingSystem = v.VotingSystem.Copy()
+	}
+
 	return result
 }
 
 func (v *Vote) Serialize(w io.Writer) error {
-	if v.Proposal != nil {
-		script, err := protocol.Serialize(v.Proposal, IsTest())
-		if err != nil {
-			return errors.Wrap(err, "serialize proposal")
-		}
-
-		v.ProposalScript = script
-	}
-
-	if v.Vote != nil {
-		script, err := protocol.Serialize(v.Vote, IsTest())
-		if err != nil {
-			return errors.Wrap(err, "serialize vote")
-		}
-
-		v.VoteScript = script
-	}
-
-	if v.Result != nil {
-		script, err := protocol.Serialize(v.Result, IsTest())
-		if err != nil {
-			return errors.Wrap(err, "serialize result")
-		}
-
-		v.ResultScript = script
-	}
-
-	if v.VotingSystem != nil {
-		data, err := proto.Marshal(v.VotingSystem)
-		if err != nil {
-			return errors.Wrap(err, "serialize voting system")
-		}
-
-		v.VotingSystemData = data
-	}
-
 	b, err := bsor.MarshalBinary(v)
 	if err != nil {
 		return errors.Wrap(err, "marshal")
@@ -738,55 +685,6 @@ func (v *Vote) Deserialize(r io.Reader) error {
 	defer v.Unlock()
 	if _, err := bsor.UnmarshalBinary(b, v); err != nil {
 		return errors.Wrap(err, "unmarshal")
-	}
-
-	if len(v.ProposalScript) != 0 {
-		action, err := protocol.Deserialize(v.ProposalScript, IsTest())
-		if err != nil {
-			return errors.Wrap(err, "deserialize proposal")
-		}
-
-		proposal, ok := action.(*actions.Proposal)
-		if !ok {
-			return errors.New("ProposalScript is wrong type")
-		}
-
-		v.Proposal = proposal
-	}
-
-	if len(v.VoteScript) != 0 {
-		action, err := protocol.Deserialize(v.VoteScript, IsTest())
-		if err != nil {
-			return errors.Wrap(err, "deserialize vote")
-		}
-
-		vote, ok := action.(*actions.Vote)
-		if !ok {
-			return errors.New("Vote is wrong type")
-		}
-
-		v.Vote = vote
-	}
-
-	if len(v.ResultScript) != 0 {
-		action, err := protocol.Deserialize(v.ResultScript, IsTest())
-		if err != nil {
-			return errors.Wrap(err, "deserialize result")
-		}
-
-		result, ok := action.(*actions.Result)
-		if !ok {
-			return errors.New("Result is wrong type")
-		}
-
-		v.Result = result
-	}
-
-	if len(v.VotingSystemData) != 0 {
-		v.VotingSystem = &actions.VotingSystemField{}
-		if err := proto.Unmarshal(v.VotingSystemData, v.VotingSystem); err != nil {
-			return errors.Wrap(err, "unmarshal voting system")
-		}
 	}
 
 	return nil

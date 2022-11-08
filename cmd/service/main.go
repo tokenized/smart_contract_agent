@@ -74,8 +74,6 @@ func main() {
 		logger.JSON("config", maskedConfig),
 	}, "Config")
 
-	state.SetIsTest(cfg.Agents.IsTest)
-
 	feeLockingScript, err := bitcoin.NewRawAddressFromAddress(cfg.FeeAddress).LockingScript()
 	if err != nil {
 		logger.Fatal(ctx, "Invalid fee address : %s", err)

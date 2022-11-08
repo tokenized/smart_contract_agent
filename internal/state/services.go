@@ -13,7 +13,6 @@ import (
 	"github.com/tokenized/pkg/bitcoin"
 	"github.com/tokenized/pkg/bsor"
 	"github.com/tokenized/specification/dist/golang/actions"
-	"github.com/tokenized/specification/dist/golang/protocol"
 
 	"github.com/pkg/errors"
 )
@@ -29,15 +28,10 @@ type ContractServicesCache struct {
 }
 
 type ContractServices struct {
-	Formation     *actions.ContractFormation `bsor:"-" json:"formation"`
+	Formation     *actions.ContractFormation `bsor:"1" json:"formation"`
 	FormationTxID *bitcoin.Hash32            `bsor:"2" json:"formation_txid"`
 
 	Services []*Service `bsor:"3" json:"service"`
-
-	// FormationScript is only used by Serialize to save the Formation value in BSOR.
-	FormationScript bitcoin.Script `bsor:"4" json:"formation_script"`
-
-	contractHash ContractHash `bsor:"-" json:"-"`
 
 	isModified bool
 	sync.Mutex `bsor:"-"`
@@ -81,7 +75,6 @@ func (c *ContractServicesCache) Update(ctx context.Context, contractLockingScrip
 	path := ContractServicesPath(contractHash)
 
 	contractServices := &ContractServices{
-		contractHash:  contractHash,
 		Formation:     formation,
 		FormationTxID: &txid,
 	}
@@ -115,7 +108,6 @@ func (c *ContractServicesCache) Update(ctx context.Context, contractLockingScrip
 		}, "Updating existing contract services")
 
 		addedContractServices.Lock()
-		addedContractServices.contractHash = contractHash
 		addedContractServices.Formation = formation
 		addedContractServices.FormationTxID = &txid
 		addedContractServices.Services = contractServices.Services
@@ -145,12 +137,7 @@ func (c *ContractServicesCache) Get(ctx context.Context,
 		return nil, nil
 	}
 
-	contactServices := item.(*ContractServices)
-	contactServices.Lock()
-	contactServices.contractHash = contractHash
-	contactServices.Unlock()
-
-	return contactServices, nil
+	return item.(*ContractServices), nil
 }
 
 func (c *ContractServicesCache) Release(ctx context.Context, contractLockingScript bitcoin.Script) {
@@ -159,10 +146,6 @@ func (c *ContractServicesCache) Release(ctx context.Context, contractLockingScri
 
 func ContractServicesPath(contractHash ContractHash) string {
 	return fmt.Sprintf("%s/%s", contractServicesPath, contractHash)
-}
-
-func (c *ContractServices) Path() string {
-	return ContractServicesPath(c.contractHash)
 }
 
 func (c *ContractServices) MarkModified() {
@@ -182,12 +165,8 @@ func (s *ContractServices) CacheCopy() cacher.CacheValue {
 		Services: make([]*Service, len(s.Services)),
 	}
 
-	isTest := IsTest()
-
 	if s.Formation != nil {
-		copyScript, _ := protocol.Serialize(s.Formation, isTest)
-		action, _ := protocol.Deserialize(copyScript, isTest)
-		result.Formation, _ = action.(*actions.ContractFormation)
+		result.Formation = s.Formation.Copy()
 	}
 
 	if s.FormationTxID != nil {
@@ -207,15 +186,6 @@ func (s *ContractServices) CacheCopy() cacher.CacheValue {
 }
 
 func (c *ContractServices) Serialize(w io.Writer) error {
-	if c.Formation != nil {
-		script, err := protocol.Serialize(c.Formation, IsTest())
-		if err != nil {
-			return errors.Wrap(err, "serialize contract formation")
-		}
-
-		c.FormationScript = script
-	}
-
 	b, err := bsor.MarshalBinary(c)
 	if err != nil {
 		return errors.Wrap(err, "marshal")
@@ -260,20 +230,6 @@ func (c *ContractServices) Deserialize(r io.Reader) error {
 	defer c.Unlock()
 	if _, err := bsor.UnmarshalBinary(b, c); err != nil {
 		return errors.Wrap(err, "unmarshal")
-	}
-
-	if len(c.FormationScript) != 0 {
-		action, err := protocol.Deserialize(c.FormationScript, IsTest())
-		if err != nil {
-			return errors.Wrap(err, "deserialize contract formation")
-		}
-
-		formation, ok := action.(*actions.ContractFormation)
-		if !ok {
-			return errors.New("FormationScript is wrong type")
-		}
-
-		c.Formation = formation
 	}
 
 	return nil

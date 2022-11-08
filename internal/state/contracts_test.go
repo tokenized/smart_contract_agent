@@ -1,6 +1,7 @@
 package state
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"math/rand"
@@ -15,6 +16,49 @@ import (
 	"github.com/tokenized/specification/dist/golang/instruments"
 	"github.com/tokenized/specification/dist/golang/protocol"
 )
+
+func Test_Contract_Serialize(t *testing.T) {
+	_, contractLockingScript, _ := MockKey()
+
+	contract := &Contract{
+		LockingScript: contractLockingScript,
+		Formation: &actions.ContractFormation{
+			ContractName: "Test Contract Name",
+			Issuer: &actions.EntityField{
+				Name: "John Bitcoin",
+				Type: actions.EntitiesIndividual,
+			},
+			Timestamp: uint64(time.Now().UnixNano()),
+		},
+		FormationTxID: &bitcoin.Hash32{},
+		BodyOfAgreementFormation: &actions.BodyOfAgreementFormation{
+			Chapters: []*actions.ChapterField{
+				{
+					Title:    "Chapter 1",
+					Preamble: "This is the first chapter",
+				},
+			},
+			Revision:  0,
+			Timestamp: uint64(time.Now().UnixNano()),
+		},
+		BodyOfAgreementFormationTxID: &bitcoin.Hash32{},
+
+		// Instruments []*Instrument `bsor:"7" json:"instruments"`
+	}
+
+	buf := &bytes.Buffer{}
+	if err := contract.Serialize(buf); err != nil {
+		t.Fatalf("Failed to serialize contract : %s", err)
+	}
+
+	newContract := &Contract{}
+	if err := newContract.Deserialize(buf); err != nil {
+		t.Fatalf("Failed to deserialize contract : %s", err)
+	}
+
+	js, _ := json.MarshalIndent(newContract, "", "  ")
+	t.Logf("Contract : %s", js)
+}
 
 func Test_Contracts(t *testing.T) {
 	ctx := context.Background()

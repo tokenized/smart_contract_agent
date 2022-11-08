@@ -13,7 +13,6 @@ import (
 	"github.com/tokenized/pkg/bsor"
 	"github.com/tokenized/specification/dist/golang/actions"
 	"github.com/tokenized/specification/dist/golang/instruments"
-	"github.com/tokenized/specification/dist/golang/protocol"
 
 	"github.com/pkg/errors"
 )
@@ -32,13 +31,10 @@ type InstrumentCache struct {
 type Instrument struct {
 	InstrumentType [3]byte                     `bsor:"1" json:"instrument_type"`
 	InstrumentCode InstrumentCode              `bsor:"2" json:"instrument_id"`
-	Creation       *actions.InstrumentCreation `bsor:"-" json:"creation`
+	Creation       *actions.InstrumentCreation `bsor:"3" json:"creation`
 	CreationTxID   *bitcoin.Hash32             `bsor:"4" json:"creation_txid"`
 
 	FrozenUntil *uint64 `bsor:"5" json:"frozen_until,omitempty"`
-
-	// CreationScript is only used by Serialize to save the Creation value in BSOR.
-	CreationScript bitcoin.Script `bsor:"6" json:"creation_script"`
 
 	// payload is used to cache the deserialized value of the payload in Creation.
 	payload instruments.Instrument `json:"instrument"`
@@ -185,43 +181,6 @@ func (i *Instrument) IsExpired(now uint64) bool {
 	return false
 }
 
-func (i *Instrument) PrepareForMarshal() error {
-	i.Lock()
-	defer i.Unlock()
-
-	if i.Creation != nil {
-		script, err := protocol.Serialize(i.Creation, IsTest())
-		if err != nil {
-			return errors.Wrap(err, "serialize instrument creation")
-		}
-
-		i.CreationScript = script
-	}
-
-	return nil
-}
-
-func (i *Instrument) CompleteUnmarshal() error {
-	i.Lock()
-	defer i.Unlock()
-
-	if len(i.CreationScript) != 0 {
-		action, err := protocol.Deserialize(i.CreationScript, IsTest())
-		if err != nil {
-			return errors.Wrap(err, "deserialize instrument creation")
-		}
-
-		creation, ok := action.(*actions.InstrumentCreation)
-		if !ok {
-			return errors.New("CreationScript is wrong type")
-		}
-
-		i.Creation = creation
-	}
-
-	return nil
-}
-
 func InstrumentPath(contractHash ContractHash, instrumentCode InstrumentCode) string {
 	return fmt.Sprintf("%s/%s/%s", instrumentPath, contractHash, instrumentCode)
 }
@@ -244,12 +203,8 @@ func (i *Instrument) CacheCopy() cacher.CacheValue {
 	copy(result.InstrumentType[:], i.InstrumentType[:])
 	copy(result.InstrumentCode[:], i.InstrumentCode[:])
 
-	isTest := IsTest()
-
 	if i.Creation != nil {
-		copyScript, _ := protocol.Serialize(i.Creation, isTest)
-		action, _ := protocol.Deserialize(copyScript, isTest)
-		result.Creation, _ = action.(*actions.InstrumentCreation)
+		result.Creation = i.Creation.Copy()
 	}
 
 	if i.CreationTxID != nil {
@@ -266,15 +221,6 @@ func (i *Instrument) CacheCopy() cacher.CacheValue {
 }
 
 func (i *Instrument) Serialize(w io.Writer) error {
-	if i.Creation != nil {
-		script, err := protocol.Serialize(i.Creation, IsTest())
-		if err != nil {
-			return errors.Wrap(err, "serialize instrument creation")
-		}
-
-		i.CreationScript = script
-	}
-
 	b, err := bsor.MarshalBinary(i)
 	if err != nil {
 		return errors.Wrap(err, "marshal")
@@ -319,20 +265,6 @@ func (i *Instrument) Deserialize(r io.Reader) error {
 	defer i.Unlock()
 	if _, err := bsor.UnmarshalBinary(b, i); err != nil {
 		return errors.Wrap(err, "unmarshal")
-	}
-
-	if len(i.CreationScript) != 0 {
-		action, err := protocol.Deserialize(i.CreationScript, IsTest())
-		if err != nil {
-			return errors.Wrap(err, "deserialize instrument creation")
-		}
-
-		creation, ok := action.(*actions.InstrumentCreation)
-		if !ok {
-			return errors.New("CreationScript is wrong type")
-		}
-
-		i.Creation = creation
 	}
 
 	return nil

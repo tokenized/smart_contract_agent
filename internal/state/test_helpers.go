@@ -557,7 +557,7 @@ func MockVoteContractAmendmentCompleted(ctx context.Context, caches *TestCaches,
 	proposalTx.AddTxOut(wire.NewTxOut(200, contractLockingScript)) // For Vote
 	proposalTx.AddTxOut(wire.NewTxOut(200, contractLockingScript)) // For Result
 
-	proposalScript, err := protocol.Serialize(vote.Proposal, IsTest())
+	proposalScript, err := protocol.Serialize(vote.Proposal, true)
 	if err != nil {
 		panic(fmt.Sprintf("Failed to serialize proposal : %s", err))
 	}
@@ -581,7 +581,7 @@ func MockVoteContractAmendmentCompleted(ctx context.Context, caches *TestCaches,
 	voteTx.AddTxIn(wire.NewTxIn(wire.NewOutPoint(vote.ProposalTxID, 0), contractLockingScript))
 	voteTx.AddTxOut(wire.NewTxOut(200, contractLockingScript))
 
-	voteScript, err := protocol.Serialize(vote.Vote, IsTest())
+	voteScript, err := protocol.Serialize(vote.Vote, true)
 	if err != nil {
 		panic(fmt.Sprintf("Failed to serialize vote : %s", err))
 	}
@@ -607,7 +607,7 @@ func MockVoteContractAmendmentCompleted(ctx context.Context, caches *TestCaches,
 	resultTx.AddTxIn(wire.NewTxIn(wire.NewOutPoint(vote.ProposalTxID, 1), contractLockingScript))
 	resultTx.AddTxOut(wire.NewTxOut(200, contractLockingScript))
 
-	resultScript, err := protocol.Serialize(vote.Result, IsTest())
+	resultScript, err := protocol.Serialize(vote.Result, true)
 	if err != nil {
 		panic(fmt.Sprintf("Failed to serialize result : %s", err))
 	}
@@ -678,7 +678,7 @@ func MockVoteInstrumentAmendmentCompleted(ctx context.Context, caches *TestCache
 	proposalTx.AddTxOut(wire.NewTxOut(200, contractLockingScript)) // For Vote
 	proposalTx.AddTxOut(wire.NewTxOut(200, contractLockingScript)) // For Result
 
-	proposalScript, err := protocol.Serialize(vote.Proposal, IsTest())
+	proposalScript, err := protocol.Serialize(vote.Proposal, true)
 	if err != nil {
 		panic(fmt.Sprintf("Failed to serialize proposal : %s", err))
 	}
@@ -702,7 +702,7 @@ func MockVoteInstrumentAmendmentCompleted(ctx context.Context, caches *TestCache
 	voteTx.AddTxIn(wire.NewTxIn(wire.NewOutPoint(vote.ProposalTxID, 0), contractLockingScript))
 	voteTx.AddTxOut(wire.NewTxOut(200, contractLockingScript))
 
-	voteScript, err := protocol.Serialize(vote.Vote, IsTest())
+	voteScript, err := protocol.Serialize(vote.Vote, true)
 	if err != nil {
 		panic(fmt.Sprintf("Failed to serialize vote : %s", err))
 	}
@@ -728,7 +728,7 @@ func MockVoteInstrumentAmendmentCompleted(ctx context.Context, caches *TestCache
 	resultTx.AddTxIn(wire.NewTxIn(wire.NewOutPoint(vote.ProposalTxID, 1), contractLockingScript))
 	resultTx.AddTxOut(wire.NewTxOut(200, contractLockingScript))
 
-	resultScript, err := protocol.Serialize(vote.Result, IsTest())
+	resultScript, err := protocol.Serialize(vote.Result, true)
 	if err != nil {
 		panic(fmt.Sprintf("Failed to serialize result : %s", err))
 	}
@@ -808,7 +808,7 @@ func MockProposal(ctx context.Context, caches *TestCaches, contract *Contract,
 	proposalTx.AddTxOut(wire.NewTxOut(200, contractLockingScript)) // For Vote
 	proposalTx.AddTxOut(wire.NewTxOut(200, contractLockingScript)) // For Result
 
-	proposalScript, err := protocol.Serialize(vote.Proposal, IsTest())
+	proposalScript, err := protocol.Serialize(vote.Proposal, true)
 	if err != nil {
 		panic(fmt.Sprintf("Failed to serialize proposal : %s", err))
 	}
@@ -832,7 +832,7 @@ func MockProposal(ctx context.Context, caches *TestCaches, contract *Contract,
 	voteTx.AddTxIn(wire.NewTxIn(wire.NewOutPoint(vote.ProposalTxID, 0), contractLockingScript))
 	voteTx.AddTxOut(wire.NewTxOut(200, contractLockingScript))
 
-	voteScript, err := protocol.Serialize(vote.Vote, IsTest())
+	voteScript, err := protocol.Serialize(vote.Vote, true)
 	if err != nil {
 		panic(fmt.Sprintf("Failed to serialize vote : %s", err))
 	}

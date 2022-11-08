@@ -5,7 +5,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/binary"
-	"sync"
 
 	"github.com/tokenized/cacher"
 	"github.com/tokenized/pkg/bitcoin"
@@ -16,9 +15,6 @@ import (
 
 var (
 	endian = binary.LittleEndian
-
-	isTestLock sync.Mutex
-	isTest     = true
 )
 
 type Caches struct {
@@ -89,19 +85,6 @@ func NewCaches(cache *cacher.Cache) (*Caches, error) {
 type ContractHash bitcoin.Hash32
 
 type InstrumentCode bitcoin.Hash20
-
-func SetIsTest(value bool) {
-	isTestLock.Lock()
-	isTest = value
-	isTestLock.Unlock()
-}
-
-func IsTest() bool {
-	isTestLock.Lock()
-	value := isTest
-	isTestLock.Unlock()
-	return value
-}
 
 func CalculateContractHash(lockingScript bitcoin.Script) ContractHash {
 	return ContractHash(sha256.Sum256(lockingScript))
