@@ -237,6 +237,10 @@ func (a *Agent) processContractOffer(ctx context.Context, transaction *state.Tra
 	formationTransaction.SetProcessed()
 	formationTransaction.Unlock()
 
+	transaction.Lock()
+	transaction.AddResponseTxID(formationTxID)
+	transaction.Unlock()
+
 	if err := a.BroadcastTx(ctx, formationTx.MsgTx, nil); err != nil {
 		return errors.Wrap(err, "broadcast")
 	}
@@ -675,6 +679,10 @@ func (a *Agent) processContractAmendment(ctx context.Context, transaction *state
 	formationTransaction.SetProcessed()
 	formationTransaction.Unlock()
 
+	transaction.Lock()
+	transaction.AddResponseTxID(formationTxID)
+	transaction.Unlock()
+
 	if err := a.BroadcastTx(ctx, formationTx.MsgTx, nil); err != nil {
 		return errors.Wrap(err, "broadcast")
 	}
@@ -693,10 +701,16 @@ func (a *Agent) processContractFormation(ctx context.Context, transaction *state
 
 	// First input must be the agent's locking script
 	transaction.Lock()
+	input := transaction.Input(0)
+	txid := transaction.TxID()
 	inputOutput, err := transaction.InputOutput(0)
 	transaction.Unlock()
 	if err != nil {
 		return errors.Wrapf(err, "input locking script %d", 0)
+	}
+
+	if _, err := a.addResponseTxID(ctx, input.PreviousOutPoint.Hash, txid); err != nil {
+		return errors.Wrap(err, "add response txid")
 	}
 
 	agentLockingScript := a.LockingScript()
@@ -732,7 +746,6 @@ func (a *Agent) processContractFormation(ctx context.Context, transaction *state
 	}
 
 	a.contract.Formation = formation
-	txid := transaction.GetTxID()
 	a.contract.FormationTxID = &txid
 	a.contract.MarkModified()
 

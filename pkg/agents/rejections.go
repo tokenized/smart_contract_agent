@@ -378,8 +378,14 @@ func (a *Agent) sendRejection(ctx context.Context, transaction *state.Transactio
 		return errors.Wrap(err, "sign")
 	}
 
+	rejectTxID := *rejectTx.MsgTx.TxHash()
+
+	transaction.Lock()
+	transaction.AddResponseTxID(rejectTxID)
+	transaction.Unlock()
+
 	logger.InfoWithFields(ctx, []logger.Field{
-		logger.Stringer("response_txid", rejectTx.MsgTx.TxHash()),
+		logger.Stringer("response_txid", rejectTxID),
 		logger.Uint32("reject_code", rejectError.Code),
 		logger.String("reject_label", rejectError.Label()),
 		logger.String("reject_message", rejectError.Message),

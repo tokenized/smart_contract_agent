@@ -1,6 +1,8 @@
 package agents
 
 import (
+	"context"
+
 	"github.com/tokenized/pkg/bitcoin"
 	"github.com/tokenized/pkg/txbuilder"
 	"github.com/tokenized/pkg/wire"
@@ -68,4 +70,24 @@ func findBitcoinOutput(tx *wire.MsgTx, lockingScript bitcoin.Script, value uint6
 	}
 
 	return false
+}
+
+func (a *Agent) addResponseTxID(ctx context.Context,
+	requestTxID, responseTxID bitcoin.Hash32) (bool, error) {
+
+	requestTransaction, err := a.caches.Transactions.Get(ctx, requestTxID)
+	if err != nil {
+		return false, errors.Wrap(err, "get tx")
+	}
+
+	if requestTransaction == nil {
+		return false, errors.New("Request transaction not found")
+	}
+
+	requestTransaction.Lock()
+	result := requestTransaction.AddResponseTxID(responseTxID)
+	requestTransaction.Unlock()
+	a.caches.Transactions.Release(ctx, requestTxID)
+
+	return result, nil
 }

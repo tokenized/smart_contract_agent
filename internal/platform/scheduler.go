@@ -13,7 +13,7 @@ import (
 )
 
 type Scheduler struct {
-	tasks []*Task
+	tasks []Task
 
 	// refreshNotify is used notify the Run thread that the tasks have changed so the next task
 	// should be refreshed.
@@ -22,17 +22,11 @@ type Scheduler struct {
 	lock sync.Mutex
 }
 
-type Task struct {
-	id       bitcoin.Hash32
-	start    time.Time
-	function threads.InterruptableFunction
+type Task interface {
+	ID() bitcoin.Hash32
+	Start() time.Time
+	Run(ctx context.Context, interrupt <-chan interface{}) error
 }
-
-// type Task interface {
-// 	Equal(other Task) bool
-// 	Start() time.Time
-// 	Run(ctx context.Context, interrupt <-chan interface{}) error
-// }
 
 func NewScheduler() *Scheduler {
 	return &Scheduler{
@@ -40,21 +34,15 @@ func NewScheduler() *Scheduler {
 	}
 }
 
-func (s *Scheduler) Schedule(ctx context.Context, id bitcoin.Hash32, start time.Time,
-	function threads.InterruptableFunction) {
-
-	tsk := &Task{
-		id:       id,
-		start:    start,
-		function: function,
-	}
-
+func (s *Scheduler) Schedule(ctx context.Context, task Task) {
 	s.lock.Lock()
 
-	for i, task := range s.tasks {
-		if task.id.Equal(&id) {
+	id := task.ID()
+	for i, t := range s.tasks {
+		tid := t.ID()
+		if id.Equal(&tid) {
 			// Update existing task
-			s.tasks[i] = tsk
+			s.tasks[i] = task
 			s.lock.Unlock()
 			s.refreshNotify <- true
 			return
@@ -62,7 +50,7 @@ func (s *Scheduler) Schedule(ctx context.Context, id bitcoin.Hash32, start time.
 	}
 
 	// Add new task
-	s.tasks = append(s.tasks, tsk)
+	s.tasks = append(s.tasks, task)
 	s.lock.Unlock()
 	s.refreshNotify <- true
 }
@@ -78,7 +66,8 @@ func (s *Scheduler) remove(id bitcoin.Hash32) bool {
 	defer s.lock.Unlock()
 
 	for i, task := range s.tasks {
-		if task.id.Equal(&id) {
+		tid := task.ID()
+		if tid.Equal(&id) {
 			s.tasks = append(s.tasks[:i], s.tasks[i+1:]...)
 			return true
 		}
@@ -104,19 +93,19 @@ func (s *Scheduler) Run(ctx context.Context, interrupt <-chan interface{}) error
 
 		nextTask := s.findNextTask()
 		if nextTask != nil {
-			if now.After(nextTask.start) {
-				if err := nextTask.function(ctx, interrupt); err != nil {
+			if now.After(nextTask.Start()) {
+				if err := nextTask.Run(ctx, interrupt); err != nil {
 					if errors.Cause(err) == threads.Interrupted {
 						return threads.Interrupted
 					}
 
-					return errors.Wrap(err, nextTask.id.String())
+					return errors.Wrap(err, nextTask.ID().String())
 				}
 
-				s.remove(nextTask.id)
+				s.remove(nextTask.ID())
 			}
 
-			durationToStart := nextTask.start.Sub(now)
+			durationToStart := nextTask.Start().Sub(now)
 			timer := time.NewTimer(durationToStart)
 			selects = append(selects, reflect.SelectCase{
 				Dir:  reflect.SelectRecv,
@@ -133,26 +122,38 @@ func (s *Scheduler) Run(ctx context.Context, interrupt <-chan interface{}) error
 			// continue to reset next task
 
 		case 2: // next task start
-			if err := nextTask.function(ctx, interrupt); err != nil {
+			if err := nextTask.Run(ctx, interrupt); err != nil {
 				if errors.Cause(err) == threads.Interrupted {
 					return threads.Interrupted
 				}
 
-				return errors.Wrap(err, nextTask.id.String())
+				return errors.Wrap(err, nextTask.ID().String())
 			}
 
-			s.remove(nextTask.id)
+			s.remove(nextTask.ID())
 		}
 	}
 }
 
-func (s *Scheduler) findNextTask() *Task {
+func (s *Scheduler) ListTasks() []Task {
 	s.lock.Lock()
 	defer s.lock.Unlock()
 
-	var result *Task
+	result := make([]Task, len(s.tasks))
+	for i, task := range s.tasks {
+		result[i] = task
+	}
+
+	return result
+}
+
+func (s *Scheduler) findNextTask() Task {
+	s.lock.Lock()
+	defer s.lock.Unlock()
+
+	var result Task
 	for _, task := range s.tasks {
-		if result == nil || result.start.After(task.start) {
+		if result == nil || result.Start().After(task.Start()) {
 			result = task
 		}
 	}

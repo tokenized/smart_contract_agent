@@ -1,4 +1,4 @@
-package conductor
+package conductors
 
 import (
 	"bytes"

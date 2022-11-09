@@ -40,6 +40,10 @@ type Transaction struct {
 	IsProcessed   bool             `bsor:"5" json:"is_processed"`
 	ResponseTxIDs []bitcoin.Hash32 `bsor:"6" json:"response_txids"`
 
+	// ConflictingTxIDs lists txs that have conflicting inputs and will "double spend" this tx if
+	// confirmed.
+	// ConflictingTxIDs []bitcoin.Hash32 `bsor:"7" json:"conflicting_txids"`
+
 	Ancestors expanded_tx.AncestorTxs `bsor:"-" json:"ancestors,omitempty"`
 
 	isProcessing bool
@@ -288,6 +292,18 @@ func (tx *Transaction) SetProcessed() {
 
 	tx.IsProcessed = true
 	tx.isModified = true
+}
+
+func (tx *Transaction) AddResponseTxID(txid bitcoin.Hash32) bool {
+	for _, id := range tx.ResponseTxIDs {
+		if id.Equal(&txid) {
+			return false
+		}
+	}
+
+	tx.ResponseTxIDs = append(tx.ResponseTxIDs, txid)
+	tx.isModified = true
+	return true
 }
 
 func TransactionPath(txid bitcoin.Hash32) string {

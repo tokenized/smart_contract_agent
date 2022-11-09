@@ -4,7 +4,9 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"time"
 
+	"github.com/tokenized/config"
 	"github.com/tokenized/logger"
 	"github.com/tokenized/pkg/bitcoin"
 	"github.com/tokenized/pkg/storage"
@@ -21,18 +23,20 @@ var (
 )
 
 type Config struct {
-	IsTest      bool    `default:"true" envconfig:"IS_TEST" json:"is_test"`
-	FeeRate     float32 `default:"0.05" envconfig:"FEE_RATE" json:"fee_rate"`
-	DustFeeRate float32 `default:"0.00" envconfig:"DUST_FEE_RATE" json:"dust_fee_rate"`
-	MinFeeRate  float32 `default:"0.05" envconfig:"MIN_FEE_RATE" json:"min_fee_rate"`
+	IsTest                  bool            `default:"true" envconfig:"IS_TEST" json:"is_test"`
+	FeeRate                 float32         `default:"0.05" envconfig:"FEE_RATE" json:"fee_rate"`
+	DustFeeRate             float32         `default:"0.00" envconfig:"DUST_FEE_RATE" json:"dust_fee_rate"`
+	MinFeeRate              float32         `default:"0.05" envconfig:"MIN_FEE_RATE" json:"min_fee_rate"`
+	MultiContractExpiration config.Duration `default:"1h" envconfig:"MULTI_CONTRACT_EXPIRATION" json:"multi_contract_expiration"`
 }
 
 func DefaultConfig() Config {
 	return Config{
-		IsTest:      true,
-		FeeRate:     0.05,
-		DustFeeRate: 0.00,
-		MinFeeRate:  0.05,
+		IsTest:                  true,
+		FeeRate:                 0.05,
+		DustFeeRate:             0.00,
+		MinFeeRate:              0.05,
+		MultiContractExpiration: config.NewDuration(time.Hour),
 	}
 }
 
@@ -320,6 +324,13 @@ func (a *Agent) MinFeeRate() float32 {
 	return a.config.MinFeeRate
 }
 
+func (a *Agent) MultiContractExpiration() time.Duration {
+	a.lock.Lock()
+	defer a.lock.Unlock()
+
+	return a.config.MultiContractExpiration.Duration
+}
+
 func (a *Agent) ActionIsSupported(action actions.Action) bool {
 	switch action.(type) {
 	case *actions.ContractOffer, *actions.ContractFormation, *actions.ContractAmendment,
@@ -356,7 +367,9 @@ func (a *Agent) ActionIsSupported(action actions.Action) bool {
 func (a *Agent) Process(ctx context.Context, transaction *state.Transaction,
 	actions []actions.Action, now uint64) error {
 
-	ctx = logger.ContextWithLogFields(ctx, logger.Stringer("txid", transaction.GetTxID()))
+	agentLockingScript := a.LockingScript()
+	ctx = logger.ContextWithLogFields(ctx, logger.Stringer("txid", transaction.GetTxID()),
+		logger.Stringer("contract_locking_script", agentLockingScript))
 	logger.Info(ctx, "Processing transaction")
 
 	// TODO If the contract locking script has changed, then reject all actions. --ce

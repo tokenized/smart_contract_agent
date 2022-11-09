@@ -266,6 +266,8 @@ func (b *Balance) SettlePendingQuantity() uint64 {
 	return quantity
 }
 
+// Available returns the balance quantity with all pending modifications and balance adjustments
+// applied.
 func (b *Balance) Available() uint64 {
 	available := b.PendingQuantity()
 	for _, adj := range b.Adjustments {
@@ -284,6 +286,7 @@ func (b *Balance) Available() uint64 {
 	return available
 }
 
+// HasFrozen returns true if there are any balance adjustments with the code Freeze.
 func (b *Balance) HasFrozen() bool {
 	for _, adj := range b.Adjustments {
 		if adj.Code == FreezeCode {
@@ -294,6 +297,7 @@ func (b *Balance) HasFrozen() bool {
 	return false
 }
 
+// AddPendingDebit adds a pending modification to reduce the balance.
 func (b *Balance) AddPendingDebit(quantity uint64, now uint64) error {
 	available := b.Available()
 	if available < quantity {
@@ -320,6 +324,7 @@ func (b *Balance) AddPendingDebit(quantity uint64, now uint64) error {
 	return nil
 }
 
+// AddPendingCredit adds a pending modification to increase the balance.
 func (b *Balance) AddPendingCredit(quantity uint64, now uint64) error {
 	if b.pendingDirection { // credit
 		b.pendingQuantity += quantity
@@ -335,7 +340,9 @@ func (b *Balance) AddPendingCredit(quantity uint64, now uint64) error {
 	return nil
 }
 
-func (b *Balance) RevertPending(txid *bitcoin.Hash32) {
+// RevertPending removes any balance adjustements for the specified transfer transaction and
+// clears any pending modification.
+func (b *Balance) RevertPending(txid bitcoin.Hash32) {
 	var newAdjustments []*BalanceAdjustment
 	for _, adj := range b.Adjustments {
 		if txid.Equal(adj.TxID) {
@@ -350,7 +357,9 @@ func (b *Balance) RevertPending(txid *bitcoin.Hash32) {
 	b.pendingQuantity = 0
 }
 
-func (b *Balance) FinalizePending(txid *bitcoin.Hash32, isMultiContract bool) {
+// FinalizePending clears the current pending modification and converts it into a balance
+// adjustment.
+func (b *Balance) FinalizePending(txid bitcoin.Hash32, isMultiContract bool) {
 	var code BalanceAdjustmentCode
 	if isMultiContract {
 		if b.pendingDirection { // credit
@@ -371,12 +380,26 @@ func (b *Balance) FinalizePending(txid *bitcoin.Hash32, isMultiContract bool) {
 	b.Adjustments = append(b.Adjustments, &BalanceAdjustment{
 		Code:            code,
 		Quantity:        b.pendingQuantity,
-		TxID:            txid,
+		TxID:            &txid,
 		SettledQuantity: settledQuantity,
 	})
 
 	b.pendingDirection = false
 	b.pendingQuantity = 0
+	b.isModified = true
+}
+
+// CancelPending removes any balance adjustements for the specified transfer transaction.
+func (b *Balance) CancelPending(txid bitcoin.Hash32) {
+	var newAdjustments []*BalanceAdjustment
+	for _, adj := range b.Adjustments {
+		if txid.Equal(adj.TxID) {
+			continue
+		}
+
+		newAdjustments = append(newAdjustments, adj)
+	}
+	b.Adjustments = newAdjustments
 	b.isModified = true
 }
 
@@ -390,6 +413,8 @@ func (b *Balance) VerifySettlement(transferTxID bitcoin.Hash32) *BalanceAdjustme
 	return nil
 }
 
+// Settle applies any balance adjustments for the specified transfer transaction to the current
+// quantity.
 func (b *Balance) Settle(transferTxID, settlementTxID bitcoin.Hash32, now uint64) bool {
 	var newAdjustments []*BalanceAdjustment
 	found := false
@@ -617,15 +642,21 @@ func (bs *Balances) Find(lockingScript bitcoin.Script) *Balance {
 	return nil
 }
 
-func (bs *Balances) RevertPending(txid *bitcoin.Hash32) {
+func (bs *Balances) RevertPending(txid bitcoin.Hash32) {
 	for _, b := range *bs {
 		b.RevertPending(txid)
 	}
 }
 
-func (bs *Balances) FinalizePending(txid *bitcoin.Hash32, isMultiContract bool) {
+func (bs *Balances) FinalizePending(txid bitcoin.Hash32, isMultiContract bool) {
 	for _, b := range *bs {
 		b.FinalizePending(txid, isMultiContract)
+	}
+}
+
+func (bs *Balances) CancelPending(txid bitcoin.Hash32) {
+	for _, b := range *bs {
+		b.CancelPending(txid)
 	}
 }
 

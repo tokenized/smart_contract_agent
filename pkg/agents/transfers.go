@@ -24,9 +24,6 @@ func (a *Agent) processTransfer(ctx context.Context, transaction *state.Transact
 	// Verify appropriate output belongs to this contract.
 	agentLockingScript := a.LockingScript()
 
-	ctx = logger.ContextWithLogFields(ctx,
-		logger.Stringer("contract_locking_script", agentLockingScript))
-
 	txid := transaction.GetTxID()
 	transferContracts, err := parseTransferContracts(transaction, transfer, agentLockingScript, now)
 	if err != nil {
@@ -52,6 +49,11 @@ func (a *Agent) processTransfer(ctx context.Context, transaction *state.Transact
 		logger.Info(ctx, "Waiting for settlement request message to process transfer")
 		return nil // Wait for settlement request message
 	}
+
+	// TODO Verify boomerang output has enough funding. --ce
+	// if transferContracts.IsMultiContract() {
+
+	// }
 
 	if movedTxID := a.MovedTxID(); movedTxID != nil {
 		return errors.Wrap(a.sendRejection(ctx, transaction,
@@ -207,7 +209,8 @@ func (a *Agent) processTransfer(ctx context.Context, transaction *state.Transact
 		return errors.Wrap(err, "sign")
 	}
 
-	if err := a.completeSettlement(ctx, txid, settlementTx, balances, now); err != nil {
+	if err := a.completeSettlement(ctx, transaction, txid, settlementTx, balances,
+		now); err != nil {
 		balances.Unlock()
 		return errors.Wrap(err, "complete settlement")
 	}
@@ -276,11 +279,12 @@ func (a *Agent) buildBitcoinTransfer(ctx context.Context, transferTransaction *s
 			"sender quantity more than receiver", now)
 	}
 
-	return errors.New("Not Implemented")
+	return nil
 }
 
-func (a *Agent) completeSettlement(ctx context.Context, transferTxID bitcoin.Hash32,
-	settlementTx *txbuilder.TxBuilder, balances state.Balances, now uint64) error {
+func (a *Agent) completeSettlement(ctx context.Context, transferTransaction *state.Transaction,
+	transferTxID bitcoin.Hash32, settlementTx *txbuilder.TxBuilder, balances state.Balances,
+	now uint64) error {
 
 	settlementTxID := *settlementTx.MsgTx.TxHash()
 	settlementTransaction, err := a.caches.Transactions.AddRaw(ctx, settlementTx.MsgTx, nil)
@@ -297,6 +301,10 @@ func (a *Agent) completeSettlement(ctx context.Context, transferTxID bitcoin.Has
 	settlementTransaction.Lock()
 	settlementTransaction.SetProcessed()
 	settlementTransaction.Unlock()
+
+	transferTransaction.Lock()
+	transferTransaction.AddResponseTxID(settlementTxID)
+	transferTransaction.Unlock()
 
 	// Broadcast settlement tx.
 	logger.InfoWithFields(ctx, []logger.Field{
@@ -321,9 +329,6 @@ func (a *Agent) processSettlement(ctx context.Context, transaction *state.Transa
 	txid := transaction.TxID()
 
 	agentLockingScript := a.LockingScript()
-
-	ctx = logger.ContextWithLogFields(ctx,
-		logger.Stringer("contract_locking_script", agentLockingScript))
 
 	outputCount := transaction.OutputCount()
 	var lockingScripts []bitcoin.Script
@@ -460,6 +465,10 @@ func (a *Agent) processSettlement(ctx context.Context, transaction *state.Transa
 		}
 
 		a.caches.Balances.ReleaseMulti(instrumentCtx, agentLockingScript, instrumentCode, addedBalances)
+	}
+
+	if _, err := a.addResponseTxID(ctx, transferTxID, txid); err != nil {
+		return errors.Wrap(err, "add response txid")
 	}
 
 	if err := a.postTransactionToSubscriptions(ctx, lockingScripts, transaction); err != nil {
@@ -765,8 +774,8 @@ func (a *Agent) buildInstrumentSettlement(ctx context.Context, settlementTx *txb
 	if instrumentTransfer.InstrumentType != instrumentType {
 		logger.Warn(ctx, "Wrong instrument type: %s (should be %s)",
 			instrumentTransfer.InstrumentType, instrument.InstrumentType)
-		return nil, nil, platform.NewRejectErrorWithOutputIndex(actions.RejectionsInstrumentNotFound, "",
-			now, int(instrumentTransfer.ContractIndex))
+		return nil, nil, platform.NewRejectErrorWithOutputIndex(actions.RejectionsInstrumentNotFound,
+			"", now, int(instrumentTransfer.ContractIndex))
 	}
 
 	logger.Info(ctx, "Processing transfer")
@@ -776,8 +785,8 @@ func (a *Agent) buildInstrumentSettlement(ctx context.Context, settlementTx *txb
 		logger.WarnWithFields(ctx, []logger.Field{
 			logger.Timestamp("now", int64(now)),
 		}, "Instrument is frozen")
-		return nil, nil, platform.NewRejectErrorWithOutputIndex(actions.RejectionsInstrumentFrozen, "", now,
-			int(instrumentTransfer.ContractIndex))
+		return nil, nil, platform.NewRejectErrorWithOutputIndex(actions.RejectionsInstrumentFrozen,
+			"", now, int(instrumentTransfer.ContractIndex))
 	}
 
 	// Check if instrument is expired or event is over.
@@ -901,7 +910,7 @@ func (a *Agent) buildInstrumentSettlement(ctx context.Context, settlementTx *txb
 		lockingScript := senderLockingScripts[i]
 		balance := balances.Find(lockingScript)
 		if balance == nil {
-			balances.RevertPending(&transferTxID)
+			balances.RevertPending(transferTxID)
 			balances.Unlock()
 			a.caches.Balances.ReleaseMulti(ctx, agentLockingScript, instrumentCode, balances)
 			return nil, nil, fmt.Errorf("Missing balance for sender %d : %s", i, lockingScript)
@@ -913,7 +922,7 @@ func (a *Agent) buildInstrumentSettlement(ctx context.Context, settlementTx *txb
 				logger.Uint64("quantity", sender.Quantity),
 			}, "Failed to add debit : %s", err)
 
-			balances.RevertPending(&transferTxID)
+			balances.RevertPending(transferTxID)
 			balances.Unlock()
 			a.caches.Balances.ReleaseMulti(ctx, agentLockingScript, instrumentCode, balances)
 
@@ -931,7 +940,7 @@ func (a *Agent) buildInstrumentSettlement(ctx context.Context, settlementTx *txb
 		lockingScript := receiverLockingScripts[i]
 		balance := balances.Find(lockingScript)
 		if balance == nil {
-			balances.RevertPending(&transferTxID)
+			balances.RevertPending(transferTxID)
 			balances.Unlock()
 			a.caches.Balances.ReleaseMulti(ctx, agentLockingScript, instrumentCode, balances)
 			return nil, nil, fmt.Errorf("Missing balance for receiver %d : %s", i, lockingScript)
@@ -942,7 +951,7 @@ func (a *Agent) buildInstrumentSettlement(ctx context.Context, settlementTx *txb
 				logger.Stringer("locking_script", lockingScript),
 				logger.Uint64("quantity", receiver.Quantity),
 			}, "Failed to add credit : %s", err)
-			balances.RevertPending(&transferTxID)
+			balances.RevertPending(transferTxID)
 			balances.Unlock()
 			a.caches.Balances.ReleaseMulti(ctx, agentLockingScript, instrumentCode, balances)
 
@@ -962,13 +971,13 @@ func (a *Agent) buildInstrumentSettlement(ctx context.Context, settlementTx *txb
 	}
 
 	if err := populateTransferSettlement(settlementTx, instrumentSettlement, balances); err != nil {
-		balances.RevertPending(&transferTxID)
+		balances.RevertPending(transferTxID)
 		balances.Unlock()
 		a.caches.Balances.ReleaseMulti(ctx, agentLockingScript, instrumentCode, balances)
 		return nil, nil, errors.Wrap(err, "populate settlement")
 	}
 
-	balances.FinalizePending(&transferTxID, isMultiContract)
+	balances.FinalizePending(transferTxID, isMultiContract)
 	return instrumentSettlement, balances, nil
 }
 

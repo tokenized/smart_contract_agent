@@ -19,7 +19,7 @@ import (
 	"github.com/tokenized/smart_contract_agent/internal/state"
 	"github.com/tokenized/smart_contract_agent/internal/whatsonchain"
 	"github.com/tokenized/smart_contract_agent/pkg/agents"
-	"github.com/tokenized/smart_contract_agent/pkg/conductor"
+	"github.com/tokenized/smart_contract_agent/pkg/conductors"
 	"github.com/tokenized/threads"
 
 	"github.com/pkg/errors"
@@ -97,7 +97,7 @@ func main() {
 
 	broadcaster := NewNoopBroadcaster()
 
-	conductor := conductor.NewConductor(cfg.BaseKey, cfg.Agents, feeLockingScript, nil, caches,
+	conductor := conductors.NewConductor(cfg.BaseKey, cfg.Agents, feeLockingScript, nil, caches,
 		store, broadcaster, woc, woc, nil)
 
 	var cacheWait, loadWait sync.WaitGroup
@@ -210,7 +210,7 @@ func getInputs(ctx context.Context, transactions *state.TransactionCache,
 	return nil
 }
 
-func loadTx(ctx context.Context, conductor *conductor.Conductor,
+func loadTx(ctx context.Context, conductor *conductors.Conductor,
 	transactions *state.TransactionCache, woc *whatsonchain.Service, txid bitcoin.Hash32) error {
 	ctx = logger.ContextWithLogFields(ctx, logger.Stringer("txid", txid))
 
@@ -232,7 +232,7 @@ func loadTx(ctx context.Context, conductor *conductor.Conductor,
 	return nil
 }
 
-func load(ctx context.Context, interrupt <-chan interface{}, conductor *conductor.Conductor,
+func load(ctx context.Context, interrupt <-chan interface{}, conductor *conductors.Conductor,
 	transactions *state.TransactionCache, baseKey, contractKey bitcoin.Key,
 	woc *whatsonchain.Service) error {
 

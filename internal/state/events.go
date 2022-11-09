@@ -24,8 +24,9 @@ const (
 
 type Event struct {
 	Type                  EventType      `bsor:"1" json:"type"`
-	ContractLockingScript bitcoin.Script `bsor:"2" json:"contract_locking_script"`
-	ID                    bitcoin.Hash32 `bsor:"3" json:"id"`
+	Start                 uint64         `bsor:"2" json:"start"`
+	ContractLockingScript bitcoin.Script `bsor:"3" json:"contract_locking_script"`
+	ID                    bitcoin.Hash32 `bsor:"4" json:"id"`
 }
 
 type Events []*Event

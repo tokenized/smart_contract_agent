@@ -18,7 +18,7 @@ import (
 	"github.com/tokenized/smart_contract_agent/internal/platform"
 	"github.com/tokenized/smart_contract_agent/internal/state"
 	"github.com/tokenized/smart_contract_agent/pkg/agents"
-	"github.com/tokenized/smart_contract_agent/pkg/conductor"
+	"github.com/tokenized/smart_contract_agent/pkg/conductors"
 	spyNodeClient "github.com/tokenized/spynode/pkg/client"
 	"github.com/tokenized/threads"
 )
@@ -102,10 +102,14 @@ func main() {
 		logger.Fatal(ctx, "main : Failed to create caches : %s", err)
 	}
 
-	conductor := conductor.NewConductor(cfg.BaseKey, cfg.Agents, feeLockingScript, spyNode,
+	conductor := conductors.NewConductor(cfg.BaseKey, cfg.Agents, feeLockingScript, spyNode,
 		caches, store, NewSpyNodeBroadcaster(spyNode), spyNode, platform.NewHeaders(spyNode),
 		scheduler)
 	spyNode.RegisterHandler(conductor)
+
+	if err := conductors.LoadEvents(ctx, store, scheduler, conductor); err != nil {
+		logger.Fatal(ctx, "main : Failed to load events : %s", err)
+	}
 
 	var spyNodeWait, cacheWait, schedulerWait sync.WaitGroup
 
@@ -160,6 +164,10 @@ func main() {
 
 	if err := conductor.Save(ctx, store); err != nil {
 		logger.Error(ctx, "main : Failed to save conductor : %s", err)
+	}
+
+	if err := conductors.SaveEvents(ctx, store, scheduler); err != nil {
+		logger.Fatal(ctx, "main : Failed to save events : %s", err)
 	}
 
 	cacheThread.Stop(ctx)

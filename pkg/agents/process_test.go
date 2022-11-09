@@ -55,16 +55,32 @@ func Test_Process(t *testing.T) {
 
 	// Create a contract by processing contract formation.
 	var outputs []*expanded_tx.Output
-	tx := &wire.MsgTx{}
+	tx := wire.NewMsgTx(1)
 
 	// Contract input
-	txid := &bitcoin.Hash32{}
-	rand.Read(txid[:])
+	offerTx := wire.NewMsgTx(1)
+	offerTx.AddTxOut(wire.NewTxOut(2200, contractLockingScript))
+	contractOfferTxID := *offerTx.TxHash()
+
+	contractOfferTransaction := &state.Transaction{
+		Tx:           offerTx,
+		State:        wallet.TxStateSafe,
+		SpentOutputs: outputs,
+		IsProcessed:  false,
+	}
+
+	contractOfferTransaction, err = caches.Caches.Transactions.Add(ctx,
+		contractOfferTransaction)
+	if err != nil {
+		t.Fatalf("Failed to add contract offer tx : %s", err)
+	}
+	caches.Caches.Transactions.Release(ctx, contractOfferTxID)
+
 	outputs = append(outputs, &expanded_tx.Output{
 		LockingScript: contractLockingScript,
 		Value:         2200,
 	})
-	tx.AddTxIn(wire.NewTxIn(wire.NewOutPoint(txid, 0), make([]byte,
+	tx.AddTxIn(wire.NewTxIn(wire.NewOutPoint(&contractOfferTxID, 0), make([]byte,
 		txbuilder.MaximumP2PKHSigScriptSize)))
 
 	// Contract output
@@ -102,20 +118,21 @@ func Test_Process(t *testing.T) {
 	tx.AddTxOut(wire.NewTxOut(0, contractFormationScript))
 	contractFormationTxID := *tx.TxHash()
 
-	contractFormationTx := &state.Transaction{
+	contractFormationTransaction := &state.Transaction{
 		Tx:           tx,
 		State:        wallet.TxStateSafe,
 		SpentOutputs: outputs,
 		IsProcessed:  false,
 	}
 
-	contractFormationTx, err = caches.Caches.Transactions.Add(ctx, contractFormationTx)
+	contractFormationTransaction, err = caches.Caches.Transactions.Add(ctx,
+		contractFormationTransaction)
 	if err != nil {
 		t.Fatalf("Failed to add contract formation tx : %s", err)
 	}
 
 	now := uint64(time.Now().UnixNano())
-	if err := agent.Process(ctx, contractFormationTx, []actions.Action{contractFormation},
+	if err := agent.Process(ctx, contractFormationTransaction, []actions.Action{contractFormation},
 		now); err != nil {
 		t.Fatalf("Failed to process contract formation : %s", err)
 	}
@@ -156,16 +173,32 @@ func Test_Process(t *testing.T) {
 
 	// Create instrument by processing instrument creation.
 	outputs = nil
-	tx = &wire.MsgTx{}
+	tx = wire.NewMsgTx(1)
 
 	// Contract input
-	txid = &bitcoin.Hash32{}
-	rand.Read(txid[:])
+	definitionTx := wire.NewMsgTx(1)
+	definitionTx.AddTxOut(wire.NewTxOut(2200, contractLockingScript))
+	instrumentDefinitionTxID := *definitionTx.TxHash()
+
+	instrumentDefinitionTransaction := &state.Transaction{
+		Tx:           definitionTx,
+		State:        wallet.TxStateSafe,
+		SpentOutputs: outputs,
+		IsProcessed:  false,
+	}
+
+	instrumentDefinitionTransaction, err = caches.Caches.Transactions.Add(ctx,
+		instrumentDefinitionTransaction)
+	if err != nil {
+		t.Fatalf("Failed to add instrument definition tx : %s", err)
+	}
+	caches.Caches.Transactions.Release(ctx, instrumentDefinitionTxID)
+
 	outputs = append(outputs, &expanded_tx.Output{
 		LockingScript: contractLockingScript,
 		Value:         2200,
 	})
-	tx.AddTxIn(wire.NewTxIn(wire.NewOutPoint(txid, 0), make([]byte,
+	tx.AddTxIn(wire.NewTxIn(wire.NewOutPoint(&instrumentDefinitionTxID, 0), make([]byte,
 		txbuilder.MaximumP2PKHSigScriptSize)))
 
 	// Contract output
@@ -350,16 +383,32 @@ func Test_Process(t *testing.T) {
 		remainingQuantity -= quantity
 
 		outputs = nil
-		tx = &wire.MsgTx{}
+		tx = wire.NewMsgTx(1)
 
 		// Contract input
-		txid = &bitcoin.Hash32{}
-		rand.Read(txid[:])
+		transferTx := wire.NewMsgTx(1)
+		transferTx.AddTxOut(wire.NewTxOut(2200, contractLockingScript))
+		transferTxID := *transferTx.TxHash()
+
+		transferTransaction := &state.Transaction{
+			Tx:           transferTx,
+			State:        wallet.TxStateSafe,
+			SpentOutputs: outputs,
+			IsProcessed:  false,
+		}
+
+		transferTransaction, err = caches.Caches.Transactions.Add(ctx,
+			transferTransaction)
+		if err != nil {
+			t.Fatalf("Failed to add transfer tx : %s", err)
+		}
+		caches.Caches.Transactions.Release(ctx, transferTxID)
+
 		outputs = append(outputs, &expanded_tx.Output{
 			LockingScript: contractLockingScript,
 			Value:         2200,
 		})
-		tx.AddTxIn(wire.NewTxIn(wire.NewOutPoint(txid, 0), make([]byte,
+		tx.AddTxIn(wire.NewTxIn(wire.NewOutPoint(&transferTxID, 0), make([]byte,
 			txbuilder.MaximumP2PKHSigScriptSize)))
 
 		// admin output
@@ -509,16 +558,32 @@ func Test_Process(t *testing.T) {
 		quantities2 = append(quantities2, quantity)
 
 		outputs = nil
-		tx = &wire.MsgTx{}
+		tx = wire.NewMsgTx(1)
 
 		// Contract input
-		txid = &bitcoin.Hash32{}
-		rand.Read(txid[:])
+		transferTx := wire.NewMsgTx(1)
+		transferTx.AddTxOut(wire.NewTxOut(2200, contractLockingScript))
+		transferTxID := *transferTx.TxHash()
+
+		transferTransaction := &state.Transaction{
+			Tx:           transferTx,
+			State:        wallet.TxStateSafe,
+			SpentOutputs: outputs,
+			IsProcessed:  false,
+		}
+
+		transferTransaction, err = caches.Caches.Transactions.Add(ctx,
+			transferTransaction)
+		if err != nil {
+			t.Fatalf("Failed to add transfer tx : %s", err)
+		}
+		caches.Caches.Transactions.Release(ctx, transferTxID)
+
 		outputs = append(outputs, &expanded_tx.Output{
 			LockingScript: contractLockingScript,
 			Value:         2200,
 		})
-		tx.AddTxIn(wire.NewTxIn(wire.NewOutPoint(txid, 0), make([]byte,
+		tx.AddTxIn(wire.NewTxIn(wire.NewOutPoint(&transferTxID, 0), make([]byte,
 			txbuilder.MaximumP2PKHSigScriptSize)))
 
 		// admin output

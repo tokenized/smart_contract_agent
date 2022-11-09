@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/tokenized/logger"
 	"github.com/tokenized/pkg/bitcoin"
@@ -149,7 +150,7 @@ func (a *Agent) processSettlementRequest(ctx context.Context, transaction *state
 
 			if agentLockingScript.Equal(contractLockingScript) {
 				if instrumentSettlement != nil {
-					balances.RevertPending(&transferTxID)
+					balances.RevertPending(transferTxID)
 					balances.Unlock()
 					logger.Warn(instrumentCtx, "Settlement already exists in settlment request")
 					return errors.Wrap(a.sendRejection(instrumentCtx, transaction,
@@ -162,7 +163,7 @@ func (a *Agent) processSettlementRequest(ctx context.Context, transaction *state
 					instrumentTransfer, transferContracts.Outputs[instrumentIndex], true, headers,
 					now)
 				if err != nil {
-					balances.RevertPending(&transferTxID)
+					balances.RevertPending(transferTxID)
 					balances.Unlock()
 					if rejectError, ok := errors.Cause(err).(platform.RejectError); ok {
 						return errors.Wrap(a.sendRejection(instrumentCtx, transaction, rejectError),
@@ -178,7 +179,7 @@ func (a *Agent) processSettlementRequest(ctx context.Context, transaction *state
 
 			} else {
 				if instrumentSettlement == nil {
-					balances.RevertPending(&transferTxID)
+					balances.RevertPending(transferTxID)
 					balances.Unlock()
 					logger.Warn(instrumentCtx,
 						"Settlement for prior external contract doesn't exist in settlment request")
@@ -190,7 +191,7 @@ func (a *Agent) processSettlementRequest(ctx context.Context, transaction *state
 				if err := a.buildExternalSettlement(instrumentCtx, settlementTx,
 					transferTransaction, instrumentTransfer,
 					transferContracts.Outputs[instrumentIndex]); err != nil {
-					balances.RevertPending(&transferTxID)
+					balances.RevertPending(transferTxID)
 					balances.Unlock()
 					return errors.Wrapf(err, "build external settlement: %s", instrumentID)
 				}
@@ -277,7 +278,7 @@ func (a *Agent) processSettlementRequest(ctx context.Context, transaction *state
 		key := a.Key()
 		usedKeys, err := settlementTx.Sign([]bitcoin.Key{key})
 		if err != nil && errors.Cause(err) != txbuilder.ErrMissingPrivateKey {
-			balances.RevertPending(&transferTxID)
+			balances.RevertPending(transferTxID)
 			balances.Unlock()
 
 			if errors.Cause(err) == txbuilder.ErrInsufficientValue {
@@ -296,12 +297,12 @@ func (a *Agent) processSettlementRequest(ctx context.Context, transaction *state
 
 		if err := a.sendSignatureRequest(ctx, transaction, transferContracts, settlementTx,
 			now); err != nil {
-			balances.RevertPending(&transferTxID)
+			balances.RevertPending(transferTxID)
 			balances.Unlock()
 			return errors.Wrap(err, "send signature request")
 		}
 
-		balances.FinalizePending(&transferTxID, true)
+		balances.FinalizePending(transferTxID, true)
 		balances.Unlock()
 		return nil
 	}
@@ -315,12 +316,12 @@ func (a *Agent) processSettlementRequest(ctx context.Context, transaction *state
 
 	if err := a.sendSettlementRequest(ctx, transaction, transferTransaction, transfer,
 		transferContracts, settlement, now); err != nil {
-		balances.RevertPending(&transferTxID)
+		balances.RevertPending(transferTxID)
 		balances.Unlock()
 		return errors.Wrap(err, "send settlement request")
 	}
 
-	balances.FinalizePending(&transferTxID, true)
+	balances.FinalizePending(transferTxID, true)
 	balances.Unlock()
 	return nil
 }
@@ -497,12 +498,30 @@ func (a *Agent) sendSettlementRequest(ctx context.Context,
 	}
 	defer a.caches.Transactions.Release(ctx, messageTxID)
 
+	currentTransaction.Lock()
+	currentTransaction.AddResponseTxID(messageTxID)
+	currentTransaction.Unlock()
+
 	logger.InfoWithFields(ctx, []logger.Field{
 		logger.Stringer("next_contract_locking_script", transferContracts.NextLockingScript),
 		logger.Stringer("response_txid", messageTxID),
 	}, "Sending settlement request to next contract")
 	if err := a.BroadcastTx(ctx, messageTx.MsgTx, message.ReceiverIndexes); err != nil {
 		return errors.Wrap(err, "broadcast")
+	}
+
+	// Schedule cancel of transfer if other contract(s) don't respond.
+	if a.scheduler != nil {
+		expireTimeStamp := now + uint64(a.MultiContractExpiration().Nanoseconds())
+		expireTime := time.Unix(0, int64(expireTimeStamp))
+
+		logger.InfoWithFields(ctx, []logger.Field{
+			logger.Timestamp("task_start", int64(expireTimeStamp)),
+		}, "Scheduling cancel pending transfer")
+
+		task := NewCancelPendingTransferTask(expireTime, a.factory, agentLockingScript,
+			transferTxID, expireTimeStamp)
+		a.scheduler.Schedule(ctx, task)
 	}
 
 	return nil

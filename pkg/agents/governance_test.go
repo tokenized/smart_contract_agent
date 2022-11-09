@@ -7,7 +7,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pkg/errors"
 	"github.com/tokenized/cacher"
 	"github.com/tokenized/logger"
 	"github.com/tokenized/pkg/bitcoin"
@@ -19,6 +18,8 @@ import (
 	"github.com/tokenized/specification/dist/golang/actions"
 	"github.com/tokenized/specification/dist/golang/protocol"
 	"github.com/tokenized/threads"
+
+	"github.com/pkg/errors"
 )
 
 func Test_Proposal_Valid(t *testing.T) {
@@ -209,6 +210,7 @@ func Test_Proposal_Valid(t *testing.T) {
 
 	caches.Caches.Transactions.Release(ctx, transaction.GetTxID())
 
+	// Wait for scheduled task to finalize vote.
 	time.Sleep(time.Millisecond * 250)
 
 	responseTx2 := broadcaster.GetLastTx()
@@ -431,7 +433,7 @@ func Test_Ballots_Valid(t *testing.T) {
 		}
 	}
 
-	if err := agent.finalizeVote(ctx, voteTxID, uint64(time.Now().UnixNano())); err != nil {
+	if err := agent.FinalizeVote(ctx, voteTxID, uint64(time.Now().UnixNano())); err != nil {
 		t.Fatalf("Failed to finalize vote : %s", err)
 	}
 

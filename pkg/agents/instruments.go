@@ -196,6 +196,10 @@ func (a *Agent) processInstrumentDefinition(ctx context.Context, transaction *st
 	creationTransaction.SetProcessed()
 	creationTransaction.Unlock()
 
+	transaction.Lock()
+	transaction.AddResponseTxID(creationTxID)
+	transaction.Unlock()
+
 	if err := a.BroadcastTx(ctx, creationTx.MsgTx, nil); err != nil {
 		return errors.Wrap(err, "broadcast")
 	}
@@ -457,6 +461,10 @@ func (a *Agent) processInstrumentModification(ctx context.Context, transaction *
 	creationTransaction.SetProcessed()
 	creationTransaction.Unlock()
 
+	transaction.Lock()
+	transaction.AddResponseTxID(creationTxID)
+	transaction.Unlock()
+
 	if err := a.BroadcastTx(ctx, creationTx.MsgTx, nil); err != nil {
 		return errors.Wrap(err, "broadcast")
 	}
@@ -473,11 +481,16 @@ func (a *Agent) processInstrumentCreation(ctx context.Context, transaction *stat
 
 	// First input must be the agent's locking script
 	transaction.Lock()
+	input := transaction.Input(0)
 	txid := transaction.TxID()
 	inputOutput, err := transaction.InputOutput(0)
 	transaction.Unlock()
 	if err != nil {
 		return errors.Wrapf(err, "input locking script %d", 0)
+	}
+
+	if _, err := a.addResponseTxID(ctx, input.PreviousOutPoint.Hash, txid); err != nil {
+		return errors.Wrap(err, "add response txid")
 	}
 
 	agentLockingScript := a.LockingScript()

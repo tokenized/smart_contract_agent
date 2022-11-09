@@ -269,12 +269,19 @@ func (a *Agent) processSignatureRequest(ctx context.Context, transaction *state.
 
 	// If this is the first contract then ensure settlement tx is complete and broadcast.
 	if transferContracts.IsFirstContract() {
-		if err := a.completeSettlement(ctx, transferTxID, settlementTx, balances, now); err != nil {
+		if err := a.completeSettlement(ctx, transferTransaction, transferTxID, settlementTx,
+			balances, now); err != nil {
 			balances.Unlock()
 			return errors.Wrap(err, "complete settlement")
 		}
 
 		balances.Unlock()
+
+		// Cancel scheduled task to cancel the transfer if other contract(s) don't respond.
+		if a.scheduler != nil {
+			a.scheduler.Cancel(ctx, transferTxID)
+		}
+
 		return nil
 	}
 
@@ -284,6 +291,11 @@ func (a *Agent) processSignatureRequest(ctx context.Context, transaction *state.
 	if err := a.sendSignatureRequest(ctx, transaction, transferContracts, settlementTx,
 		now); err != nil {
 		return errors.Wrap(err, "send signature request")
+	}
+
+	// Cancel scheduled task to cancel the transfer if other contract(s) don't respond.
+	if a.scheduler != nil {
+		a.scheduler.Cancel(ctx, transferTxID)
 	}
 
 	return nil
@@ -402,7 +414,7 @@ func (a *Agent) verifyInstrumentSettlement(ctx context.Context, agentLockingScri
 				logger.Stringer("locking_script", txout.LockingScript),
 			}, "Missing settlement balance")
 			return nil, platform.NewRejectError(actions.RejectionsMsgMalformed,
-				fmt.Sprintf("missing balance %d", i), now)
+				fmt.Sprintf("missing settlement balance %d", i), now)
 		}
 
 		adjustment := balance.VerifySettlement(transferTxID)
@@ -413,8 +425,9 @@ func (a *Agent) verifyInstrumentSettlement(ctx context.Context, agentLockingScri
 				logger.Int("index", i),
 				logger.Stringer("locking_script", txout.LockingScript),
 			}, "Missing settlement adjustment")
-			return nil, platform.NewRejectError(actions.RejectionsMsgMalformed,
-				fmt.Sprintf("missing adjustment %d", i), now)
+			// Assume this adjustment was removed by a cancel when the multi-contract expired.
+			return nil, platform.NewRejectError(actions.RejectionsTransferExpired,
+				fmt.Sprintf("settlement %d", i), now)
 		}
 
 		if adjustment.SettledQuantity != settlement.Quantity {
@@ -516,6 +529,10 @@ func (a *Agent) sendSignatureRequest(ctx context.Context, currentTransaction *st
 		return errors.Wrap(err, "add response tx")
 	}
 	defer a.caches.Transactions.Release(ctx, messageTxID)
+
+	currentTransaction.Lock()
+	currentTransaction.AddResponseTxID(messageTxID)
+	currentTransaction.Unlock()
 
 	logger.InfoWithFields(ctx, []logger.Field{
 		logger.Stringer("previous_contract_locking_script",
