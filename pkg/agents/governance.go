@@ -21,8 +21,6 @@ import (
 func (a *Agent) processProposal(ctx context.Context, transaction *state.Transaction,
 	proposal *actions.Proposal, now uint64) error {
 
-	logger.Info(ctx, "Processing proposal")
-
 	agentLockingScript := a.LockingScript()
 
 	// First output must be the agent's locking script.
@@ -491,8 +489,6 @@ func (a *Agent) processProposal(ctx context.Context, transaction *state.Transact
 func (a *Agent) processVote(ctx context.Context, transaction *state.Transaction,
 	vote *actions.Vote, now uint64) error {
 
-	logger.Info(ctx, "Processing vote")
-
 	// First input must be the agent's locking script
 	transaction.Lock()
 
@@ -607,8 +603,6 @@ func (a *Agent) processVote(ctx context.Context, transaction *state.Transaction,
 
 func (a *Agent) processBallotCast(ctx context.Context, transaction *state.Transaction,
 	ballotCast *actions.BallotCast, now uint64) error {
-
-	logger.Info(ctx, "Processing ballot cast")
 
 	agentLockingScript := a.LockingScript()
 
@@ -816,8 +810,6 @@ func (a *Agent) processBallotCast(ctx context.Context, transaction *state.Transa
 func (a *Agent) processBallotCounted(ctx context.Context, transaction *state.Transaction,
 	ballotCounted *actions.BallotCounted, now uint64) error {
 
-	logger.Info(ctx, "Processing ballot counted")
-
 	// First input must be the agent's locking script
 	transaction.Lock()
 	txid := transaction.TxID()
@@ -926,8 +918,6 @@ func (a *Agent) processBallotCounted(ctx context.Context, transaction *state.Tra
 
 func (a *Agent) processVoteResult(ctx context.Context, transaction *state.Transaction,
 	result *actions.Result, now uint64) error {
-
-	logger.Info(ctx, "Processing vote result")
 
 	// First input must be the agent's locking script
 	transaction.Lock()

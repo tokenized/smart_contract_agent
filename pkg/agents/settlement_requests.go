@@ -55,8 +55,9 @@ func (a *Agent) processSettlementRequest(ctx context.Context, transaction *state
 			"reject")
 	}
 
-	ctx = logger.ContextWithLogFields(ctx, logger.Stringer("transfer_txid", transferTxID))
-	logger.Info(ctx, "Processing settlement request")
+	logger.InfoWithFields(ctx, []logger.Field{
+		logger.Stringer("transfer_txid", transferTxID),
+	}, "TransferTxID")
 
 	transferTransaction, err := a.caches.Transactions.Get(ctx, transferTxID)
 	if err != nil {

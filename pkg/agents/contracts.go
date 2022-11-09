@@ -22,8 +22,6 @@ import (
 func (a *Agent) processContractOffer(ctx context.Context, transaction *state.Transaction,
 	offer *actions.ContractOffer, now uint64) error {
 
-	logger.Info(ctx, "Processing contract offer")
-
 	agentLockingScript := a.LockingScript()
 
 	// First output must be the agent's locking script
@@ -254,8 +252,6 @@ func (a *Agent) processContractOffer(ctx context.Context, transaction *state.Tra
 
 func (a *Agent) processContractAmendment(ctx context.Context, transaction *state.Transaction,
 	amendment *actions.ContractAmendment, now uint64) error {
-
-	logger.Info(ctx, "Processing contract amendment")
 
 	if !amendment.ChangeAdministrationAddress && !amendment.ChangeOperatorAddress &&
 		len(amendment.Amendments) == 0 {
@@ -696,8 +692,6 @@ func (a *Agent) processContractAmendment(ctx context.Context, transaction *state
 
 func (a *Agent) processContractFormation(ctx context.Context, transaction *state.Transaction,
 	formation *actions.ContractFormation, now uint64) error {
-
-	logger.Info(ctx, "Processing contract formation")
 
 	// First input must be the agent's locking script
 	transaction.Lock()

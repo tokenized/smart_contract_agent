@@ -12,6 +12,7 @@ import (
 	"github.com/tokenized/specification/dist/golang/actions"
 	"github.com/tokenized/specification/dist/golang/protocol"
 
+	"github.com/google/uuid"
 	"github.com/pkg/errors"
 )
 
@@ -76,6 +77,13 @@ func (t *FinalizeVoteTask) Run(ctx context.Context, interrupt <-chan interface{}
 
 func FinalizeVote(ctx context.Context, factory AgentFactory, contractLockingScript bitcoin.Script,
 	voteTxID bitcoin.Hash32, now uint64) error {
+
+	ctx = logger.ContextWithLogFields(ctx, logger.Stringer("trace", uuid.New()))
+
+	logger.InfoWithFields(ctx, []logger.Field{
+		logger.Stringer("vote_txid", voteTxID),
+		logger.Stringer("contract_locking_script", contractLockingScript),
+	}, "Finalizing vote")
 
 	agent, err := factory.GetAgent(ctx, contractLockingScript)
 	if err != nil {

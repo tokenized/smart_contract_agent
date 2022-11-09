@@ -15,6 +15,7 @@ import (
 	"github.com/tokenized/smart_contract_agent/internal/state"
 	"github.com/tokenized/specification/dist/golang/actions"
 
+	"github.com/google/uuid"
 	"github.com/pkg/errors"
 )
 
@@ -367,17 +368,17 @@ func (a *Agent) ActionIsSupported(action actions.Action) bool {
 func (a *Agent) Process(ctx context.Context, transaction *state.Transaction,
 	actions []actions.Action, now uint64) error {
 
+	ctx = logger.ContextWithLogFields(ctx, logger.Stringer("trace", uuid.New()))
+
+	txid := transaction.GetTxID()
 	agentLockingScript := a.LockingScript()
-	ctx = logger.ContextWithLogFields(ctx, logger.Stringer("txid", transaction.GetTxID()),
-		logger.Stringer("contract_locking_script", agentLockingScript))
-	logger.Info(ctx, "Processing transaction")
-
-	// TODO If the contract locking script has changed, then reject all actions. --ce
-
-	// TODO If the contract is expired, then reject all actions. --ce
+	logger.InfoWithFields(ctx, []logger.Field{
+		logger.Stringer("txid", txid),
+		logger.Stringer("contract_locking_script", agentLockingScript),
+	}, "Processing transaction")
 
 	for i, action := range actions {
-		if err := a.processAction(ctx, transaction, action, now); err != nil {
+		if err := a.processAction(ctx, transaction, txid, action, now); err != nil {
 			return errors.Wrapf(err, "process action %d: %s", i, action.Code())
 		}
 	}
@@ -386,14 +387,18 @@ func (a *Agent) Process(ctx context.Context, transaction *state.Transaction,
 }
 
 func (a *Agent) processAction(ctx context.Context, transaction *state.Transaction,
-	action actions.Action, now uint64) error {
+	txid bitcoin.Hash32, action actions.Action, now uint64) error {
+
+	logger.InfoWithFields(ctx, []logger.Field{
+		logger.Stringer("txid", txid),
+		logger.String("action_code", action.Code()),
+		logger.String("action_name", action.TypeName()),
+	}, "Processing action")
 
 	if err := action.Validate(); err != nil {
 		return errors.Wrap(a.sendRejection(ctx, transaction,
 			platform.NewRejectError(actions.RejectionsMsgMalformed, err.Error(), now)), "reject")
 	}
-
-	ctx = logger.ContextWithLogFields(ctx, logger.String("action", action.Code()))
 
 	switch act := action.(type) {
 	case *actions.ContractOffer:

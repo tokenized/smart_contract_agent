@@ -32,8 +32,8 @@ func (a *Agent) processSignatureRequest(ctx context.Context, transaction *state.
 
 	if len(tx.TxIn) == 0 {
 		return errors.Wrap(a.sendRejection(ctx, transaction,
-			platform.NewRejectError(actions.RejectionsMsgMalformed, "settlement missing inputs", now)),
-			"reject")
+			platform.NewRejectError(actions.RejectionsMsgMalformed, "settlement missing inputs",
+				now)), "reject")
 	}
 
 	// Parse settlement action.
@@ -48,8 +48,8 @@ func (a *Agent) processSignatureRequest(ctx context.Context, transaction *state.
 		if s, ok := action.(*actions.Settlement); ok {
 			if settlement != nil {
 				return errors.Wrap(a.sendRejection(ctx, transaction,
-					platform.NewRejectError(actions.RejectionsMsgMalformed, "more than on settlement",
-						now)), "reject")
+					platform.NewRejectError(actions.RejectionsMsgMalformed,
+						"more than on settlement", now)), "reject")
 			}
 			settlement = s
 		} else {
@@ -61,8 +61,8 @@ func (a *Agent) processSignatureRequest(ctx context.Context, transaction *state.
 
 	if settlement == nil {
 		return errors.Wrap(a.sendRejection(ctx, transaction,
-			platform.NewRejectError(actions.RejectionsMsgMalformed, "missing settlement action", now)),
-			"reject")
+			platform.NewRejectError(actions.RejectionsMsgMalformed, "missing settlement action",
+				now)), "reject")
 	}
 
 	// Add spent outputs to transaction.
@@ -75,8 +75,9 @@ func (a *Agent) processSignatureRequest(ctx context.Context, transaction *state.
 		}
 	}
 
-	ctx = logger.ContextWithLogFields(ctx, logger.Stringer("transfer_txid", transferTxID))
-	logger.Info(ctx, "Processing signature request")
+	logger.InfoWithFields(ctx, []logger.Field{
+		logger.Stringer("transfer_txid", transferTxID),
+	}, "TransferTxID")
 
 	transferTransaction, err := a.caches.Transactions.Get(ctx, transferTxID)
 	if err != nil {
@@ -85,7 +86,8 @@ func (a *Agent) processSignatureRequest(ctx context.Context, transaction *state.
 
 	if transferTransaction == nil {
 		return errors.Wrap(a.sendRejection(ctx, transaction,
-			platform.NewRejectError(actions.RejectionsMsgMalformed, "unknown transfer tx", now)), "reject")
+			platform.NewRejectError(actions.RejectionsMsgMalformed, "unknown transfer tx", now)),
+			"reject")
 	}
 	defer a.caches.Transactions.Release(ctx, transferTxID)
 
@@ -107,8 +109,8 @@ func (a *Agent) processSignatureRequest(ctx context.Context, transaction *state.
 	if transfer == nil {
 		transferTransaction.Unlock()
 		return errors.Wrap(a.sendRejection(ctx, transaction,
-			platform.NewRejectError(actions.RejectionsMsgMalformed, "missing transfer action", now)),
-			"reject")
+			platform.NewRejectError(actions.RejectionsMsgMalformed, "missing transfer action",
+				now)), "reject")
 	}
 	transferTransaction.Unlock()
 

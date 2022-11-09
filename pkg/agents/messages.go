@@ -54,13 +54,15 @@ func (a *Agent) processMessage(ctx context.Context, transaction *state.Transacti
 		return a.processNonRelevantMessage(ctx, transaction, message, now)
 	}
 
-	logger.Info(ctx, "Processing message")
-
 	payload, err := messages.Deserialize(message.MessageCode, message.MessagePayload)
 	if err != nil {
 		logger.Warn(ctx, "Failed to deserialize message payload : %s", err)
 		return nil
 	}
+
+	logger.InfoWithFields(ctx, []logger.Field{
+		logger.String("message_type", payload.TypeName()),
+	}, "Message type")
 
 	switch p := payload.(type) {
 	case *messages.SettlementRequest:

@@ -21,8 +21,6 @@ import (
 func (a *Agent) processBodyOfAgreementOffer(ctx context.Context, transaction *state.Transaction,
 	offer *actions.BodyOfAgreementOffer, now uint64) error {
 
-	logger.Info(ctx, "Processing body of agreement offer")
-
 	// First output must be the agent's locking script
 	transaction.Lock()
 	contractOutput := transaction.Output(0)
@@ -170,8 +168,6 @@ func (a *Agent) processBodyOfAgreementOffer(ctx context.Context, transaction *st
 
 func (a *Agent) processBodyOfAgreementAmendment(ctx context.Context, transaction *state.Transaction,
 	amendment *actions.BodyOfAgreementAmendment, now uint64) error {
-
-	logger.Info(ctx, "Processing body of agreement amendment")
 
 	agentLockingScript := a.LockingScript()
 
@@ -410,8 +406,6 @@ func (a *Agent) processBodyOfAgreementAmendment(ctx context.Context, transaction
 
 func (a *Agent) processBodyOfAgreementFormation(ctx context.Context, transaction *state.Transaction,
 	formation *actions.BodyOfAgreementFormation, now uint64) error {
-
-	logger.Info(ctx, "Processing body of agreement formation")
 
 	// First input must be the agent's locking script
 	transaction.Lock()

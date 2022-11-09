@@ -22,8 +22,6 @@ import (
 func (a *Agent) processInstrumentDefinition(ctx context.Context, transaction *state.Transaction,
 	definition *actions.InstrumentDefinition, now uint64) error {
 
-	logger.Info(ctx, "Processing instrument definition")
-
 	agentLockingScript := a.LockingScript()
 
 	transaction.Lock()
@@ -214,11 +212,17 @@ func (a *Agent) processInstrumentDefinition(ctx context.Context, transaction *st
 func (a *Agent) processInstrumentModification(ctx context.Context, transaction *state.Transaction,
 	modification *actions.InstrumentModification, now uint64) error {
 
-	instrumentID, _ := protocol.InstrumentIDForRaw(modification.InstrumentType,
+	instrumentID, err := protocol.InstrumentIDForRaw(modification.InstrumentType,
 		modification.InstrumentCode)
-	ctx = logger.ContextWithLogFields(ctx, logger.String("instrument_id", instrumentID))
+	if err != nil {
+		return errors.Wrap(a.sendRejection(ctx, transaction,
+			platform.NewRejectError(actions.RejectionsMsgMalformed,
+				fmt.Sprintf("InstrumentID: %s", err), now)), "reject")
+	}
 
-	logger.Info(ctx, "Processing instrument modification")
+	logger.InfoWithFields(ctx, []logger.Field{
+		logger.String("instrument_id", instrumentID),
+	}, "Instrument ID")
 
 	agentLockingScript := a.LockingScript()
 
@@ -499,9 +503,10 @@ func (a *Agent) processInstrumentCreation(ctx context.Context, transaction *stat
 	}
 
 	instrumentID, _ := protocol.InstrumentIDForRaw(creation.InstrumentType, creation.InstrumentCode)
-	ctx = logger.ContextWithLogFields(ctx, logger.String("instrument_id", instrumentID))
 
-	logger.Info(ctx, "Processing instrument creation")
+	logger.InfoWithFields(ctx, []logger.Field{
+		logger.String("instrument_id", instrumentID),
+	}, "Instrument ID")
 
 	var instrumentType [3]byte
 	copy(instrumentType[:], []byte(creation.InstrumentType))

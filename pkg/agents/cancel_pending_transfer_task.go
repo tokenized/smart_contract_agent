@@ -11,6 +11,7 @@ import (
 	"github.com/tokenized/specification/dist/golang/actions"
 	"github.com/tokenized/specification/dist/golang/protocol"
 
+	"github.com/google/uuid"
 	"github.com/pkg/errors"
 )
 
@@ -84,6 +85,13 @@ func (t *CancelPendingTransferTask) Run(ctx context.Context, interrupt <-chan in
 
 func CancelPendingTransfer(ctx context.Context, factory AgentFactory,
 	contractLockingScript bitcoin.Script, transferTxID bitcoin.Hash32, now uint64) error {
+
+	ctx = logger.ContextWithLogFields(ctx, logger.Stringer("trace", uuid.New()))
+
+	logger.InfoWithFields(ctx, []logger.Field{
+		logger.Stringer("transfer_txid", transferTxID),
+		logger.Stringer("contract_locking_script", contractLockingScript),
+	}, "Cancelling pending transfer")
 
 	agent, err := factory.GetAgent(ctx, contractLockingScript)
 	if err != nil {

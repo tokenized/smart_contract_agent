@@ -47,8 +47,6 @@ func (a *Agent) processRejection(ctx context.Context, transaction *state.Transac
 		return nil
 	}
 
-	logger.Info(ctx, "Processing rejection")
-
 	// Check if this is a reject from another contract in a multi-contract transfer to a settlement
 	// request.
 	rejectedTransaction, err := a.caches.Transactions.Get(ctx, rejectedTxID)
