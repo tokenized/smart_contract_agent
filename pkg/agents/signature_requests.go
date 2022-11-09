@@ -419,30 +419,10 @@ func (a *Agent) verifyInstrumentSettlement(ctx context.Context, agentLockingScri
 				fmt.Sprintf("missing settlement balance %d", i), now)
 		}
 
-		adjustment := balance.VerifySettlement(transferTxID)
-		if adjustment == nil {
+		if rejectCode := balance.VerifySettlement(transferTxID, settlement.Quantity); rejectCode != 0 {
 			balances.Unlock()
 			a.caches.Balances.ReleaseMulti(ctx, agentLockingScript, instrumentCode, balances)
-			logger.WarnWithFields(ctx, []logger.Field{
-				logger.Int("index", i),
-				logger.Stringer("locking_script", txout.LockingScript),
-			}, "Missing settlement adjustment")
-			// Assume this adjustment was removed by a cancel when the multi-contract expired.
-			return nil, platform.NewRejectError(actions.RejectionsTransferExpired,
-				fmt.Sprintf("settlement %d", i), now)
-		}
-
-		if adjustment.SettledQuantity != settlement.Quantity {
-			balances.Unlock()
-			a.caches.Balances.ReleaseMulti(ctx, agentLockingScript, instrumentCode, balances)
-			logger.WarnWithFields(ctx, []logger.Field{
-				logger.Int("index", i),
-				logger.Stringer("locking_script", txout.LockingScript),
-				logger.Uint64("adjustment_quantity", adjustment.SettledQuantity),
-				logger.Uint64("settlement_quantity", settlement.Quantity),
-			}, "Wrong settlement quantity")
-			return nil, platform.NewRejectError(actions.RejectionsMsgMalformed,
-				fmt.Sprintf("wrong settlement quantity %d", i), now)
+			return nil, platform.NewRejectError(rejectCode, fmt.Sprintf("settlement %d", i), now)
 		}
 	}
 

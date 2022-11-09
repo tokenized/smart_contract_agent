@@ -174,8 +174,8 @@ func (a *Agent) processSettlementRequest(ctx context.Context, transaction *state
 				}
 
 				settlement.Instruments = append(settlement.Instruments, instrumentSettlement)
-				defer a.caches.Balances.ReleaseMulti(instrumentCtx, agentLockingScript, instrumentCode,
-					instrumentBalances)
+				defer a.caches.Balances.ReleaseMulti(instrumentCtx, agentLockingScript,
+					instrumentCode, instrumentBalances)
 				balances = state.AppendBalances(balances, instrumentBalances)
 
 			} else {
@@ -208,10 +208,14 @@ func (a *Agent) processSettlementRequest(ctx context.Context, transaction *state
 		// Add settlement
 		settlementScript, err := protocol.Serialize(settlement, a.IsTest())
 		if err != nil {
+			balances.RevertPending(transferTxID)
+			balances.Unlock()
 			return errors.Wrap(err, "serialize settlement")
 		}
 
 		if err := settlementTx.AddOutput(settlementScript, 0, false, false); err != nil {
+			balances.RevertPending(transferTxID)
+			balances.Unlock()
 			return errors.Wrap(err, "add settlement output")
 		}
 
@@ -219,6 +223,8 @@ func (a *Agent) processSettlementRequest(ctx context.Context, transaction *state
 			ra, err := bitcoin.DecodeRawAddress(transfer.ExchangeFeeAddress)
 			if err != nil {
 				logger.Warn(ctx, "Invalid exchange fee address : %s", err)
+				balances.RevertPending(transferTxID)
+				balances.Unlock()
 				return errors.Wrap(a.sendRejection(ctx, transaction,
 					platform.NewRejectError(actions.RejectionsMsgMalformed, err.Error(), now)),
 					"reject")
@@ -227,6 +233,8 @@ func (a *Agent) processSettlementRequest(ctx context.Context, transaction *state
 			lockingScript, err := ra.LockingScript()
 			if err != nil {
 				logger.Warn(ctx, "Invalid exchange fee locking script : %s", err)
+				balances.RevertPending(transferTxID)
+				balances.Unlock()
 				return errors.Wrap(a.sendRejection(ctx, transaction,
 					platform.NewRejectError(actions.RejectionsMsgMalformed, err.Error(), now)),
 					"reject")
@@ -234,6 +242,8 @@ func (a *Agent) processSettlementRequest(ctx context.Context, transaction *state
 
 			if err := settlementTx.AddOutput(lockingScript, transfer.ExchangeFee, false,
 				false); err != nil {
+				balances.RevertPending(transferTxID)
+				balances.Unlock()
 				return errors.Wrap(err, "add exchange fee")
 			}
 		}
@@ -246,6 +256,8 @@ func (a *Agent) processSettlementRequest(ctx context.Context, transaction *state
 			ra, err := bitcoin.DecodeRawAddress(contractFee.Address)
 			if err != nil {
 				logger.Warn(ctx, "Invalid contract fee address : %s", err)
+				balances.RevertPending(transferTxID)
+				balances.Unlock()
 				return errors.Wrap(a.sendRejection(ctx, transaction,
 					platform.NewRejectError(actions.RejectionsMsgMalformed, err.Error(), now)),
 					"reject")
@@ -254,6 +266,8 @@ func (a *Agent) processSettlementRequest(ctx context.Context, transaction *state
 			lockingScript, err := ra.LockingScript()
 			if err != nil {
 				logger.Warn(ctx, "Invalid contract fee locking script : %s", err)
+				balances.RevertPending(transferTxID)
+				balances.Unlock()
 				return errors.Wrap(a.sendRejection(ctx, transaction,
 					platform.NewRejectError(actions.RejectionsMsgMalformed, err.Error(), now)),
 					"reject")
@@ -261,6 +275,8 @@ func (a *Agent) processSettlementRequest(ctx context.Context, transaction *state
 
 			if err := settlementTx.AddOutput(lockingScript, contractFee.Quantity, false,
 				false); err != nil {
+				balances.RevertPending(transferTxID)
+				balances.Unlock()
 				return errors.Wrap(err, "add contract fee")
 			}
 		}
@@ -269,9 +285,13 @@ func (a *Agent) processSettlementRequest(ctx context.Context, transaction *state
 		if a.ContractFee() > 0 {
 			if err := settlementTx.AddOutput(a.FeeLockingScript(), a.ContractFee(), true,
 				false); err != nil {
+				balances.RevertPending(transferTxID)
+				balances.Unlock()
 				return errors.Wrap(err, "add contract fee")
 			}
 		} else if err := settlementTx.SetChangeLockingScript(a.FeeLockingScript(), ""); err != nil {
+			balances.RevertPending(transferTxID)
+			balances.Unlock()
 			return errors.Wrap(err, "set change")
 		}
 
@@ -293,6 +313,8 @@ func (a *Agent) processSettlementRequest(ctx context.Context, transaction *state
 		}
 
 		if len(usedKeys) != 1 || !usedKeys[0].Equal(key) {
+			balances.RevertPending(transferTxID)
+			balances.Unlock()
 			return fmt.Errorf("Wrong used key returned from signing : %s", usedKeys[0].PublicKey())
 		}
 

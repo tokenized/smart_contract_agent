@@ -91,6 +91,8 @@ func (a *Agent) processTransfer(ctx context.Context, transaction *state.Transact
 	for index, instrumentTransfer := range transfer.Instruments {
 		if instrumentTransfer.InstrumentType == protocol.BSVInstrumentID {
 			if len(instrumentTransfer.InstrumentCode) != 0 {
+				balances.RevertPending(txid)
+				balances.Unlock()
 				logger.Warn(ctx, "Bitcoin instrument with instrument code")
 				return errors.Wrap(a.sendRejection(ctx, transaction,
 					platform.NewRejectErrorWithOutputIndex(actions.RejectionsMsgMalformed,
@@ -105,6 +107,8 @@ func (a *Agent) processTransfer(ctx context.Context, transaction *state.Transact
 			if err := a.buildBitcoinTransfer(instrumentCtx, transaction, settlementTx,
 				instrumentTransfer, now); err != nil {
 				if rejectError, ok := errors.Cause(err).(platform.RejectError); ok {
+					balances.RevertPending(txid)
+					balances.Unlock()
 					rejectError.OutputIndex = transferContracts.FirstContractOutputIndex
 					return errors.Wrap(a.sendRejection(instrumentCtx, transaction, rejectError),
 						"reject")
@@ -129,6 +133,8 @@ func (a *Agent) processTransfer(ctx context.Context, transaction *state.Transact
 			settlementTx, settlement, transaction, instrumentCode, instrumentTransfer,
 			transferContracts.Outputs[index], transferContracts.IsMultiContract(), headers, now)
 		if err != nil {
+			balances.RevertPending(txid)
+			balances.Unlock()
 			if rejectError, ok := errors.Cause(err).(platform.RejectError); ok {
 				return errors.Wrap(a.sendRejection(instrumentCtx, transaction, rejectError),
 					"reject")
@@ -137,16 +143,21 @@ func (a *Agent) processTransfer(ctx context.Context, transaction *state.Transact
 		}
 
 		settlement.Instruments = append(settlement.Instruments, instrumentSettlement)
-		defer a.caches.Balances.ReleaseMulti(ctx, agentLockingScript, instrumentCode, instrumentBalances)
+		defer a.caches.Balances.ReleaseMulti(ctx, agentLockingScript, instrumentCode,
+			instrumentBalances)
 		balances = state.AppendBalances(balances, instrumentBalances)
 	}
 
 	settlementScript, err := protocol.Serialize(settlement, a.IsTest())
 	if err != nil {
+		balances.RevertPending(txid)
+		balances.Unlock()
 		return errors.Wrap(err, "serialize settlement")
 	}
 
 	if err := settlementTx.AddOutput(settlementScript, 0, false, false); err != nil {
+		balances.RevertPending(txid)
+		balances.Unlock()
 		return errors.Wrap(err, "add settlement output")
 	}
 
@@ -154,6 +165,8 @@ func (a *Agent) processTransfer(ctx context.Context, transaction *state.Transact
 	if transfer.ExchangeFee > 0 {
 		ra, err := bitcoin.DecodeRawAddress(transfer.ExchangeFeeAddress)
 		if err != nil {
+			balances.RevertPending(txid)
+			balances.Unlock()
 			logger.Warn(ctx, "Invalid exchange fee address : %s", err)
 			return errors.Wrap(a.sendRejection(ctx, transaction,
 				platform.NewRejectErrorWithOutputIndex(actions.RejectionsMsgMalformed, err.Error(),
@@ -162,6 +175,8 @@ func (a *Agent) processTransfer(ctx context.Context, transaction *state.Transact
 
 		lockingScript, err := ra.LockingScript()
 		if err != nil {
+			balances.RevertPending(txid)
+			balances.Unlock()
 			logger.Warn(ctx, "Invalid exchange fee locking script : %s", err)
 			return errors.Wrap(a.sendRejection(ctx, transaction,
 				platform.NewRejectErrorWithOutputIndex(actions.RejectionsMsgMalformed, err.Error(),
@@ -170,6 +185,8 @@ func (a *Agent) processTransfer(ctx context.Context, transaction *state.Transact
 
 		if err := settlementTx.AddOutput(lockingScript, transfer.ExchangeFee, false,
 			false); err != nil {
+			balances.RevertPending(txid)
+			balances.Unlock()
 			return errors.Wrap(err, "add exchange fee")
 		}
 	}
@@ -178,9 +195,13 @@ func (a *Agent) processTransfer(ctx context.Context, transaction *state.Transact
 	if a.ContractFee() > 0 {
 		if err := settlementTx.AddOutput(a.FeeLockingScript(), a.ContractFee(), true,
 			false); err != nil {
+			balances.RevertPending(txid)
+			balances.Unlock()
 			return errors.Wrap(err, "add contract fee")
 		}
 	} else if err := settlementTx.SetChangeLockingScript(a.FeeLockingScript(), ""); err != nil {
+		balances.RevertPending(txid)
+		balances.Unlock()
 		return errors.Wrap(err, "set change")
 	}
 

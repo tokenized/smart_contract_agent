@@ -403,14 +403,25 @@ func (b *Balance) CancelPending(txid bitcoin.Hash32) {
 	b.isModified = true
 }
 
-func (b *Balance) VerifySettlement(transferTxID bitcoin.Hash32) *BalanceAdjustment {
+func (b *Balance) VerifySettlement(transferTxID bitcoin.Hash32, quantity uint64) int {
 	for _, adj := range b.Adjustments {
-		if transferTxID.Equal(adj.TxID) {
-			return adj
+		if !transferTxID.Equal(adj.TxID) {
+			continue
 		}
+
+		if adj.SettledQuantity == quantity {
+			return actions.RejectionsSuccess
+		}
+
+		if b.HasFrozen() {
+			return actions.RejectionsTransferExpired
+		}
+
+		return actions.RejectionsMsgMalformed
 	}
 
-	return nil
+	// Assume the adjustment was removed by a multi-contract transfer expiration.
+	return actions.RejectionsTransferExpired
 }
 
 // Settle applies any balance adjustments for the specified transfer transaction to the current
