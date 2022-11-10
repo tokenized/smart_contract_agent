@@ -357,6 +357,46 @@ func (b *Balance) RevertPending(txid bitcoin.Hash32) {
 	b.pendingQuantity = 0
 }
 
+func (b *Balance) AddFreeze(txid bitcoin.Hash32, quantity uint64) {
+	for _, adj := range b.Adjustments {
+		if !txid.Equal(adj.TxID) {
+			continue
+		}
+
+		// Already have this freeze
+		return
+	}
+
+	// Add a new freeze
+	settledQuantity := b.SettlePendingQuantity()
+	b.Adjustments = append(b.Adjustments, &BalanceAdjustment{
+		Code:            FreezeCode,
+		Quantity:        quantity,
+		TxID:            &txid,
+		SettledQuantity: settledQuantity,
+	})
+
+	b.isModified = true
+}
+
+func (b *Balance) RemoveFreeze(txid bitcoin.Hash32) {
+	var newAdjustments []*BalanceAdjustment
+	found := false
+	for _, adj := range b.Adjustments {
+		if adj.Code == FreezeCode && txid.Equal(adj.TxID) {
+			found = true
+			continue
+		}
+
+		newAdjustments = append(newAdjustments, adj)
+	}
+
+	if found {
+		b.Adjustments = newAdjustments
+		b.isModified = true
+	}
+}
+
 // FinalizePending clears the current pending modification and converts it into a balance
 // adjustment.
 func (b *Balance) FinalizePending(txid bitcoin.Hash32, isMultiContract bool) {
@@ -645,6 +685,10 @@ func AppendZeroBalance(balances Balances, lockingScript bitcoin.Script) Balances
 // Find returns the balance with the specified locking script, or nil if there isn't a match.
 func (bs *Balances) Find(lockingScript bitcoin.Script) *Balance {
 	for _, b := range *bs {
+		if b == nil {
+			continue
+		}
+
 		if b.LockingScript.Equal(lockingScript) {
 			return b
 		}
@@ -655,31 +699,61 @@ func (bs *Balances) Find(lockingScript bitcoin.Script) *Balance {
 
 func (bs *Balances) RevertPending(txid bitcoin.Hash32) {
 	for _, b := range *bs {
+		if b == nil {
+			continue
+		}
+
 		b.RevertPending(txid)
 	}
 }
 
 func (bs *Balances) FinalizePending(txid bitcoin.Hash32, isMultiContract bool) {
 	for _, b := range *bs {
+		if b == nil {
+			continue
+		}
+
 		b.FinalizePending(txid, isMultiContract)
 	}
 }
 
 func (bs *Balances) CancelPending(txid bitcoin.Hash32) {
 	for _, b := range *bs {
+		if b == nil {
+			continue
+		}
+
 		b.CancelPending(txid)
 	}
 }
 
 func (bs *Balances) Settle(transferTxID, settlementTxID bitcoin.Hash32, now uint64) {
 	for _, b := range *bs {
+		if b == nil {
+			continue
+		}
+
 		b.Settle(transferTxID, settlementTxID, now)
+	}
+}
+
+func (bs *Balances) RemoveFreeze(freezeOrderTxID bitcoin.Hash32) {
+	for _, b := range *bs {
+		if b == nil {
+			continue
+		}
+
+		b.RemoveFreeze(freezeOrderTxID)
 	}
 }
 
 func (bs *Balances) LockingScripts() []bitcoin.Script {
 	var result []bitcoin.Script
 	for _, b := range *bs {
+		if b == nil {
+			continue
+		}
+
 		result = appendLockingScript(result, b.LockingScript)
 	}
 	return result
@@ -687,12 +761,20 @@ func (bs *Balances) LockingScripts() []bitcoin.Script {
 
 func (bs *Balances) Lock() {
 	for _, b := range *bs {
+		if b == nil {
+			continue
+		}
+
 		b.Lock()
 	}
 }
 
 func (bs *Balances) Unlock() {
 	for _, b := range *bs {
+		if b == nil {
+			continue
+		}
+
 		b.Unlock()
 	}
 }
