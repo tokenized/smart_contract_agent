@@ -34,7 +34,7 @@ func (a *Agent) processSettlementRequest(ctx context.Context, transaction *state
 	if err != nil {
 		logger.Warn(ctx, "Invalid transfer txid in settlement request : %s", err)
 		return errors.Wrap(a.sendRejection(ctx, transaction,
-			platform.NewRejectError(actions.RejectionsMsgMalformed, "transfer txid invalid", now)),
+			platform.NewRejectError(actions.RejectionsMsgMalformed, "transfer txid invalid"), now),
 			"reject")
 	}
 	transferTxID := *newTransferTxID
@@ -43,7 +43,7 @@ func (a *Agent) processSettlementRequest(ctx context.Context, transaction *state
 	if err != nil {
 		logger.Warn(ctx, "Failed to decode settlement from settlement request : %s", err)
 		return errors.Wrap(a.sendRejection(ctx, transaction,
-			platform.NewRejectError(actions.RejectionsMsgMalformed, "settlement invalid", now)),
+			platform.NewRejectError(actions.RejectionsMsgMalformed, "settlement invalid"), now),
 			"reject")
 	}
 
@@ -51,7 +51,7 @@ func (a *Agent) processSettlementRequest(ctx context.Context, transaction *state
 	if !ok {
 		logger.Warn(ctx, "Settlement request settlement is not a settlement : %s", err)
 		return errors.Wrap(a.sendRejection(ctx, transaction,
-			platform.NewRejectError(actions.RejectionsMsgMalformed, "settlement wrong", now)),
+			platform.NewRejectError(actions.RejectionsMsgMalformed, "settlement wrong"), now),
 			"reject")
 	}
 
@@ -95,15 +95,15 @@ func (a *Agent) processSettlementRequest(ctx context.Context, transaction *state
 			logger.Stringer("transfer_txid", transferTxID),
 		}, "Transfer action not found in transfer transaction")
 		return errors.Wrap(a.sendRejection(ctx, transaction,
-			platform.NewRejectError(actions.RejectionsMsgMalformed, "transfer tx missing transfer",
-				now)), "reject")
+			platform.NewRejectError(actions.RejectionsMsgMalformed, "transfer tx missing transfer"),
+			now), "reject")
 	}
 
 	transferContracts, err := parseTransferContracts(transferTransaction, transfer,
 		agentLockingScript, now)
 	if err != nil {
 		if rejectError, ok := errors.Cause(err).(platform.RejectError); ok {
-			return errors.Wrap(a.sendRejection(ctx, transaction, rejectError), "reject")
+			return errors.Wrap(a.sendRejection(ctx, transaction, rejectError, now), "reject")
 		}
 
 		return errors.Wrap(err, "parse contracts")
@@ -119,13 +119,11 @@ func (a *Agent) processSettlementRequest(ctx context.Context, transaction *state
 	if !firstInputOutput.LockingScript.Equal(transferContracts.PreviousLockingScript) {
 		return errors.Wrap(a.sendRejection(ctx, transaction,
 			platform.NewRejectError(actions.RejectionsMsgMalformed,
-				"settlement request not from previous contract", now)), "reject")
+				"settlement request not from previous contract"), now), "reject")
 	}
 
-	if movedTxID := a.MovedTxID(); movedTxID != nil {
-		return errors.Wrap(a.sendRejection(ctx, transaction,
-			platform.NewRejectError(actions.RejectionsContractMoved, movedTxID.String(), now)),
-			"reject")
+	if err := a.CheckContractIsAvailable(now); err != nil {
+		return errors.Wrap(a.sendRejection(ctx, transaction, err, now), "reject")
 	}
 
 	isFinalContract := transferContracts.IsFinalContract()
@@ -156,7 +154,7 @@ func (a *Agent) processSettlementRequest(ctx context.Context, transaction *state
 					logger.Warn(instrumentCtx, "Settlement already exists in settlment request")
 					return errors.Wrap(a.sendRejection(instrumentCtx, transaction,
 						platform.NewRejectError(actions.RejectionsMsgMalformed,
-							"settlement provided by other contract agent", now)), "reject")
+							"settlement provided by other contract agent"), now), "reject")
 				}
 
 				instrumentSettlement, instrumentBalances, err := a.buildInstrumentSettlement(instrumentCtx,
@@ -167,8 +165,8 @@ func (a *Agent) processSettlementRequest(ctx context.Context, transaction *state
 					balances.RevertPending(transferTxID)
 					balances.Unlock()
 					if rejectError, ok := errors.Cause(err).(platform.RejectError); ok {
-						return errors.Wrap(a.sendRejection(instrumentCtx, transaction, rejectError),
-							"reject")
+						return errors.Wrap(a.sendRejection(instrumentCtx, transaction, rejectError,
+							now), "reject")
 					}
 					return errors.Wrapf(err, "build settlement: %s", instrumentID)
 				}
@@ -186,7 +184,7 @@ func (a *Agent) processSettlementRequest(ctx context.Context, transaction *state
 						"Settlement for prior external contract doesn't exist in settlment request")
 					return errors.Wrap(a.sendRejection(instrumentCtx, transaction,
 						platform.NewRejectError(actions.RejectionsMsgMalformed,
-							"settlement not provided by other contract", now)), "reject")
+							"settlement not provided by other contract"), now), "reject")
 				}
 
 				if err := a.buildExternalSettlement(instrumentCtx, settlementTx,
@@ -226,7 +224,7 @@ func (a *Agent) processSettlementRequest(ctx context.Context, transaction *state
 				balances.RevertPending(transferTxID)
 				balances.Unlock()
 				return errors.Wrap(a.sendRejection(ctx, transaction,
-					platform.NewRejectError(actions.RejectionsMsgMalformed, err.Error(), now)),
+					platform.NewRejectError(actions.RejectionsMsgMalformed, err.Error()), now),
 					"reject")
 			}
 
@@ -236,7 +234,7 @@ func (a *Agent) processSettlementRequest(ctx context.Context, transaction *state
 				balances.RevertPending(transferTxID)
 				balances.Unlock()
 				return errors.Wrap(a.sendRejection(ctx, transaction,
-					platform.NewRejectError(actions.RejectionsMsgMalformed, err.Error(), now)),
+					platform.NewRejectError(actions.RejectionsMsgMalformed, err.Error()), now),
 					"reject")
 			}
 
@@ -259,7 +257,7 @@ func (a *Agent) processSettlementRequest(ctx context.Context, transaction *state
 				balances.RevertPending(transferTxID)
 				balances.Unlock()
 				return errors.Wrap(a.sendRejection(ctx, transaction,
-					platform.NewRejectError(actions.RejectionsMsgMalformed, err.Error(), now)),
+					platform.NewRejectError(actions.RejectionsMsgMalformed, err.Error()), now),
 					"reject")
 			}
 
@@ -269,7 +267,7 @@ func (a *Agent) processSettlementRequest(ctx context.Context, transaction *state
 				balances.RevertPending(transferTxID)
 				balances.Unlock()
 				return errors.Wrap(a.sendRejection(ctx, transaction,
-					platform.NewRejectError(actions.RejectionsMsgMalformed, err.Error(), now)),
+					platform.NewRejectError(actions.RejectionsMsgMalformed, err.Error()), now),
 					"reject")
 			}
 
@@ -305,8 +303,8 @@ func (a *Agent) processSettlementRequest(ctx context.Context, transaction *state
 			if errors.Cause(err) == txbuilder.ErrInsufficientValue {
 				logger.Warn(ctx, "Insufficient tx funding : %s", err)
 				return errors.Wrap(a.sendRejection(ctx, transaction,
-					platform.NewRejectError(actions.RejectionsInsufficientTxFeeFunding, err.Error(),
-						now)), "reject")
+					platform.NewRejectError(actions.RejectionsInsufficientTxFeeFunding,
+						err.Error()), now), "reject")
 			}
 
 			return errors.Wrap(err, "sign")
@@ -508,8 +506,8 @@ func (a *Agent) sendSettlementRequest(ctx context.Context,
 		if errors.Cause(err) == txbuilder.ErrInsufficientValue {
 			logger.Warn(ctx, "Insufficient tx funding : %s", err)
 			return errors.Wrap(a.sendRejection(ctx, currentTransaction,
-				platform.NewRejectError(actions.RejectionsInsufficientTxFeeFunding, err.Error(),
-					now)), "reject")
+				platform.NewRejectError(actions.RejectionsInsufficientTxFeeFunding, err.Error()),
+				now), "reject")
 		}
 
 		return errors.Wrap(err, "sign")

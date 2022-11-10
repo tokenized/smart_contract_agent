@@ -298,15 +298,15 @@ func (b *Balance) HasFrozen() bool {
 }
 
 // AddPendingDebit adds a pending modification to reduce the balance.
-func (b *Balance) AddPendingDebit(quantity uint64, now uint64) error {
+func (b *Balance) AddPendingDebit(quantity uint64) error {
 	available := b.Available()
 	if available < quantity {
 		if b.HasFrozen() {
 			return platform.NewRejectError(actions.RejectionsHoldingsFrozen,
-				fmt.Sprintf("available %d, debit %d", available, quantity), now)
+				fmt.Sprintf("available %d, debit %d", available, quantity))
 		} else {
 			return platform.NewRejectError(actions.RejectionsInsufficientQuantity,
-				fmt.Sprintf("available %d, debit %d", available, quantity), now)
+				fmt.Sprintf("available %d, debit %d", available, quantity))
 		}
 	}
 
@@ -325,7 +325,7 @@ func (b *Balance) AddPendingDebit(quantity uint64, now uint64) error {
 }
 
 // AddPendingCredit adds a pending modification to increase the balance.
-func (b *Balance) AddPendingCredit(quantity uint64, now uint64) error {
+func (b *Balance) AddPendingCredit(quantity uint64) error {
 	if b.pendingDirection { // credit
 		b.pendingQuantity += quantity
 	} else { // debit

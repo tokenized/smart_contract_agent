@@ -10,41 +10,35 @@ import (
 type RejectError struct {
 	Code                  uint32
 	Message               string
-	Timestamp             uint64
 	InputIndex            int
 	OutputIndex           int
 	ReceiverLockingScript bitcoin.Script
 }
 
-func NewRejectError(code int, message string, timestamp uint64) RejectError {
+func NewRejectError(code int, message string) RejectError {
 	return RejectError{
 		Code:        uint32(code),
 		Message:     message,
-		Timestamp:   timestamp,
 		InputIndex:  0,
 		OutputIndex: -1,
 	}
 }
 
-func NewRejectErrorWithOutputIndex(code int, message string, timestamp uint64,
-	outputIndex int) RejectError {
-
+func NewRejectErrorWithOutputIndex(code int, message string, outputIndex int) RejectError {
 	return RejectError{
 		Code:        uint32(code),
 		Message:     message,
-		Timestamp:   timestamp,
 		InputIndex:  0,
 		OutputIndex: outputIndex,
 	}
 }
 
-func NewRejectErrorFull(code int, message string, timestamp uint64,
-	inputIndex, outputIndex int, receiverLockingScript bitcoin.Script) RejectError {
+func NewRejectErrorFull(code int, message string, inputIndex, outputIndex int,
+	receiverLockingScript bitcoin.Script) RejectError {
 
 	return RejectError{
 		Code:                  uint32(code),
 		Message:               message,
-		Timestamp:             timestamp,
 		InputIndex:            inputIndex,
 		OutputIndex:           outputIndex,
 		ReceiverLockingScript: receiverLockingScript,

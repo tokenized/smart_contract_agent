@@ -123,7 +123,8 @@ func (a *Agent) processRejection(ctx context.Context, transaction *state.Transac
 				rejectError.OutputIndex = transferContracts.FirstContractOutputIndex
 			}
 			if transferContracts != nil && transferContracts.IsFirstContract() {
-				return errors.Wrap(a.sendRejection(ctx, transferTransaction, rejectError), "reject")
+				return errors.Wrap(a.sendRejection(ctx, transferTransaction, rejectError, now),
+					"reject")
 			}
 
 			return nil // Only first contract can reject at this point
@@ -136,7 +137,7 @@ func (a *Agent) processRejection(ctx context.Context, transaction *state.Transac
 		// This is the first contract so create a reject for the transfer itself.
 		return errors.Wrap(a.sendRejection(ctx, transferTransaction,
 			platform.NewRejectErrorWithOutputIndex(int(rejection.RejectionCode), rejection.Message,
-				now, transferContracts.FirstContractOutputIndex)), "reject")
+				transferContracts.FirstContractOutputIndex), now), "reject")
 	}
 
 	// This is not the first contract so create a reject to the previous contract agent.
@@ -146,7 +147,7 @@ func (a *Agent) processRejection(ctx context.Context, transaction *state.Transac
 
 	return errors.Wrap(a.sendRejection(ctx, transaction,
 		platform.NewRejectErrorFull(int(rejection.RejectionCode),
-			rejection.Message, now, 0, -1, transferContracts.PreviousLockingScript)), "reject")
+			rejection.Message, 0, -1, transferContracts.PreviousLockingScript), now), "reject")
 }
 
 func firstInputTxID(transaction *state.Transaction) bitcoin.Hash32 {
@@ -246,20 +247,27 @@ func (a *Agent) traceToTransfer(ctx context.Context,
 // sendRejection creates a reject message transaction that spends the specified output and contains
 // the specified reject code.
 func (a *Agent) sendRejection(ctx context.Context, transaction *state.Transaction,
-	rejectError platform.RejectError) error {
+	rejectError error, now uint64) error {
+
+	var reject *platform.RejectError
+	if re, ok := rejectError.(platform.RejectError); ok {
+		reject = &re
+	} else if re, ok := rejectError.(*platform.RejectError); ok {
+		reject = re
+	}
 
 	agentLockingScript := a.LockingScript()
 	rejectTx := txbuilder.NewTxBuilder(a.FeeRate(), a.DustFeeRate())
 
 	transaction.Lock()
 
-	if rejectError.OutputIndex != -1 {
+	if reject != nil && reject.OutputIndex != -1 {
 		// Add input spending output flagged for response.
 		outpoint := wire.OutPoint{
 			Hash:  transaction.TxID(),
-			Index: uint32(rejectError.OutputIndex),
+			Index: uint32(reject.OutputIndex),
 		}
-		output := transaction.Output(rejectError.OutputIndex)
+		output := transaction.Output(reject.OutputIndex)
 
 		if output.LockingScript.Equal(agentLockingScript) {
 			if err := rejectTx.AddInput(outpoint, output.LockingScript, output.Value); err != nil {
@@ -272,7 +280,7 @@ func (a *Agent) sendRejection(ctx context.Context, transaction *state.Transactio
 	// Find any other outputs with the contract locking script.
 	outputCount := transaction.OutputCount()
 	for i := 0; i < outputCount; i++ {
-		if i == rejectError.OutputIndex {
+		if reject != nil && i == reject.OutputIndex {
 			continue
 		}
 
@@ -297,10 +305,15 @@ func (a *Agent) sendRejection(ctx context.Context, transaction *state.Transactio
 		return nil
 	}
 
-	if len(rejectError.ReceiverLockingScript) == 0 {
+	if reject == nil || len(reject.ReceiverLockingScript) == 0 {
 		// Add output with locking script that had the issue. This is referenced by the
 		// RejectAddressIndex zero value of the rejection action.
-		rejectInputOutput, err := transaction.InputOutput(rejectError.InputIndex)
+		inputIndex := 0
+		if reject != nil {
+			inputIndex = reject.InputIndex
+		}
+
+		rejectInputOutput, err := transaction.InputOutput(inputIndex)
 		if err != nil {
 			transaction.Unlock()
 			return errors.Wrap(err, "reject input output")
@@ -308,21 +321,26 @@ func (a *Agent) sendRejection(ctx context.Context, transaction *state.Transactio
 
 		if err := rejectTx.AddOutput(rejectInputOutput.LockingScript, 1, false, true); err != nil {
 			transaction.Unlock()
-			return errors.Wrap(err, "add action")
+			return errors.Wrap(err, "add receiver")
 		}
 	} else {
-		if err := rejectTx.AddOutput(rejectError.ReceiverLockingScript, 1, true,
-			true); err != nil {
+		if err := rejectTx.AddOutput(reject.ReceiverLockingScript, 1, true, true); err != nil {
 			transaction.Unlock()
-			return errors.Wrap(err, "add action")
+			return errors.Wrap(err, "add receiver")
 		}
 	}
 
 	// Add rejection action
 	rejection := &actions.Rejection{
-		RejectionCode: rejectError.Code,
-		Message:       rejectError.Message,
-		Timestamp:     rejectError.Timestamp,
+		Timestamp: now,
+	}
+
+	if reject != nil {
+		rejection.RejectionCode = reject.Code
+		rejection.Message = reject.Message
+	} else {
+		rejection.RejectionCode = actions.RejectionsMsgMalformed
+		rejection.Message = rejectError.Error()
 	}
 
 	rejectionScript, err := protocol.Serialize(rejection, a.IsTest())
@@ -341,7 +359,7 @@ func (a *Agent) sendRejection(ctx context.Context, transaction *state.Transactio
 	inputCount := transaction.InputCount()
 	var refundInputValue uint64
 	var refundScript bitcoin.Script
-	if len(rejectError.ReceiverLockingScript) == 0 {
+	if reject == nil || len(reject.ReceiverLockingScript) == 0 {
 		for i := 0; i < inputCount; i++ {
 			inputOutput, err := transaction.InputOutput(i)
 			if err != nil {
@@ -355,7 +373,7 @@ func (a *Agent) sendRejection(ctx context.Context, transaction *state.Transactio
 			}
 		}
 	} else {
-		refundScript = rejectError.ReceiverLockingScript
+		refundScript = reject.ReceiverLockingScript
 	}
 	transaction.Unlock()
 
@@ -382,11 +400,19 @@ func (a *Agent) sendRejection(ctx context.Context, transaction *state.Transactio
 	transaction.AddResponseTxID(rejectTxID)
 	transaction.Unlock()
 
+	var rejectLabel string
+	rejectData := actions.RejectionsData(rejection.RejectionCode)
+	if rejectData != nil {
+		rejectLabel = rejectData.Label
+	} else {
+		rejectLabel = "<unknown>"
+	}
+
 	logger.InfoWithFields(ctx, []logger.Field{
 		logger.Stringer("response_txid", rejectTxID),
-		logger.Uint32("reject_code", rejectError.Code),
-		logger.String("reject_label", rejectError.Label()),
-		logger.String("reject_message", rejectError.Message),
+		logger.Uint32("reject_code", rejection.RejectionCode),
+		logger.String("reject_label", rejectLabel),
+		logger.String("reject_message", rejection.Message),
 	}, "Responding with rejection")
 	if err := a.BroadcastTx(ctx, rejectTx.MsgTx, nil); err != nil {
 		return errors.Wrap(err, "broadcast")

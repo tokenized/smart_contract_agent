@@ -34,7 +34,8 @@ type Instrument struct {
 	Creation       *actions.InstrumentCreation `bsor:"3" json:"creation`
 	CreationTxID   *bitcoin.Hash32             `bsor:"4" json:"creation_txid"`
 
-	FrozenUntil *uint64 `bsor:"5" json:"frozen_until,omitempty"`
+	FrozenUntil *uint64         `bsor:"5" json:"frozen_until,omitempty"`
+	FreezeTxID  *bitcoin.Hash32 `bsor:"6" json:"freeze_txid"`
 
 	// payload is used to cache the deserialized value of the payload in Creation.
 	payload instruments.Instrument `json:"instrument"`
@@ -154,8 +155,18 @@ func (i *Instrument) TransfersPermitted() bool {
 	return true
 }
 
+func (i *Instrument) Freeze(txid bitcoin.Hash32, until uint64) {
+	i.FreezeTxID = &txid
+	i.FrozenUntil = &until
+}
+
 func (i *Instrument) IsFrozen(now uint64) bool {
 	return i.FrozenUntil != nil && (*i.FrozenUntil == 0 || *i.FrozenUntil >= now)
+}
+
+func (i *Instrument) Thaw() {
+	i.FreezeTxID = nil
+	i.FrozenUntil = nil
 }
 
 func (i *Instrument) IsExpired(now uint64) bool {

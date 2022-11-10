@@ -15,6 +15,7 @@ import (
 	"github.com/tokenized/pkg/bitcoin"
 	"github.com/tokenized/pkg/bsor"
 	"github.com/tokenized/pkg/storage"
+	"github.com/tokenized/smart_contract_agent/internal/platform"
 	"github.com/tokenized/specification/dist/golang/actions"
 	"github.com/tokenized/specification/dist/golang/protocol"
 
@@ -44,10 +45,11 @@ type Contract struct {
 
 	MovedTxID *bitcoin.Hash32 `bsor:"8" json:"moved_txid"`
 
-	FrozenUntil *uint64 `bsor:"9" json:"frozen_until,omitempty"`
+	FrozenUntil *uint64         `bsor:"9" json:"frozen_until,omitempty"`
+	FreezeTxID  *bitcoin.Hash32 `bsor:"10" json:"freeze_txid"`
 
 	// TODO Populate AdminMemberInstrumentCode value. --ce
-	AdminMemberInstrumentCode InstrumentCode `bsor:"10" json:"admin_member_instrument_code"`
+	AdminMemberInstrumentCode InstrumentCode `bsor:"11" json:"admin_member_instrument_code"`
 
 	isModified bool
 	sync.Mutex `bsor:"-"`
@@ -197,6 +199,26 @@ func ContractPath(lockingScript bitcoin.Script) string {
 	return fmt.Sprintf("%s/%s", contractPath, CalculateContractHash(lockingScript))
 }
 
+func (c *Contract) CheckIsAvailable(now uint64) error {
+	if c.Formation == nil {
+		return platform.NewRejectError(actions.RejectionsContractDoesNotExist, "")
+	}
+
+	if c.IsExpired(now) {
+		return platform.NewRejectError(actions.RejectionsContractExpired, "")
+	}
+
+	if c.MovedTxID != nil {
+		return platform.NewRejectError(actions.RejectionsContractMoved, c.MovedTxID.String())
+	}
+
+	if c.IsFrozen(now) {
+		return platform.NewRejectError(actions.RejectionsContractFrozen, "")
+	}
+
+	return nil
+}
+
 func (c *Contract) AdminLockingScript() bitcoin.Script {
 	if c.Formation == nil {
 		return nil
@@ -246,6 +268,20 @@ func (c *Contract) IsAdminOrOperator(lockingScript bitcoin.Script) bool {
 func (c *Contract) IsExpired(now uint64) bool {
 	return c.Formation != nil && c.Formation.ContractExpiration != 0 &&
 		c.Formation.ContractExpiration < now
+}
+
+func (c *Contract) Freeze(txid bitcoin.Hash32, until uint64) {
+	c.FreezeTxID = &txid
+	c.FrozenUntil = &until
+}
+
+func (c *Contract) IsFrozen(now uint64) bool {
+	return c.FrozenUntil != nil && (*c.FrozenUntil == 0 || *c.FrozenUntil >= now)
+}
+
+func (c *Contract) Thaw() {
+	c.FreezeTxID = nil
+	c.FrozenUntil = nil
 }
 
 func (c *Contract) MarkModified() {

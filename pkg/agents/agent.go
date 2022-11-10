@@ -151,25 +151,11 @@ func (a *Agent) AdminLockingScript() bitcoin.Script {
 	return a.contract.AdminLockingScript()
 }
 
-func (a *Agent) ContractExists() bool {
+func (a *Agent) CheckContractIsAvailable(now uint64) error {
 	a.contract.Lock()
 	defer a.contract.Unlock()
 
-	return a.contract.Formation != nil
-}
-
-func (a *Agent) ContractIsExpired(now uint64) bool {
-	a.contract.Lock()
-	defer a.contract.Unlock()
-
-	return a.contract.IsExpired(now)
-}
-
-func (a *Agent) MovedTxID() *bitcoin.Hash32 {
-	a.contract.Lock()
-	defer a.contract.Unlock()
-
-	return a.contract.MovedTxID
+	return a.contract.CheckIsAvailable(now)
 }
 
 type IdentityOracle struct {
@@ -397,7 +383,7 @@ func (a *Agent) processAction(ctx context.Context, transaction *state.Transactio
 
 	if err := action.Validate(); err != nil {
 		return errors.Wrap(a.sendRejection(ctx, transaction,
-			platform.NewRejectError(actions.RejectionsMsgMalformed, err.Error(), now)), "reject")
+			platform.NewRejectError(actions.RejectionsMsgMalformed, err.Error()), now), "reject")
 	}
 
 	switch act := action.(type) {
