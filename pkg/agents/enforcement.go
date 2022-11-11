@@ -243,8 +243,6 @@ func (a *Agent) processFreezeOrder(ctx context.Context, transaction *state.Trans
 		}
 
 		if isFull {
-			instrument.Lock()
-
 			if instrument.IsFrozen(now) {
 				return errors.Wrap(a.sendRejection(ctx, transaction,
 					platform.NewRejectError(actions.RejectionsInstrumentFrozen, ""), now), "reject")
@@ -712,9 +710,286 @@ func (a *Agent) processThawOrder(ctx context.Context, transaction *state.Transac
 func (a *Agent) processConfiscateOrder(ctx context.Context, transaction *state.Transaction,
 	order *actions.Order, now uint64) error {
 
-	logger.Info(ctx, "Processing confiscate order")
+	logger.Info(ctx, "Processing confiscation order")
 
-	return errors.New("Not Implemented")
+	agentLockingScript := a.LockingScript()
+
+	transaction.Lock()
+	txid := transaction.TxID()
+	contractOutput := transaction.Output(0)
+	transaction.Unlock()
+
+	confiscation := &actions.Confiscation{
+		InstrumentType: order.InstrumentType,
+		InstrumentCode: order.InstrumentCode,
+		Timestamp:      now,
+	}
+
+	confiscationTx := txbuilder.NewTxBuilder(a.FeeRate(), a.DustFeeRate())
+
+	if err := confiscationTx.AddInput(wire.OutPoint{Hash: txid, Index: 0}, agentLockingScript,
+		contractOutput.Value); err != nil {
+		return errors.Wrap(err, "add input")
+	}
+
+	var instrumentCode state.InstrumentCode
+	copy(instrumentCode[:], order.InstrumentCode)
+	instrumentID, _ := protocol.InstrumentIDForRaw(order.InstrumentType, order.InstrumentCode)
+
+	logger.InfoWithFields(ctx, []logger.Field{
+		logger.String("instrument_id", instrumentID),
+	}, "Instrument ID")
+
+	instrument, err := a.caches.Instruments.Get(ctx, agentLockingScript, instrumentCode)
+	if err != nil {
+		return errors.Wrap(err, "get instrument")
+	}
+
+	if instrument == nil {
+		return errors.Wrap(a.sendRejection(ctx, transaction,
+			platform.NewRejectError(actions.RejectionsInstrumentNotFound, ""), now), "reject")
+	}
+	defer a.caches.Instruments.Release(ctx, agentLockingScript, instrumentCode)
+
+	instrument.Lock()
+
+	if instrument.Creation == nil {
+		instrument.Unlock()
+		return errors.Wrap(a.sendRejection(ctx, transaction,
+			platform.NewRejectError(actions.RejectionsInstrumentNotFound, ""), now), "reject")
+	}
+
+	if !instrument.Creation.EnforcementOrdersPermitted {
+		instrument.Unlock()
+		return errors.Wrap(a.sendRejection(ctx, transaction,
+			platform.NewRejectError(actions.RejectionsInstrumentNotPermitted, ""), now),
+			"reject")
+	}
+
+	instrument.Unlock()
+
+	// Validate deposit address, and increase balance by confiscation.DepositQty and increase
+	// DepositQty by previous balance
+	depositAddress, err := bitcoin.DecodeRawAddress(order.DepositAddress)
+	if err != nil {
+		return errors.Wrap(a.sendRejection(ctx, transaction,
+			platform.NewRejectError(actions.RejectionsMsgMalformed,
+				fmt.Sprintf("DepositAddress: %s", err)), now), "reject")
+	}
+
+	depositHash, err := depositAddress.Hash()
+	if err != nil {
+		return errors.Wrap(a.sendRejection(ctx, transaction,
+			platform.NewRejectError(actions.RejectionsMsgMalformed,
+				fmt.Sprintf("DepositAddress: Hash: %s", err)), now), "reject")
+	}
+
+	depositLockingScript, err := depositAddress.LockingScript()
+	if err != nil {
+		return errors.Wrap(a.sendRejection(ctx, transaction,
+			platform.NewRejectError(actions.RejectionsMsgMalformed,
+				fmt.Sprintf("DepositAddress: LockingScript: %s", err)), now), "reject")
+	}
+
+	hashes := make(map[bitcoin.Hash20]bool)
+	depositQuantity := uint64(0)
+	var lockingScripts []bitcoin.Script
+	var quantities []uint64
+	for i, target := range order.TargetAddresses {
+		targetAddress, err := bitcoin.DecodeRawAddress(target.Address)
+		if err != nil {
+			return errors.Wrap(a.sendRejection(ctx, transaction,
+				platform.NewRejectError(actions.RejectionsMsgMalformed,
+					fmt.Sprintf("TargetAddresses[%d]: Address: %s", i, err)), now), "reject")
+		}
+
+		if target.Quantity == 0 {
+			return errors.Wrap(a.sendRejection(ctx, transaction,
+				platform.NewRejectError(actions.RejectionsMsgMalformed,
+					fmt.Sprintf("TargetAddresses[%d]: Quantity: can't be zero", i)), now), "reject")
+		}
+
+		hash, err := targetAddress.Hash()
+		if err != nil {
+			return errors.Wrap(a.sendRejection(ctx, transaction,
+				platform.NewRejectError(actions.RejectionsMsgMalformed,
+					fmt.Sprintf("TargetAddresses[%d]: Address: Hash: %s", i, err)), now), "reject")
+		}
+
+		lockingScript, err := targetAddress.LockingScript()
+		if err != nil {
+			return errors.Wrap(a.sendRejection(ctx, transaction,
+				platform.NewRejectError(actions.RejectionsMsgMalformed,
+					fmt.Sprintf("TargetAddresses[%d]: Address: LockingScript: %s", i, err)), now),
+				"reject")
+		}
+
+		if _, exists := hashes[*hash]; exists {
+			return errors.Wrap(a.sendRejection(ctx, transaction,
+				platform.NewRejectError(actions.RejectionsMsgMalformed,
+					fmt.Sprintf("TargetAddresses[%d]: Address: duplicated", i)), now), "reject")
+		}
+
+		lockingScripts = append(lockingScripts, lockingScript)
+		quantities = append(quantities, target.Quantity)
+
+		hashes[*hash] = true
+		depositQuantity += target.Quantity
+
+		confiscation.Quantities = append(confiscation.Quantities, &actions.QuantityIndexField{
+			Index: uint32(len(confiscationTx.Outputs)),
+		})
+
+		if err := confiscationTx.AddOutput(lockingScript, 1, false, true); err != nil {
+			return errors.Wrap(err, "add output")
+		}
+
+		logger.InfoWithFields(ctx, []logger.Field{
+			logger.String("instrument_id", instrumentID),
+			logger.Stringer("locking_script", lockingScript),
+			logger.Uint64("quantity", target.Quantity),
+		}, "Confiscating quantity")
+	}
+
+	balances, err := a.caches.Balances.GetMulti(ctx, agentLockingScript, instrumentCode,
+		lockingScripts)
+	if err != nil {
+		return errors.Wrap(err, "get balances")
+	}
+	defer a.caches.Balances.ReleaseMulti(ctx, agentLockingScript, instrumentCode, balances)
+
+	balances.Lock()
+	defer balances.Unlock()
+
+	for i, balance := range balances {
+		if balance == nil {
+			balances.RevertPending(txid)
+
+			return errors.Wrap(a.sendRejection(ctx, transaction,
+				platform.NewRejectError(actions.RejectionsMsgMalformed,
+					fmt.Sprintf("TargetAddresses[%d]: no balance", i)), now), "reject")
+		}
+
+		quantity := quantities[i]
+		finalQuantity, err := balance.AddConfiscation(txid, quantity)
+		if err != nil {
+			balances.RevertPending(txid)
+
+			logger.WarnWithFields(ctx, []logger.Field{
+				logger.String("instrument_id", instrumentID),
+				logger.Stringer("locking_script", lockingScripts[i]),
+				logger.Uint64("quantity", quantity),
+			}, "Failed to add confiscation : %s", err)
+
+			if rejectError, ok := errors.Cause(err).(platform.RejectError); ok {
+				rejectError.Message = fmt.Sprintf("TargetAddresses[%d]: %s", i, rejectError.Message)
+				return errors.Wrap(a.sendRejection(ctx, transaction, rejectError, now), "reject")
+			}
+
+			return errors.Wrapf(err, "add confiscation %d", i)
+		}
+
+		confiscation.Quantities[i].Quantity = finalQuantity
+	}
+
+	if _, exists := hashes[*depositHash]; exists {
+		balances.RevertPending(txid)
+
+		return errors.Wrap(a.sendRejection(ctx, transaction,
+			platform.NewRejectError(actions.RejectionsMsgMalformed,
+				fmt.Sprintf("DepositAddress: duplicated")), now), "reject")
+	}
+
+	depositBalance, err := a.caches.Balances.Add(ctx, agentLockingScript, instrumentCode,
+		state.ZeroBalance(depositLockingScript))
+	if err != nil {
+		balances.RevertPending(txid)
+		return errors.Wrap(err, "get deposit balance")
+	}
+	defer a.caches.Balances.Release(ctx, agentLockingScript, instrumentCode, depositBalance)
+
+	if err := depositBalance.AddPendingCredit(depositQuantity); err != nil {
+		logger.WarnWithFields(ctx, []logger.Field{
+			logger.Stringer("locking_script", depositLockingScript),
+			logger.Uint64("quantity", depositQuantity),
+		}, "Failed to add deposit : %s", err)
+		balances.RevertPending(txid)
+
+		if rejectError, ok := errors.Cause(err).(platform.RejectError); ok {
+			rejectError.Message = fmt.Sprintf("credit: %s", rejectError.Message)
+			return errors.Wrap(a.sendRejection(ctx, transaction, rejectError, now), "reject")
+		}
+
+		return errors.Wrap(err, "add credit")
+	}
+
+	confiscation.DepositQty = depositBalance.SettlePendingQuantity()
+
+	confiscationScript, err := protocol.Serialize(confiscation, a.IsTest())
+	if err != nil {
+		return errors.Wrap(err, "serialize confiscation")
+	}
+
+	if err := confiscationTx.AddOutput(confiscationScript, 0, false, false); err != nil {
+		return errors.Wrap(err, "add confiscation output")
+	}
+
+	// Add the contract fee.
+	contractFee := a.ContractFee()
+	if contractFee > 0 {
+		if err := confiscationTx.AddOutput(a.FeeLockingScript(), contractFee, true,
+			false); err != nil {
+			return errors.Wrap(err, "add contract fee")
+		}
+	} else if err := confiscationTx.SetChangeLockingScript(a.FeeLockingScript(), ""); err != nil {
+		return errors.Wrap(err, "set change")
+	}
+
+	// Sign confiscation tx.
+	if _, err := confiscationTx.Sign([]bitcoin.Key{a.Key()}); err != nil {
+		if errors.Cause(err) == txbuilder.ErrInsufficientValue {
+			logger.Warn(ctx, "Insufficient tx funding : %s", err)
+			return errors.Wrap(a.sendRejection(ctx, transaction,
+				platform.NewRejectError(actions.RejectionsInsufficientTxFeeFunding, err.Error()),
+				now), "reject")
+		}
+
+		return errors.Wrap(err, "sign")
+	}
+
+	confiscationTxID := *confiscationTx.MsgTx.TxHash()
+
+	confiscationTransaction, err := a.caches.Transactions.AddRaw(ctx, confiscationTx.MsgTx, nil)
+	if err != nil {
+		return errors.Wrap(err, "add response tx")
+	}
+	defer a.caches.Transactions.Release(ctx, confiscationTxID)
+
+	balances.FinalizeConfiscation(txid, confiscationTxID, now)
+	depositBalance.Settle(txid, confiscationTxID, now)
+
+	// Set confiscation tx as processed.
+	confiscationTransaction.Lock()
+	confiscationTransaction.SetProcessed()
+	confiscationTransaction.Unlock()
+
+	transaction.Lock()
+	transaction.AddResponseTxID(confiscationTxID)
+	transaction.Unlock()
+
+	logger.InfoWithFields(ctx, []logger.Field{
+		logger.Stringer("response_txid", confiscationTxID),
+	}, "Responding with confiscation")
+	if err := a.BroadcastTx(ctx, confiscationTx.MsgTx, nil); err != nil {
+		return errors.Wrap(err, "broadcast")
+	}
+
+	if err := a.postTransactionToSubscriptions(ctx, append(lockingScripts, depositLockingScript),
+		confiscationTransaction); err != nil {
+		return errors.Wrap(err, "post confiscation to locking scripts")
+	}
+
+	return nil
 }
 
 func (a *Agent) processFreeze(ctx context.Context, transaction *state.Transaction,

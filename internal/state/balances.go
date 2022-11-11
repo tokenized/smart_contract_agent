@@ -23,6 +23,7 @@ const (
 	CreditCode              = BalanceAdjustmentCode('C')
 	MultiContractDebitCode  = BalanceAdjustmentCode('-')
 	MultiContractCreditCode = BalanceAdjustmentCode('+')
+	ConfiscationCode        = BalanceAdjustmentCode('S') // Seize
 
 	balanceVersion = uint8(0)
 	balancePath    = "balances"
@@ -397,6 +398,58 @@ func (b *Balance) RemoveFreeze(txid bitcoin.Hash32) {
 	}
 }
 
+func (b *Balance) AddConfiscation(txid bitcoin.Hash32, quantity uint64) (uint64, error) {
+	for _, adj := range b.Adjustments {
+		if !txid.Equal(adj.TxID) {
+			continue
+		}
+
+		// Already have this confiscation
+		return adj.SettledQuantity, nil
+	}
+
+	// Add a new confiscation
+	settledQuantity := b.SettlePendingQuantity()
+	if settledQuantity < quantity {
+		return 0, platform.NewRejectError(actions.RejectionsInsufficientQuantity,
+			fmt.Sprintf("available %d, confiscation %d", settledQuantity, quantity))
+	}
+	settledQuantity -= quantity
+
+	b.Adjustments = append(b.Adjustments, &BalanceAdjustment{
+		Code:            ConfiscationCode,
+		Quantity:        quantity,
+		TxID:            &txid,
+		SettledQuantity: settledQuantity,
+	})
+
+	b.isModified = true
+	return settledQuantity, nil
+}
+
+func (b *Balance) FinalizeConfiscation(orderTxID, confiscationTxID bitcoin.Hash32,
+	now uint64) bool {
+
+	var newAdjustments []*BalanceAdjustment
+	found := false
+	for _, adj := range b.Adjustments {
+		if orderTxID.Equal(adj.TxID) {
+			b.Quantity -= adj.Quantity
+			b.TxID = &confiscationTxID
+			b.Timestamp = now
+			b.isModified = true
+			found = true
+
+			continue
+		}
+
+		newAdjustments = append(newAdjustments, adj)
+	}
+	b.Adjustments = newAdjustments
+
+	return found
+}
+
 // FinalizePending clears the current pending modification and converts it into a balance
 // adjustment.
 func (b *Balance) FinalizePending(txid bitcoin.Hash32, isMultiContract bool) {
@@ -677,9 +730,13 @@ func AppendZeroBalance(balances Balances, lockingScript bitcoin.Script) Balances
 		}
 	}
 
-	return append(balances, &Balance{
+	return append(balances, ZeroBalance(lockingScript))
+}
+
+func ZeroBalance(lockingScript bitcoin.Script) *Balance {
+	return &Balance{
 		LockingScript: lockingScript,
-	})
+	}
 }
 
 // Find returns the balance with the specified locking script, or nil if there isn't a match.
@@ -744,6 +801,18 @@ func (bs *Balances) RemoveFreeze(freezeOrderTxID bitcoin.Hash32) {
 		}
 
 		b.RemoveFreeze(freezeOrderTxID)
+	}
+}
+
+func (bs *Balances) FinalizeConfiscation(orderTxID, confiscationTxID bitcoin.Hash32,
+	now uint64) {
+
+	for _, b := range *bs {
+		if b == nil {
+			continue
+		}
+
+		b.FinalizeConfiscation(orderTxID, confiscationTxID, now)
 	}
 }
 
