@@ -195,7 +195,7 @@ func (a *Agent) processSignatureRequest(ctx context.Context, transaction *state.
 		copy(instrumentCode[:], instrumentSettlement.InstrumentCode)
 
 		instrumentBalances, err := a.verifyInstrumentSettlement(instrumentCtx, agentLockingScript,
-			instrumentCode, transferTxID, settlementTx, instrumentSettlement)
+			instrumentCode, transferTxID, settlementTx, instrumentSettlement, now)
 		if err != nil {
 			balances.Unlock()
 
@@ -385,8 +385,8 @@ func (a *Agent) verifyBitcoinSettlement(ctx context.Context, transferTransaction
 
 func (a *Agent) verifyInstrumentSettlement(ctx context.Context, agentLockingScript bitcoin.Script,
 	instrumentCode state.InstrumentCode, transferTxID bitcoin.Hash32,
-	settlementTx *txbuilder.TxBuilder,
-	instrumentSettlement *actions.InstrumentSettlementField) (state.Balances, error) {
+	settlementTx *txbuilder.TxBuilder, instrumentSettlement *actions.InstrumentSettlementField,
+	now uint64) (state.Balances, error) {
 
 	var lockingScripts []bitcoin.Script
 	outputCount := uint32(len(settlementTx.MsgTx.TxOut))
@@ -422,7 +422,8 @@ func (a *Agent) verifyInstrumentSettlement(ctx context.Context, agentLockingScri
 				fmt.Sprintf("missing settlement balance %d", i))
 		}
 
-		if rejectCode := balance.VerifySettlement(transferTxID, settlement.Quantity); rejectCode != 0 {
+		if rejectCode := balance.VerifySettlement(transferTxID,
+			settlement.Quantity, now); rejectCode != 0 {
 			balances.Unlock()
 			a.caches.Balances.ReleaseMulti(ctx, agentLockingScript, instrumentCode, balances)
 			return nil, platform.NewRejectError(rejectCode, fmt.Sprintf("settlement %d", i))

@@ -56,7 +56,7 @@ type BalanceAdjustmentCode byte
 type BalanceAdjustment struct {
 	Code BalanceAdjustmentCode `bsor:"1" json:"code,omitempty"`
 
-	Expires         uint64          `bsor:"2" json:"expires,omitempty"`
+	Expires         *uint64         `bsor:"2" json:"expires,omitempty"`
 	Quantity        uint64          `bsor:"3" json:"quantity,omitempty"`
 	TxID            *bitcoin.Hash32 `bsor:"4" json:"txID,omitempty"`
 	SettledQuantity uint64          `bsor:"5" json:"settled_quantity,omitempty"`
@@ -246,8 +246,7 @@ func (b *Balance) SettlePendingQuantity() uint64 {
 	quantity := b.Quantity
 	for _, adj := range b.Adjustments {
 		switch adj.Code {
-		case FreezeCode:
-		case DebitCode, MultiContractDebitCode:
+		case FreezeCode, DebitCode, MultiContractDebitCode:
 			if quantity > adj.Quantity {
 				quantity -= adj.Quantity
 			} else {
@@ -269,11 +268,19 @@ func (b *Balance) SettlePendingQuantity() uint64 {
 
 // Available returns the balance quantity with all pending modifications and balance adjustments
 // applied.
-func (b *Balance) Available() uint64 {
+func (b *Balance) Available(now uint64) uint64 {
 	available := b.PendingQuantity()
 	for _, adj := range b.Adjustments {
 		switch adj.Code {
-		case FreezeCode, DebitCode, MultiContractDebitCode:
+		case FreezeCode:
+			if adj.Expires != nil && (*adj.Expires == 0 || *adj.Expires >= now) {
+				if available > adj.Quantity {
+					available -= adj.Quantity
+				} else {
+					available = 0
+				}
+			}
+		case DebitCode, MultiContractDebitCode:
 			if available > adj.Quantity {
 				available -= adj.Quantity
 			} else {
@@ -287,22 +294,25 @@ func (b *Balance) Available() uint64 {
 	return available
 }
 
-// HasFrozen returns true if there are any balance adjustments with the code Freeze.
-func (b *Balance) HasFrozen() bool {
+func (b *Balance) FrozenQuantity(now uint64) uint64 {
+	var result uint64
 	for _, adj := range b.Adjustments {
-		if adj.Code == FreezeCode {
-			return true
+		switch adj.Code {
+		case FreezeCode:
+			if adj.Expires != nil && (*adj.Expires == 0 || *adj.Expires >= now) {
+				result += adj.Quantity
+			}
 		}
 	}
 
-	return false
+	return result
 }
 
 // AddPendingDebit adds a pending modification to reduce the balance.
-func (b *Balance) AddPendingDebit(quantity uint64) error {
-	available := b.Available()
+func (b *Balance) AddPendingDebit(quantity, now uint64) error {
+	available := b.Available(now)
 	if available < quantity {
-		if b.HasFrozen() {
+		if b.FrozenQuantity(now) > 0 {
 			return platform.NewRejectError(actions.RejectionsHoldingsFrozen,
 				fmt.Sprintf("available %d, debit %d", available, quantity))
 		} else {
@@ -358,26 +368,44 @@ func (b *Balance) RevertPending(txid bitcoin.Hash32) {
 	b.pendingQuantity = 0
 }
 
-func (b *Balance) AddFreeze(txid bitcoin.Hash32, quantity uint64) {
+func (b *Balance) AddFreeze(txid bitcoin.Hash32, quantity, frozenUntil uint64) uint64 {
 	for _, adj := range b.Adjustments {
 		if !txid.Equal(adj.TxID) {
 			continue
 		}
 
 		// Already have this freeze
-		return
+		return 0
 	}
 
 	// Add a new freeze
 	settledQuantity := b.SettlePendingQuantity()
+	if quantity > settledQuantity {
+		settledQuantity = 0
+	} else {
+		settledQuantity -= quantity
+	}
 	b.Adjustments = append(b.Adjustments, &BalanceAdjustment{
 		Code:            FreezeCode,
+		Expires:         &frozenUntil,
 		Quantity:        quantity,
 		TxID:            &txid,
 		SettledQuantity: settledQuantity,
 	})
 
 	b.isModified = true
+	return settledQuantity
+}
+
+func (b *Balance) SettleFreeze(orderTxID, freezeTxID bitcoin.Hash32) {
+	for _, adj := range b.Adjustments {
+		if !orderTxID.Equal(adj.TxID) {
+			continue
+		}
+
+		adj.TxID = &freezeTxID
+		return
+	}
 }
 
 func (b *Balance) RemoveFreeze(txid bitcoin.Hash32) {
@@ -496,7 +524,7 @@ func (b *Balance) CancelPending(txid bitcoin.Hash32) {
 	b.isModified = true
 }
 
-func (b *Balance) VerifySettlement(transferTxID bitcoin.Hash32, quantity uint64) int {
+func (b *Balance) VerifySettlement(transferTxID bitcoin.Hash32, quantity, now uint64) int {
 	for _, adj := range b.Adjustments {
 		if !transferTxID.Equal(adj.TxID) {
 			continue
@@ -506,7 +534,7 @@ func (b *Balance) VerifySettlement(transferTxID bitcoin.Hash32, quantity uint64)
 			return actions.RejectionsSuccess
 		}
 
-		if b.HasFrozen() {
+		if b.FrozenQuantity(now) > 0 {
 			return actions.RejectionsTransferExpired
 		}
 

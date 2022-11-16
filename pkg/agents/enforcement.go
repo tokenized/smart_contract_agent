@@ -43,7 +43,6 @@ func (a *Agent) processOrder(ctx context.Context, transaction *state.Transaction
 	transaction.Unlock()
 
 	contract := a.Contract()
-	defer a.caches.Contracts.Save(ctx, contract)
 	contract.Lock()
 
 	authorizingAddress, err := bitcoin.RawAddressFromLockingScript(authorizingLockingScript)
@@ -59,10 +58,16 @@ func (a *Agent) processOrder(ctx context.Context, transaction *state.Transaction
 			platform.NewRejectError(actions.RejectionsUnauthorizedAddress, ""), now), "reject")
 	}
 
-	if a.contract.Formation == nil {
+	if contract.Formation == nil {
 		contract.Unlock()
 		return errors.Wrap(a.sendRejection(ctx, transaction,
 			platform.NewRejectError(actions.RejectionsContractDoesNotExist, ""), now), "reject")
+	}
+
+	if contract.IsExpired(now) {
+		contract.Unlock()
+		return errors.Wrap(a.sendRejection(ctx, transaction,
+			platform.NewRejectError(actions.RejectionsContractExpired, ""), now), "reject")
 	}
 
 	if contract.MovedTxID != nil {
@@ -71,6 +76,8 @@ func (a *Agent) processOrder(ctx context.Context, transaction *state.Transaction
 		return errors.Wrap(a.sendRejection(ctx, transaction,
 			platform.NewRejectError(actions.RejectionsContractMoved, movedTxID), now), "reject")
 	}
+
+	contract.Unlock()
 
 	// Validate enforcement authority public key and signature
 	if len(order.OrderSignature) > 0 || order.SignatureAlgorithm != 0 {
@@ -303,15 +310,6 @@ func (a *Agent) processFreezeOrder(ctx context.Context, transaction *state.Trans
 					logger.Stringer("locking_script", lockingScript),
 					logger.Uint64("quantity", target.Quantity),
 				}, "Freeze target")
-
-				freeze.Quantities = append(freeze.Quantities, &actions.QuantityIndexField{
-					Index:    uint32(len(freezeTx.Outputs)),
-					Quantity: target.Quantity,
-				})
-
-				if err := freezeTx.AddOutput(lockingScript, 1, false, true); err != nil {
-					return errors.Wrapf(err, "add target output: %d", i)
-				}
 			}
 
 			balances, err = a.caches.Balances.GetMulti(ctx, agentLockingScript, instrumentCode,
@@ -329,6 +327,17 @@ func (a *Agent) processFreezeOrder(ctx context.Context, transaction *state.Trans
 					return errors.Wrap(a.sendRejection(ctx, transaction,
 						platform.NewRejectError(actions.RejectionsMsgMalformed,
 							fmt.Sprintf("Balance[%d]: not found", i)), now), "reject")
+				}
+
+				quantity := balance.AddFreeze(txid, quantities[i], order.FreezePeriod)
+
+				freeze.Quantities = append(freeze.Quantities, &actions.QuantityIndexField{
+					Index:    uint32(len(freezeTx.Outputs)),
+					Quantity: quantity,
+				})
+
+				if err := freezeTx.AddOutput(balance.LockingScript, 1, false, true); err != nil {
+					return errors.Wrapf(err, "add target output: %d", i)
 				}
 			}
 		}
@@ -404,8 +413,8 @@ func (a *Agent) processFreezeOrder(ctx context.Context, transaction *state.Trans
 			instrument.Freeze(freezeTxID, order.FreezePeriod)
 		}
 	} else {
-		for i, balance := range balances {
-			balance.AddFreeze(freezeTxID, quantities[i])
+		for _, balance := range balances {
+			balance.SettleFreeze(txid, freezeTxID)
 		}
 	}
 
@@ -484,9 +493,6 @@ func (a *Agent) processThawOrder(ctx context.Context, transaction *state.Transac
 	defer a.caches.Transactions.Release(ctx, freezeTxID)
 
 	freezeTransaction.Lock()
-
-	input := freezeTransaction.Input(0)
-	freezeOrderTxID := input.PreviousOutPoint.Hash
 
 	isTest := a.IsTest()
 	var freeze *actions.Freeze
@@ -673,7 +679,7 @@ func (a *Agent) processThawOrder(ctx context.Context, transaction *state.Transac
 		if isFull {
 			instrument.Thaw()
 		} else {
-			balances.RemoveFreeze(freezeOrderTxID)
+			balances.RemoveFreeze(freezeTxID)
 		}
 	}
 
@@ -925,6 +931,10 @@ func (a *Agent) processConfiscateOrder(ctx context.Context, transaction *state.T
 
 	confiscation.DepositQty = depositBalance.SettlePendingQuantity()
 
+	if err := confiscationTx.AddOutput(depositLockingScript, 1, false, true); err != nil {
+		return errors.Wrap(err, "add deposit output")
+	}
+
 	confiscationScript, err := protocol.Serialize(confiscation, a.IsTest())
 	if err != nil {
 		return errors.Wrap(err, "serialize confiscation")
@@ -997,15 +1007,163 @@ func (a *Agent) processFreeze(ctx context.Context, transaction *state.Transactio
 
 	// First input must be the agent's locking script
 	transaction.Lock()
+
+	txid := transaction.TxID()
+
 	inputOutput, err := transaction.InputOutput(0)
-	transaction.Unlock()
 	if err != nil {
+		transaction.Unlock()
 		return errors.Wrapf(err, "input locking script %d", 0)
 	}
 
+	input := transaction.Input(0)
+	orderTxID := input.PreviousOutPoint.Hash
+
 	agentLockingScript := a.LockingScript()
 	if !agentLockingScript.Equal(inputOutput.LockingScript) {
+		transaction.Unlock()
 		return nil // Not for this agent's contract
+	}
+
+	outputCount := transaction.OutputCount()
+
+	transaction.Unlock()
+
+	if _, err := a.addResponseTxID(ctx, orderTxID, txid); err != nil {
+		return errors.Wrap(err, "add response txid")
+	}
+
+	if len(freeze.Quantities) == 0 {
+		return errors.New("No quantities provided")
+	}
+
+	isFull := false
+	if len(freeze.Quantities) == 1 {
+		index := int(freeze.Quantities[0].Index)
+		if index >= outputCount {
+			return fmt.Errorf("Output index out of range : %d >= %d", index, outputCount)
+		}
+
+		transaction.Lock()
+		output := transaction.Output(index)
+		lockingScript := output.LockingScript
+		transaction.Unlock()
+
+		if lockingScript.Equal(agentLockingScript) {
+			// Contract-Wide action
+			isFull = true
+		}
+	}
+
+	if len(freeze.InstrumentCode) == 0 {
+		if !isFull {
+			return errors.New("Missing instrument code on non-full freeze")
+		}
+
+		contract := a.Contract()
+		contract.Lock()
+		defer contract.Unlock()
+
+		if contract.IsFrozen(now) {
+			logger.InfoWithFields(ctx, []logger.Field{
+				logger.Stringer("contract_locking_script", agentLockingScript),
+			}, "Contract already frozen")
+			return nil
+		}
+
+		logger.InfoWithFields(ctx, []logger.Field{
+			logger.Stringer("contract_locking_script", agentLockingScript),
+		}, "Contract freeze")
+
+		contract.Freeze(txid, freeze.FreezePeriod)
+	} else {
+		var instrumentCode state.InstrumentCode
+		copy(instrumentCode[:], freeze.InstrumentCode)
+		instrumentID, _ := protocol.InstrumentIDForRaw(freeze.InstrumentType, freeze.InstrumentCode)
+
+		instrument, err := a.caches.Instruments.Get(ctx, agentLockingScript, instrumentCode)
+		if err != nil {
+			return errors.Wrap(err, "get instrument")
+		}
+
+		if instrument == nil {
+			return errors.New("Missing instrument")
+		}
+		defer a.caches.Instruments.Release(ctx, agentLockingScript, instrumentCode)
+
+		instrument.Lock()
+		defer instrument.Unlock()
+
+		if instrument.Creation == nil {
+			return errors.New("Missing instrument creation")
+		}
+
+		if !instrument.Creation.EnforcementOrdersPermitted {
+			return errors.New("Instrument doesn't permit enforcement orders")
+		}
+
+		if isFull {
+			if instrument.IsFrozen(now) {
+				logger.InfoWithFields(ctx, []logger.Field{
+					logger.String("instrument_id", instrumentID),
+				}, "Instrument already frozen")
+				return nil
+			}
+
+			logger.InfoWithFields(ctx, []logger.Field{
+				logger.String("instrument_id", instrumentID),
+			}, "Instrument freeze")
+
+			instrument.Freeze(txid, freeze.FreezePeriod)
+		} else {
+			// Validate target addresses
+			var lockingScripts []bitcoin.Script
+			var quantities []uint64
+			for i, target := range freeze.Quantities {
+				index := int(target.Index)
+				if index >= outputCount {
+					return fmt.Errorf("Output index %d out of range : %d >= %d", i, index,
+						outputCount)
+				}
+
+				transaction.Lock()
+				output := transaction.Output(index)
+				lockingScript := output.LockingScript
+				transaction.Unlock()
+
+				if target.Quantity == 0 {
+					return fmt.Errorf("Zero target quantity %d", i)
+				}
+
+				lockingScripts = append(lockingScripts, lockingScript)
+				quantities = append(quantities, target.Quantity)
+
+				logger.InfoWithFields(ctx, []logger.Field{
+					logger.String("instrument_id", instrumentID),
+					logger.Stringer("locking_script", lockingScript),
+					logger.Uint64("quantity", target.Quantity),
+				}, "Freeze target")
+			}
+
+			balances, err := a.caches.Balances.GetMulti(ctx, agentLockingScript, instrumentCode,
+				lockingScripts)
+			if err != nil {
+				return errors.Wrap(err, "get balances")
+			}
+			defer a.caches.Balances.ReleaseMulti(ctx, agentLockingScript, instrumentCode, balances)
+
+			balances.Lock()
+			for i, balance := range balances {
+				if balance == nil {
+					balances.RevertPending(txid)
+					balances.Unlock()
+					return fmt.Errorf("Missing balance %d", i)
+				}
+
+				balance.AddFreeze(txid, quantities[i], freeze.FreezePeriod)
+			}
+			balances.Unlock()
+		}
 	}
 
 	return nil
@@ -1016,15 +1174,157 @@ func (a *Agent) processThaw(ctx context.Context, transaction *state.Transaction,
 
 	// First input must be the agent's locking script
 	transaction.Lock()
+
+	txid := transaction.TxID()
+
 	inputOutput, err := transaction.InputOutput(0)
-	transaction.Unlock()
 	if err != nil {
+		transaction.Unlock()
 		return errors.Wrapf(err, "input locking script %d", 0)
 	}
 
+	input := transaction.Input(0)
+	orderTxID := input.PreviousOutPoint.Hash
+
 	agentLockingScript := a.LockingScript()
 	if !agentLockingScript.Equal(inputOutput.LockingScript) {
+		transaction.Unlock()
 		return nil // Not for this agent's contract
+	}
+
+	transaction.Unlock()
+
+	if _, err := a.addResponseTxID(ctx, orderTxID, txid); err != nil {
+		return errors.Wrap(err, "add response txid")
+	}
+
+	freezeTxIDHash, err := bitcoin.NewHash32(thaw.FreezeTxId)
+	if err != nil {
+		return errors.New("Freeze txid")
+	}
+	freezeTxID := *freezeTxIDHash
+
+	freezeTransaction, err := a.caches.Transactions.Get(ctx, freezeTxID)
+	if err != nil {
+		return errors.Wrap(err, "get tx")
+	}
+
+	if freezeTransaction == nil {
+		return errors.New("Freeze tx not found")
+	}
+	defer a.caches.Transactions.Release(ctx, freezeTxID)
+
+	freezeTransaction.Lock()
+
+	isTest := a.IsTest()
+	var freeze *actions.Freeze
+	outputCount := freezeTransaction.OutputCount()
+	for i := 0; i < outputCount; i++ {
+		output := freezeTransaction.Output(i)
+		action, err := protocol.Deserialize(output.LockingScript, isTest)
+		if err != nil {
+			continue
+		}
+
+		if a, ok := action.(*actions.Freeze); ok {
+			freeze = a
+		}
+	}
+
+	if freeze == nil {
+		freezeTransaction.Unlock()
+		return errors.New("Freeze order not found")
+	}
+
+	isFull := false
+	if len(freeze.Quantities) == 0 {
+		return errors.New("Missing freeze quantities")
+	} else if len(freeze.Quantities) == 1 {
+		if int(freeze.Quantities[0].Index) >= outputCount {
+			freezeTransaction.Unlock()
+			return fmt.Errorf("Freeze quantity index %d out of range : %d >= %d", 0,
+				freeze.Quantities[0].Index, outputCount)
+		}
+
+		firstQuantityOutput := freezeTransaction.Output(int(freeze.Quantities[0].Index))
+		if firstQuantityOutput.LockingScript.Equal(agentLockingScript) {
+			// Contract-Wide action
+			isFull = true
+		}
+	}
+
+	if len(freeze.InstrumentCode) == 0 {
+		freezeTransaction.Unlock()
+
+		logger.InfoWithFields(ctx, []logger.Field{
+			logger.Stringer("contract_locking_script", agentLockingScript),
+		}, "Contract thaw")
+
+		contract := a.Contract()
+		contract.Lock()
+		defer contract.Unlock()
+
+		if !contract.IsFrozen(now) {
+			return errors.New("Contract not frozen")
+		}
+
+		contract.Thaw()
+	} else {
+		var instrumentCode state.InstrumentCode
+		copy(instrumentCode[:], freeze.InstrumentCode)
+		instrumentID, _ := protocol.InstrumentIDForRaw(freeze.InstrumentType, freeze.InstrumentCode)
+
+		if isFull {
+			freezeTransaction.Unlock()
+
+			logger.InfoWithFields(ctx, []logger.Field{
+				logger.String("instrument_id", instrumentID),
+			}, "Instrument thaw")
+
+			instrument, err := a.caches.Instruments.Get(ctx, agentLockingScript, instrumentCode)
+			if err != nil {
+				return errors.Wrap(err, "get instrument")
+			}
+
+			if instrument == nil {
+				return errors.New("Instrument not found")
+			}
+			defer a.caches.Instruments.Release(ctx, agentLockingScript, instrumentCode)
+
+			instrument.Lock()
+			defer instrument.Unlock()
+
+			if !instrument.IsFrozen(now) {
+				return errors.New("Instrument not frozen")
+			}
+
+			instrument.Thaw()
+		} else {
+			var lockingScripts []bitcoin.Script
+			for i, target := range freeze.Quantities {
+				if int(target.Index) >= outputCount {
+					freezeTransaction.Unlock()
+					return fmt.Errorf("Invalid freeze quantity index %d : %d >= %d", i,
+						target.Index, outputCount)
+				}
+
+				output := freezeTransaction.Output(int(target.Index))
+				lockingScripts = append(lockingScripts, output.LockingScript)
+			}
+
+			freezeTransaction.Unlock()
+
+			balances, err := a.caches.Balances.GetMulti(ctx, agentLockingScript, instrumentCode,
+				lockingScripts)
+			if err != nil {
+				return errors.Wrap(err, "get balances")
+			}
+			defer a.caches.Balances.ReleaseMulti(ctx, agentLockingScript, instrumentCode, balances)
+
+			balances.Lock()
+			balances.RemoveFreeze(freezeTxID)
+			balances.Unlock()
+		}
 	}
 
 	return nil
@@ -1035,16 +1335,197 @@ func (a *Agent) processConfiscation(ctx context.Context, transaction *state.Tran
 
 	// First input must be the agent's locking script
 	transaction.Lock()
+
+	txid := transaction.TxID()
+
 	inputOutput, err := transaction.InputOutput(0)
-	transaction.Unlock()
 	if err != nil {
+		transaction.Unlock()
 		return errors.Wrapf(err, "input locking script %d", 0)
 	}
 
+	input := transaction.Input(0)
+	orderTxID := input.PreviousOutPoint.Hash
+
 	agentLockingScript := a.LockingScript()
 	if !agentLockingScript.Equal(inputOutput.LockingScript) {
+		transaction.Unlock()
 		return nil // Not for this agent's contract
 	}
+
+	outputCount := transaction.OutputCount()
+
+	if _, err := a.addResponseTxID(ctx, orderTxID, txid); err != nil {
+		transaction.Unlock()
+		return errors.Wrap(err, "add response txid")
+	}
+
+	var instrumentCode state.InstrumentCode
+	copy(instrumentCode[:], confiscation.InstrumentCode)
+	instrumentID, _ := protocol.InstrumentIDForRaw(confiscation.InstrumentType,
+		confiscation.InstrumentCode)
+
+	logger.InfoWithFields(ctx, []logger.Field{
+		logger.String("instrument_id", instrumentID),
+	}, "Confiscation of instrument")
+
+	highestIndex := 0
+	balances := make(state.Balances, len(confiscation.Quantities))
+	for i, target := range confiscation.Quantities {
+		if int(target.Index) >= outputCount {
+			transaction.Unlock()
+			return fmt.Errorf("Invalid confiscation quantity index %d : %d >= %d", i,
+				target.Index, outputCount)
+		}
+
+		if highestIndex < int(target.Index) {
+			highestIndex = int(target.Index)
+		}
+
+		output := transaction.Output(int(target.Index))
+
+		balances[i] = &state.Balance{
+			LockingScript: output.LockingScript,
+			Quantity:      target.Quantity,
+			Timestamp:     confiscation.Timestamp,
+			TxID:          &txid,
+		}
+	}
+
+	transaction.Unlock()
+
+	// Add the balances to the cache.
+	addedBalances, err := a.caches.Balances.AddMulti(ctx, agentLockingScript, instrumentCode,
+		balances)
+	if err != nil {
+		return errors.Wrap(err, "add balances")
+	}
+
+	// Update any balances that weren't new and therefore weren't updated by the "add".
+	for i, balance := range balances {
+		addedBalance := addedBalances[i]
+		addedBalance.Lock()
+		if balance == addedBalance {
+			logger.WarnWithFields(ctx, []logger.Field{
+				logger.Timestamp("timestamp", int64(addedBalance.Timestamp)),
+				logger.Timestamp("existing_timestamp", int64(confiscation.Timestamp)),
+				logger.Stringer("locking_script", balance.LockingScript),
+				logger.Uint64("quantity", balance.Quantity),
+			}, "New hard balance confiscation")
+			addedBalance.Unlock()
+			continue // balance was new and is already up to date from the add.
+		}
+
+		// If the balance doesn't match then it already existed and must be updated.
+		if confiscation.Timestamp < addedBalance.Timestamp {
+			logger.WarnWithFields(ctx, []logger.Field{
+				logger.Timestamp("timestamp", int64(addedBalance.Timestamp)),
+				logger.Timestamp("old_timestamp", int64(confiscation.Timestamp)),
+				logger.Stringer("locking_script", balance.LockingScript),
+				logger.Uint64("quantity", addedBalance.Quantity),
+				logger.Uint64("old_quantity", balance.Quantity),
+			}, "Older confiscation ignored")
+			addedBalance.Unlock()
+			continue
+		}
+
+		// Update balance
+		if addedBalance.Settle(orderTxID, txid, confiscation.Timestamp) {
+			logger.WarnWithFields(ctx, []logger.Field{
+				logger.Timestamp("timestamp", int64(addedBalance.Timestamp)),
+				logger.Timestamp("existing_timestamp", int64(confiscation.Timestamp)),
+				logger.Stringer("locking_script", balance.LockingScript),
+				logger.Uint64("settlement_quantity", balance.Quantity),
+				logger.Uint64("quantity", addedBalance.Quantity),
+			}, "Applied prior balance adjustment confiscation")
+			addedBalance.Unlock()
+			continue
+		}
+
+		logger.WarnWithFields(ctx, []logger.Field{
+			logger.Timestamp("timestamp", int64(addedBalance.Timestamp)),
+			logger.Timestamp("existing_timestamp", int64(confiscation.Timestamp)),
+			logger.Stringer("locking_script", balance.LockingScript),
+			logger.Uint64("previous_quantity", addedBalance.Quantity),
+			logger.Uint64("quantity", balance.Quantity),
+		}, "Applying hard balance confiscation")
+
+		addedBalance.Quantity = balance.Quantity
+		addedBalance.Timestamp = confiscation.Timestamp
+		addedBalance.TxID = &txid
+		addedBalance.MarkModified()
+		addedBalance.Unlock()
+	}
+
+	a.caches.Balances.ReleaseMulti(ctx, agentLockingScript, instrumentCode, addedBalances)
+
+	// Deposit
+	depositIndex := highestIndex + 1
+	if depositIndex >= outputCount {
+		return fmt.Errorf("Missing deposit quantity output : %d >= %d", depositIndex, outputCount)
+	}
+
+	transaction.Lock()
+	output := transaction.Output(depositIndex)
+	transaction.Unlock()
+
+	depositBalance := &state.Balance{
+		LockingScript: output.LockingScript,
+		Quantity:      confiscation.DepositQty,
+		Timestamp:     confiscation.Timestamp,
+		TxID:          &txid,
+	}
+
+	addedDepositBalance, err := a.caches.Balances.Add(ctx, agentLockingScript, instrumentCode,
+		depositBalance)
+	if err != nil {
+		return errors.Wrap(err, "add deposit balance")
+	}
+
+	addedDepositBalance.Lock()
+	if depositBalance == addedDepositBalance {
+		// Balance was new and is already up to date from the add.
+		logger.WarnWithFields(ctx, []logger.Field{
+			logger.Timestamp("timestamp", int64(addedDepositBalance.Timestamp)),
+			logger.Timestamp("existing_timestamp", int64(confiscation.Timestamp)),
+			logger.Stringer("locking_script", depositBalance.LockingScript),
+			logger.Uint64("quantity", depositBalance.Quantity),
+		}, "New hard balance confiscation")
+	} else if confiscation.Timestamp < addedDepositBalance.Timestamp {
+		// If the balance doesn't match then it already existed and must be updated.
+		logger.WarnWithFields(ctx, []logger.Field{
+			logger.Timestamp("timestamp", int64(addedDepositBalance.Timestamp)),
+			logger.Timestamp("old_timestamp", int64(confiscation.Timestamp)),
+			logger.Stringer("locking_script", depositBalance.LockingScript),
+			logger.Uint64("quantity", addedDepositBalance.Quantity),
+			logger.Uint64("old_quantity", depositBalance.Quantity),
+		}, "Older confiscation ignored")
+	} else if addedDepositBalance.Settle(orderTxID, txid, confiscation.Timestamp) {
+		// Update balance
+		logger.WarnWithFields(ctx, []logger.Field{
+			logger.Timestamp("timestamp", int64(addedDepositBalance.Timestamp)),
+			logger.Timestamp("existing_timestamp", int64(confiscation.Timestamp)),
+			logger.Stringer("locking_script", depositBalance.LockingScript),
+			logger.Uint64("settlement_quantity", depositBalance.Quantity),
+			logger.Uint64("quantity", addedDepositBalance.Quantity),
+		}, "Applied prior balance adjustment confiscation")
+	} else {
+		logger.WarnWithFields(ctx, []logger.Field{
+			logger.Timestamp("timestamp", int64(addedDepositBalance.Timestamp)),
+			logger.Timestamp("existing_timestamp", int64(confiscation.Timestamp)),
+			logger.Stringer("locking_script", depositBalance.LockingScript),
+			logger.Uint64("previous_quantity", addedDepositBalance.Quantity),
+			logger.Uint64("quantity", depositBalance.Quantity),
+		}, "Applying hard balance confiscation")
+
+		addedDepositBalance.Quantity = depositBalance.Quantity
+		addedDepositBalance.Timestamp = confiscation.Timestamp
+		addedDepositBalance.TxID = &txid
+		addedDepositBalance.MarkModified()
+	}
+	addedDepositBalance.Unlock()
+
+	a.caches.Balances.Release(ctx, agentLockingScript, instrumentCode, addedDepositBalance)
 
 	return nil
 }
@@ -1054,16 +1535,29 @@ func (a *Agent) processReconciliation(ctx context.Context, transaction *state.Tr
 
 	// First input must be the agent's locking script
 	transaction.Lock()
+
+	txid := transaction.TxID()
+
 	inputOutput, err := transaction.InputOutput(0)
-	transaction.Unlock()
 	if err != nil {
+		transaction.Unlock()
 		return errors.Wrapf(err, "input locking script %d", 0)
 	}
 
+	input := transaction.Input(0)
+	orderTxID := input.PreviousOutPoint.Hash
+
 	agentLockingScript := a.LockingScript()
 	if !agentLockingScript.Equal(inputOutput.LockingScript) {
+		transaction.Unlock()
 		return nil // Not for this agent's contract
 	}
 
-	return nil
+	transaction.Unlock()
+
+	if _, err := a.addResponseTxID(ctx, orderTxID, txid); err != nil {
+		return errors.Wrap(err, "add response txid")
+	}
+
+	return errors.New("Not Implemented")
 }

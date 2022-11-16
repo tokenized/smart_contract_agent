@@ -925,7 +925,7 @@ func (a *Agent) buildInstrumentSettlement(ctx context.Context, settlementTx *txb
 			return nil, nil, fmt.Errorf("Missing balance for sender %d : %s", i, lockingScript)
 		}
 
-		if err := balance.AddPendingDebit(sender.Quantity); err != nil {
+		if err := balance.AddPendingDebit(sender.Quantity, now); err != nil {
 			logger.WarnWithFields(ctx, []logger.Field{
 				logger.Stringer("locking_script", lockingScript),
 				logger.Uint64("quantity", sender.Quantity),

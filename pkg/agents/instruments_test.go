@@ -211,9 +211,10 @@ func Test_Instruments_Amendment_Basic(t *testing.T) {
 	}
 
 	newDefinition := &actions.InstrumentDefinition{
-		AuthorizedTokenQty: instrument.Creation.AuthorizedTokenQty + 10,
-		InstrumentType:     instrument.Creation.InstrumentType,
-		InstrumentPayload:  instrument.Creation.InstrumentPayload,
+		AuthorizedTokenQty:         instrument.Creation.AuthorizedTokenQty + 10,
+		EnforcementOrdersPermitted: true,
+		InstrumentType:             instrument.Creation.InstrumentType,
+		InstrumentPayload:          instrument.Creation.InstrumentPayload,
 	}
 
 	amendments, err := instrument.Creation.CreateAmendments(newDefinition)
@@ -385,9 +386,10 @@ func Test_Instruments_Amendment_Payload(t *testing.T) {
 	}
 
 	newDefinition := &actions.InstrumentDefinition{
-		AuthorizedTokenQty: instrument.Creation.AuthorizedTokenQty,
-		InstrumentType:     instrument.Creation.InstrumentType,
-		InstrumentPayload:  currencyBuf.Bytes(),
+		AuthorizedTokenQty:         instrument.Creation.AuthorizedTokenQty,
+		EnforcementOrdersPermitted: true,
+		InstrumentType:             instrument.Creation.InstrumentType,
+		InstrumentPayload:          currencyBuf.Bytes(),
 	}
 
 	amendments, err := instrument.Creation.CreateAmendments(newDefinition)

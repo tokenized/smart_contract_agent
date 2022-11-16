@@ -117,6 +117,7 @@ func (a *Agent) processInstrumentDefinition(ctx context.Context, transaction *st
 		return errors.Wrap(err, "creation")
 	}
 
+	creation.InstrumentCode = instrumentCode[:]
 	creation.Timestamp = now
 	creation.InstrumentRevision = 0
 

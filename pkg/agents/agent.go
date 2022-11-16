@@ -439,6 +439,7 @@ func (a *Agent) processAction(ctx context.Context, transaction *state.Transactio
 		return a.processVoteResult(ctx, transaction, act, now)
 
 	case *actions.Order:
+		return a.processOrder(ctx, transaction, act, now)
 
 	case *actions.Freeze:
 		return a.processFreeze(ctx, transaction, act, now)
