@@ -257,8 +257,8 @@ func Test_Freeze_Balances_Valid(t *testing.T) {
 
 	thawOrder := &actions.Order{
 		ComplianceAction: actions.ComplianceActionThaw,
-		InstrumentType:   string(instrument.InstrumentType[:]),
-		InstrumentCode:   instrument.InstrumentCode[:],
+		// InstrumentType:   string(instrument.InstrumentType[:]),
+		// InstrumentCode:   instrument.InstrumentCode[:],
 		// TargetAddresses          []*TargetAddressField
 		FreezeTxId: freezeTxID[:],
 		// FreezePeriod             uint64
@@ -563,7 +563,138 @@ func Test_Freeze_Contract_Valid(t *testing.T) {
 	contract.Unlock()
 
 	if !isFrozen {
-		t.Errorf("Contract is not frozen")
+		t.Errorf("Contract should be frozen")
+	} else {
+		t.Logf("Contract is frozen")
+	}
+
+	freezeTxID := *responseTx.TxHash()
+
+	thawOrder := &actions.Order{
+		ComplianceAction: actions.ComplianceActionThaw,
+		// InstrumentType:   string(instrument.InstrumentType[:]),
+		// InstrumentCode:   instrument.InstrumentCode[:],
+		// TargetAddresses          []*TargetAddressField
+		FreezeTxId: freezeTxID[:],
+		// FreezePeriod             uint64
+		// DepositAddress           []byte
+		// AuthorityName            string
+		// AuthorityPublicKey       []byte
+		// SignatureAlgorithm       uint32
+		// OrderSignature           []byte
+		// BitcoinDispersions       []*QuantityIndexField
+		Message: "Court Order",
+		// SupportingEvidenceFormat uint32
+		// SupportingEvidence       []byte
+		// ReferenceTransactions    []*ReferenceTransactionField
+	}
+
+	t.Logf("Creating Thaw Order")
+
+	tx = txbuilder.NewTxBuilder(0.05, 0.0)
+
+	// Add input
+	outpoint = state.MockOutPoint(adminLockingScript, 1)
+	spentOutputs = []*expanded_tx.Output{
+		{
+			LockingScript: adminLockingScript,
+			Value:         1,
+		},
+	}
+
+	if err := tx.AddInput(*outpoint, adminLockingScript, 1); err != nil {
+		t.Fatalf("Failed to add input : %s", err)
+	}
+
+	// Add contract output
+	if err := tx.AddOutput(contractLockingScript, 500, false, false); err != nil {
+		t.Fatalf("Failed to add contract output : %s", err)
+	}
+
+	// Add action output
+	thawOrderScript, err := protocol.Serialize(thawOrder, true)
+	if err != nil {
+		t.Fatalf("Failed to serialize thaw order action : %s", err)
+	}
+
+	if err := tx.AddOutput(thawOrderScript, 0, false, false); err != nil {
+		t.Fatalf("Failed to add thaw order action output : %s", err)
+	}
+
+	// Add funding
+	fundingKey, fundingLockingScript, _ = state.MockKey()
+	fundingOutpoint = state.MockOutPoint(fundingLockingScript, 700)
+	spentOutputs = append(spentOutputs, &expanded_tx.Output{
+		LockingScript: fundingLockingScript,
+		Value:         700,
+	})
+
+	if err := tx.AddInput(*fundingOutpoint, fundingLockingScript, 700); err != nil {
+		t.Fatalf("Failed to add input : %s", err)
+	}
+
+	_, changeLockingScript, _ = state.MockKey()
+	tx.SetChangeLockingScript(changeLockingScript, "")
+
+	if _, err := tx.Sign([]bitcoin.Key{adminKey, fundingKey}); err != nil {
+		t.Fatalf("Failed to sign tx : %s", err)
+	}
+
+	t.Logf("Created tx : %s", tx.String(bitcoin.MainNet))
+
+	addTransaction = &state.Transaction{
+		Tx:           tx.MsgTx,
+		SpentOutputs: spentOutputs,
+	}
+
+	transaction, err = caches.Caches.Transactions.Add(ctx, addTransaction)
+	if err != nil {
+		t.Fatalf("Failed to add transaction : %s", err)
+	}
+
+	now = uint64(time.Now().UnixNano())
+	if err := agent.Process(ctx, transaction, []actions.Action{thawOrder}, now); err != nil {
+		t.Fatalf("Failed to process transaction : %s", err)
+	}
+
+	caches.Caches.Transactions.Release(ctx, transaction.GetTxID())
+
+	responseTx = broadcaster.GetLastTx()
+	if responseTx == nil {
+		t.Fatalf("No response tx")
+	}
+
+	t.Logf("Response Tx : %s", responseTx)
+
+	// Find creation action
+	var thaw *actions.Thaw
+	for _, txout := range responseTx.TxOut {
+		action, err := protocol.Deserialize(txout.LockingScript, true)
+		if err != nil {
+			continue
+		}
+
+		if a, ok := action.(*actions.Thaw); ok {
+			thaw = a
+			break
+		}
+	}
+
+	if thaw == nil {
+		t.Fatalf("Missing thaw action")
+	}
+
+	js, _ = json.MarshalIndent(thaw, "", "  ")
+	t.Logf("Thaw : %s", js)
+
+	contract.Lock()
+	isFrozen = contract.IsFrozen(now)
+	contract.Unlock()
+
+	if isFrozen {
+		t.Errorf("Contract should not be frozen")
+	} else {
+		t.Logf("Contract is not frozen")
 	}
 
 	caches.Caches.Instruments.Release(ctx, contractLockingScript, instrument.InstrumentCode)
@@ -571,7 +702,7 @@ func Test_Freeze_Contract_Valid(t *testing.T) {
 	caches.StopTestCaches()
 }
 
-func Test_Freeze_Instruments_Valid(t *testing.T) {
+func Test_Freeze_Instrument_Valid(t *testing.T) {
 	ctx := logger.ContextWithLogger(context.Background(), true, true, "")
 	store := storage.NewMockStorage()
 	broadcaster := state.NewMockTxBroadcaster()
@@ -581,6 +712,10 @@ func Test_Freeze_Instruments_Valid(t *testing.T) {
 	contractKey, contractLockingScript, adminKey, adminLockingScript, contract, instrument := state.MockInstrument(ctx,
 		caches)
 	_, feeLockingScript, _ := state.MockKey()
+
+	instrumentID, _ := protocol.InstrumentIDForRaw(string(instrument.InstrumentType[:]),
+		instrument.InstrumentCode[:])
+	t.Logf("Mocked instrument : %s", instrumentID)
 
 	agent, err := NewAgent(contractKey, DefaultConfig(), contract, feeLockingScript, caches.Caches,
 		store, broadcaster, nil, nil, nil, nil)
@@ -735,7 +870,138 @@ func Test_Freeze_Instruments_Valid(t *testing.T) {
 	instrument.Unlock()
 
 	if !isFrozen {
-		t.Errorf("Instrument is not frozen")
+		t.Errorf("Instrument should be frozen")
+	} else {
+		t.Logf("Instrument is frozen")
+	}
+
+	freezeTxID := *responseTx.TxHash()
+
+	thawOrder := &actions.Order{
+		ComplianceAction: actions.ComplianceActionThaw,
+		// InstrumentType:   string(instrument.InstrumentType[:]),
+		// InstrumentCode:   instrument.InstrumentCode[:],
+		// TargetAddresses          []*TargetAddressField
+		FreezeTxId: freezeTxID[:],
+		// FreezePeriod             uint64
+		// DepositAddress           []byte
+		// AuthorityName            string
+		// AuthorityPublicKey       []byte
+		// SignatureAlgorithm       uint32
+		// OrderSignature           []byte
+		// BitcoinDispersions       []*QuantityIndexField
+		Message: "Court Order",
+		// SupportingEvidenceFormat uint32
+		// SupportingEvidence       []byte
+		// ReferenceTransactions    []*ReferenceTransactionField
+	}
+
+	t.Logf("Creating Thaw Order")
+
+	tx = txbuilder.NewTxBuilder(0.05, 0.0)
+
+	// Add input
+	outpoint = state.MockOutPoint(adminLockingScript, 1)
+	spentOutputs = []*expanded_tx.Output{
+		{
+			LockingScript: adminLockingScript,
+			Value:         1,
+		},
+	}
+
+	if err := tx.AddInput(*outpoint, adminLockingScript, 1); err != nil {
+		t.Fatalf("Failed to add input : %s", err)
+	}
+
+	// Add contract output
+	if err := tx.AddOutput(contractLockingScript, 500, false, false); err != nil {
+		t.Fatalf("Failed to add contract output : %s", err)
+	}
+
+	// Add action output
+	thawOrderScript, err := protocol.Serialize(thawOrder, true)
+	if err != nil {
+		t.Fatalf("Failed to serialize thaw order action : %s", err)
+	}
+
+	if err := tx.AddOutput(thawOrderScript, 0, false, false); err != nil {
+		t.Fatalf("Failed to add thaw order action output : %s", err)
+	}
+
+	// Add funding
+	fundingKey, fundingLockingScript, _ = state.MockKey()
+	fundingOutpoint = state.MockOutPoint(fundingLockingScript, 700)
+	spentOutputs = append(spentOutputs, &expanded_tx.Output{
+		LockingScript: fundingLockingScript,
+		Value:         700,
+	})
+
+	if err := tx.AddInput(*fundingOutpoint, fundingLockingScript, 700); err != nil {
+		t.Fatalf("Failed to add input : %s", err)
+	}
+
+	_, changeLockingScript, _ = state.MockKey()
+	tx.SetChangeLockingScript(changeLockingScript, "")
+
+	if _, err := tx.Sign([]bitcoin.Key{adminKey, fundingKey}); err != nil {
+		t.Fatalf("Failed to sign tx : %s", err)
+	}
+
+	t.Logf("Created tx : %s", tx.String(bitcoin.MainNet))
+
+	addTransaction = &state.Transaction{
+		Tx:           tx.MsgTx,
+		SpentOutputs: spentOutputs,
+	}
+
+	transaction, err = caches.Caches.Transactions.Add(ctx, addTransaction)
+	if err != nil {
+		t.Fatalf("Failed to add transaction : %s", err)
+	}
+
+	now = uint64(time.Now().UnixNano())
+	if err := agent.Process(ctx, transaction, []actions.Action{thawOrder}, now); err != nil {
+		t.Fatalf("Failed to process transaction : %s", err)
+	}
+
+	caches.Caches.Transactions.Release(ctx, transaction.GetTxID())
+
+	responseTx = broadcaster.GetLastTx()
+	if responseTx == nil {
+		t.Fatalf("No response tx")
+	}
+
+	t.Logf("Response Tx : %s", responseTx)
+
+	// Find creation action
+	var thaw *actions.Thaw
+	for _, txout := range responseTx.TxOut {
+		action, err := protocol.Deserialize(txout.LockingScript, true)
+		if err != nil {
+			continue
+		}
+
+		if a, ok := action.(*actions.Thaw); ok {
+			thaw = a
+			break
+		}
+	}
+
+	if thaw == nil {
+		t.Fatalf("Missing thaw action")
+	}
+
+	js, _ = json.MarshalIndent(thaw, "", "  ")
+	t.Logf("Thaw : %s", js)
+
+	instrument.Lock()
+	isFrozen = instrument.IsFrozen(now)
+	instrument.Unlock()
+
+	if isFrozen {
+		t.Errorf("Instrument should not be frozen")
+	} else {
+		t.Logf("Instrument is not frozen")
 	}
 
 	caches.Caches.Instruments.Release(ctx, contractLockingScript, instrument.InstrumentCode)

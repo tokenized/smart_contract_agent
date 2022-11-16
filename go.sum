@@ -104,8 +104,8 @@ github.com/stretchr/testify v1.3.0/go.mod h1:M5WIy9Dh21IEIfnGCwXGc5bZfKNJtfHm1UV
 github.com/stretchr/testify v1.4.0/go.mod h1:j7eGeouHqKxXV5pUuKE4zz7dFj8WfuZ+81PSLYec5m4=
 github.com/stretchr/testify v1.5.1 h1:nOGnQDM7FYENwehXlg/kFVnos3rEvtKTjRvOWSzb6H4=
 github.com/stretchr/testify v1.5.1/go.mod h1:5W2xD1RspED5o8YsWQXVCued0rvSQ+mT+I5cxcmMvtA=
-github.com/tokenized/cacher v0.0.0-20221115220146-4a6631dfb6aa h1:2GgRPsuYkHfUMwgiQvUPgvfetXDhrhRXz6bkwCSN+1k=
-github.com/tokenized/cacher v0.0.0-20221115220146-4a6631dfb6aa/go.mod h1:99uLTViO6/ZPjxTXmQeCRlvCF/ZeEQ2fRVa5OnOOHqs=
+github.com/tokenized/cacher v0.0.0-20221116194344-f83dc6fa58e9 h1:NQ0fdMLJeTZzmeXHtEr5jGOemHeBy55OQhACoywifzc=
+github.com/tokenized/cacher v0.0.0-20221116194344-f83dc6fa58e9/go.mod h1:99uLTViO6/ZPjxTXmQeCRlvCF/ZeEQ2fRVa5OnOOHqs=
 github.com/tokenized/channels v0.0.0-20220902192544-9fd058a84b32 h1:c0Ok9SXEU1TW4Om9J8EZU12x4DFg7HwO8kAEdFRHY4M=
 github.com/tokenized/channels v0.0.0-20220902192544-9fd058a84b32/go.mod h1:H9TR9nLAB/mlR+qIcJDWPyQLH+he8hdoQjAZ5tzFQsY=
 github.com/tokenized/config v0.2.1/go.mod h1:+8nT8o80nFsxk7Qt5utgfAkEIFNHFtb26hD56hMlSZE=

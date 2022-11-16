@@ -554,7 +554,7 @@ func (a *Agent) processThawOrder(ctx context.Context, transaction *state.Transac
 			logger.Stringer("contract_locking_script", agentLockingScript),
 		}, "Contract thaw")
 
-		contract := a.Contract()
+		contract = a.Contract()
 		contract.Lock()
 		defer contract.Unlock()
 
