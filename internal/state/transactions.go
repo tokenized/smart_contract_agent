@@ -26,6 +26,10 @@ const (
 	txPath    = "txs"
 )
 
+var (
+	ErrNegativeFee = errors.New("Negative Fee")
+)
+
 type TransactionCache struct {
 	cacher *cacher.Cache
 	typ    reflect.Type
@@ -525,6 +529,33 @@ func (tx *Transaction) GetTxID() bitcoin.Hash32 {
 	tx.Lock()
 	defer tx.Unlock()
 	return *tx.Tx.TxHash()
+}
+
+func (tx *Transaction) CalculateFee() (uint64, error) {
+	inputValue := uint64(0)
+	for index := range tx.Tx.TxIn {
+		inputOutput, err := tx.InputOutput(index)
+		if err != nil {
+			return 0, errors.Wrapf(err, "input %d", index)
+		}
+
+		inputValue += inputOutput.Value
+	}
+
+	outputValue := uint64(0)
+	for _, txout := range tx.Tx.TxOut {
+		outputValue += txout.Value
+	}
+
+	if outputValue > inputValue {
+		return 0, ErrNegativeFee
+	}
+
+	return inputValue - outputValue, nil
+}
+
+func (tx *Transaction) Size() uint64 {
+	return uint64(tx.Tx.SerializeSize())
 }
 
 func (r Processed) Copy() Processed {

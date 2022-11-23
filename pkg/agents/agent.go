@@ -354,8 +354,46 @@ func (a *Agent) ActionIsSupported(action actions.Action) bool {
 	}
 }
 
+func isRequest(action actions.Action) bool {
+	switch action.(type) {
+	case *actions.ContractOffer, *actions.ContractAmendment, *actions.ContractAddressChange:
+		return true
+
+	case *actions.BodyOfAgreementOffer, *actions.BodyOfAgreementAmendment:
+		return true
+
+	case *actions.InstrumentDefinition, *actions.InstrumentModification:
+		return true
+
+	case *actions.Transfer:
+		return true
+
+	case *actions.Proposal, *actions.BallotCast:
+		return true
+
+	case *actions.Order:
+		return true
+
+	case *actions.Message:
+		return true
+
+	default:
+		return false
+	}
+}
+
+func containsRequest(actions []Action) bool {
+	for _, action := range actions {
+		if isRequest(action.Action) {
+			return true
+		}
+	}
+
+	return false
+}
+
 func (a *Agent) Process(ctx context.Context, transaction *state.Transaction,
-	actions []Action, now uint64) error {
+	actionList []Action, now uint64) error {
 
 	ctx = logger.ContextWithLogFields(ctx, logger.Stringer("trace", uuid.New()))
 
@@ -366,7 +404,31 @@ func (a *Agent) Process(ctx context.Context, transaction *state.Transaction,
 		logger.Stringer("contract_locking_script", agentLockingScript),
 	}, "Processing transaction")
 
-	for i, action := range actions {
+	var feeRate, minFeeRate float32
+	if containsRequest(actionList) {
+		transaction.Lock()
+		fee, err := transaction.CalculateFee()
+		if err != nil {
+			transaction.Unlock()
+			return errors.Wrap(err, "calculate fee")
+		}
+		size := transaction.Size()
+		transaction.Unlock()
+
+		minFeeRate = a.MinFeeRate()
+		feeRate = float32(fee) / float32(size)
+	}
+
+	for i, action := range actionList {
+		if isRequest(action.Action) {
+			if feeRate < minFeeRate {
+				return errors.Wrap(a.sendRejection(ctx, transaction, action.OutputIndex,
+					platform.NewRejectError(actions.RejectionsInsufficientTxFeeFunding,
+						fmt.Sprintf("fee rate %.4f, minimum %.4f", feeRate, minFeeRate)), now),
+					"reject")
+			}
+		}
+
 		if err := a.processAction(ctx, transaction, txid, action.Action, action.OutputIndex,
 			now); err != nil {
 			return errors.Wrapf(err, "process action %d: %s", i, action.Action.Code())
@@ -486,6 +548,35 @@ func (a *Agent) processAction(ctx context.Context, transaction *state.Transactio
 
 	default:
 		return fmt.Errorf("Action not supported: %s", action.Code())
+	}
+
+	return nil
+}
+
+// ProcessUnsafe performs actions to resolve unsafe or double spent tx.
+func (a *Agent) ProcessUnsafe(ctx context.Context, transaction *state.Transaction,
+	actionList []Action, now uint64) error {
+
+	ctx = logger.ContextWithLogFields(ctx, logger.Stringer("trace", uuid.New()))
+
+	txid := transaction.GetTxID()
+	agentLockingScript := a.LockingScript()
+	logger.WarnWithFields(ctx, []logger.Field{
+		logger.Stringer("txid", txid),
+		logger.Stringer("contract_locking_script", agentLockingScript),
+	}, "Processing unsafe transaction")
+
+	for i, action := range actionList {
+		if isRequest(action.Action) {
+			return errors.Wrap(a.sendRejection(ctx, transaction, action.OutputIndex,
+				platform.NewRejectError(actions.RejectionsDoubleSpend, ""), now), "reject")
+		}
+
+		// If it isn't a request then we can process it like normal.
+		if err := a.processAction(ctx, transaction, txid, action.Action, action.OutputIndex,
+			now); err != nil {
+			return errors.Wrapf(err, "process action %d: %s", i, action.Action.Code())
+		}
 	}
 
 	return nil

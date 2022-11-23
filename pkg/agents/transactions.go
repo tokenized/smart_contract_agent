@@ -47,7 +47,10 @@ func (a *Agent) UpdateTransaction(ctx context.Context, transaction *state.Transa
 	if txState&wallet.TxStateUnsafe != 0 || txState&wallet.TxStateCancelled != 0 {
 		logger.Error(ctx, "Processed transaction is unsafe")
 
-		// TODO Perform actions to resolve unsafe or double spent tx. --ce
+		if err := a.processUnsafeTransaction(ctx, transaction, now); err != nil {
+			return errors.Wrap(err, "process unsafe")
+		}
+
 	}
 
 	return nil
@@ -57,6 +60,38 @@ func clearIsProcessing(transaction *state.Transaction, contract state.ContractHa
 	transaction.Lock()
 	transaction.ClearIsProcessing(contract)
 	transaction.Unlock()
+}
+
+func (a *Agent) processUnsafeTransaction(ctx context.Context, transaction *state.Transaction,
+	now uint64) error {
+
+	agentLockingScript := a.LockingScript()
+	isTest := a.IsTest()
+
+	actionsList, err := compileActions(transaction, agentLockingScript, isTest)
+	if err != nil {
+		return errors.Wrap(err, "compile tx")
+	}
+
+	if len(actionsList) == 0 {
+		logger.Info(ctx, "Transaction not relevant")
+		return nil
+	}
+
+	if err := a.ProcessUnsafe(ctx, transaction, actionsList, now); err != nil {
+		var codes []string
+		for _, action := range actionsList {
+			codes = append(codes, action.Action.Code())
+		}
+
+		logger.ErrorWithFields(ctx, []logger.Field{
+			logger.Stringer("agent", agentLockingScript),
+			logger.Strings("actions", codes),
+		}, "Agent failed to handle transaction : %s", err)
+	}
+
+	return nil
+
 }
 
 func (a *Agent) processTransaction(ctx context.Context, transaction *state.Transaction,
