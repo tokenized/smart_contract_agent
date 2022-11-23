@@ -93,7 +93,7 @@ func FinalizeVote(ctx context.Context, factory AgentFactory, contractLockingScri
 	if agent == nil {
 		return errors.New("Agent not found")
 	}
-	defer factory.ReleaseAgent(ctx, agent)
+	defer agent.Release(ctx)
 
 	return agent.FinalizeVote(ctx, voteTxID, now)
 }
@@ -145,12 +145,30 @@ func (a *Agent) FinalizeVote(ctx context.Context, voteTxID bitcoin.Hash32, now u
 	defer a.caches.Transactions.Release(ctx, proposalTxID)
 
 	proposalTransaction.Lock()
+
 	contractOutput := proposalTransaction.Output(1)
 	if !contractOutput.LockingScript.Equal(agentLockingScript) {
 		proposalTransaction.Unlock()
 		return errors.New("Proposal result output not to contract")
 	}
 	proposalOutputValue := contractOutput.Value
+
+	isTest := a.IsTest()
+	proposalOutputCount := proposalTransaction.OutputCount()
+	outputIndex := 0
+	for i := 0; i < proposalOutputCount; i++ {
+		output := proposalTransaction.Output(i)
+		action, err := protocol.Deserialize(output.LockingScript, isTest)
+		if err != nil {
+			continue
+		}
+
+		if _, ok := action.(*actions.Proposal); ok {
+			outputIndex = i
+			break
+		}
+	}
+
 	proposalTransaction.Unlock()
 
 	// Create vote result.
@@ -180,6 +198,7 @@ func (a *Agent) FinalizeVote(ctx context.Context, voteTxID bitcoin.Hash32, now u
 		return errors.Wrap(err, "serialize vote result")
 	}
 
+	voteResultScriptOutputIndex := len(voteResultTx.Outputs)
 	if err := voteResultTx.AddOutput(voteResultScript, 0, false, false); err != nil {
 		return errors.Wrap(err, "add vote result output")
 	}
@@ -216,11 +235,11 @@ func (a *Agent) FinalizeVote(ctx context.Context, voteTxID bitcoin.Hash32, now u
 
 	// Set vote result tx as processed since the contract is now formed.
 	voteResultTransaction.Lock()
-	voteResultTransaction.SetProcessed()
+	voteResultTransaction.SetProcessed(a.ContractHash(), voteResultScriptOutputIndex)
 	voteResultTransaction.Unlock()
 
 	proposalTransaction.Lock()
-	proposalTransaction.AddResponseTxID(voteResultTxID)
+	proposalTransaction.AddResponseTxID(a.ContractHash(), outputIndex, voteResultTxID)
 	proposalTransaction.Unlock()
 
 	if err := a.BroadcastTx(ctx, voteResultTx.MsgTx, nil); err != nil {

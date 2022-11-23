@@ -19,7 +19,6 @@ import (
 
 const (
 	instrumentVersion = uint8(0)
-	instrumentPath    = "instruments"
 )
 
 type InstrumentCache struct {
@@ -193,7 +192,7 @@ func (i *Instrument) IsExpired(now uint64) bool {
 }
 
 func InstrumentPath(contractHash ContractHash, instrumentCode InstrumentCode) string {
-	return fmt.Sprintf("%s/%s/%s", instrumentPath, contractHash, instrumentCode)
+	return fmt.Sprintf("%s/%s", contractHash, instrumentCode)
 }
 
 func (i *Instrument) MarkModified() {

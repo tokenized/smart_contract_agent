@@ -17,7 +17,7 @@ import (
 )
 
 func (a *Agent) processRejection(ctx context.Context, transaction *state.Transaction,
-	rejection *actions.Rejection, now uint64) error {
+	rejection *actions.Rejection, outputIndex int, now uint64) error {
 
 	transaction.Lock()
 	firstInput := transaction.Input(0)
@@ -91,7 +91,7 @@ func (a *Agent) processRejection(ctx context.Context, transaction *state.Transac
 	}
 
 	// Verify this is from the next contract in the transfer.
-	transferTransaction, transfer, err := a.traceToTransfer(ctx,
+	transferTransaction, transfer, transferOutputIndex, err := a.traceToTransfer(ctx,
 		firstInputTxID(rejectedTransaction))
 	if err != nil {
 		return errors.Wrap(err, "trace to transfer")
@@ -123,8 +123,8 @@ func (a *Agent) processRejection(ctx context.Context, transaction *state.Transac
 				rejectError.OutputIndex = transferContracts.FirstContractOutputIndex
 			}
 			if transferContracts != nil && transferContracts.IsFirstContract() {
-				return errors.Wrap(a.sendRejection(ctx, transferTransaction, rejectError, now),
-					"reject")
+				return errors.Wrap(a.sendRejection(ctx, transferTransaction, transferOutputIndex,
+					rejectError, now), "reject")
 			}
 
 			return nil // Only first contract can reject at this point
@@ -135,7 +135,7 @@ func (a *Agent) processRejection(ctx context.Context, transaction *state.Transac
 
 	if transferContracts.IsFirstContract() {
 		// This is the first contract so create a reject for the transfer itself.
-		return errors.Wrap(a.sendRejection(ctx, transferTransaction,
+		return errors.Wrap(a.sendRejection(ctx, transferTransaction, transferOutputIndex,
 			platform.NewRejectErrorWithOutputIndex(int(rejection.RejectionCode), rejection.Message,
 				transferContracts.FirstContractOutputIndex), now), "reject")
 	}
@@ -145,7 +145,7 @@ func (a *Agent) processRejection(ctx context.Context, transaction *state.Transac
 		return errors.New("Previous locking script missing for send signature request")
 	}
 
-	return errors.Wrap(a.sendRejection(ctx, transaction,
+	return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
 		platform.NewRejectErrorFull(int(rejection.RejectionCode),
 			rejection.Message, 0, -1, transferContracts.PreviousLockingScript), now), "reject")
 }
@@ -160,11 +160,11 @@ func firstInputTxID(transaction *state.Transaction) bitcoin.Hash32 {
 }
 
 func (a *Agent) traceToTransfer(ctx context.Context,
-	txid bitcoin.Hash32) (*state.Transaction, *actions.Transfer, error) {
+	txid bitcoin.Hash32) (*state.Transaction, *actions.Transfer, int, error) {
 
 	previousTransaction, err := a.caches.Transactions.Get(ctx, txid)
 	if err != nil {
-		return nil, nil, errors.Wrap(err, "get tx")
+		return nil, nil, 0, errors.Wrap(err, "get tx")
 	}
 
 	if previousTransaction != nil {
@@ -185,7 +185,7 @@ func (a *Agent) traceToTransfer(ctx context.Context,
 			switch a := action.(type) {
 			case *actions.Transfer:
 				previousTransaction.Unlock()
-				return previousTransaction, a, nil
+				return previousTransaction, a, i, nil
 			case *actions.Message:
 				message = a
 			}
@@ -199,19 +199,19 @@ func (a *Agent) traceToTransfer(ctx context.Context,
 		}
 
 		// This tx doesn't link back to a multi-contract transfer.
-		return nil, nil, nil
+		return nil, nil, 0, nil
 	}
 
 	fetchedTx, err := a.FetchTx(ctx, txid)
 	if err != nil {
-		return nil, nil, errors.Wrap(err, "fetch tx")
+		return nil, nil, 0, errors.Wrap(err, "fetch tx")
 	}
 
 	if fetchedTx == nil {
 		logger.InfoWithFields(ctx, []logger.Field{
 			logger.Stringer("previous_txid", txid),
 		}, "Previous transaction not found")
-		return nil, nil, nil
+		return nil, nil, 0, nil
 	}
 
 	previousTxID := fetchedTx.TxIn[0].PreviousOutPoint.Hash
@@ -228,7 +228,7 @@ func (a *Agent) traceToTransfer(ctx context.Context,
 		switch a := act.(type) {
 		case *actions.Transfer:
 			// This transfer is not known by this agent because it isn't in the transaction storage.
-			return nil, nil, nil
+			return nil, nil, 0, nil
 
 		case *actions.Message:
 			message = a
@@ -238,7 +238,7 @@ func (a *Agent) traceToTransfer(ctx context.Context,
 	if message != nil && (message.MessageCode == messages.CodeSettlementRequest ||
 		message.MessageCode == messages.CodeSignatureRequest) {
 		// This tx doesn't link back to a multi-contract transfer.
-		return nil, nil, nil
+		return nil, nil, 0, nil
 	}
 
 	return a.traceToTransfer(ctx, previousTxID)
@@ -246,7 +246,7 @@ func (a *Agent) traceToTransfer(ctx context.Context,
 
 // sendRejection creates a reject message transaction that spends the specified output and contains
 // the specified reject code.
-func (a *Agent) sendRejection(ctx context.Context, transaction *state.Transaction,
+func (a *Agent) sendRejection(ctx context.Context, transaction *state.Transaction, outputIndex int,
 	rejectError error, now uint64) error {
 
 	var reject *platform.RejectError
@@ -397,7 +397,7 @@ func (a *Agent) sendRejection(ctx context.Context, transaction *state.Transactio
 	rejectTxID := *rejectTx.MsgTx.TxHash()
 
 	transaction.Lock()
-	transaction.AddResponseTxID(rejectTxID)
+	transaction.AddResponseTxID(a.ContractHash(), outputIndex, rejectTxID)
 	transaction.Unlock()
 
 	var rejectLabel string

@@ -101,7 +101,7 @@ func CancelPendingTransfer(ctx context.Context, factory AgentFactory,
 	if agent == nil {
 		return errors.New("Agent not found")
 	}
-	defer factory.ReleaseAgent(ctx, agent)
+	defer agent.Release(ctx)
 
 	return agent.CancelPendingTransfer(ctx, transferTxID, now)
 }

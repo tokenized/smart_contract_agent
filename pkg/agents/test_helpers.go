@@ -70,24 +70,11 @@ func (f *MockAgentFactory) GetAgent(ctx context.Context,
 		return nil, nil
 	}
 
-	contract, err := f.caches.Contracts.Get(ctx, lockingScript)
-	if err != nil {
-		return nil, errors.Wrap(err, "get contract")
-	}
-
-	if contract == nil {
-		return nil, nil
-	}
-
-	agent, err := NewAgent(*key, f.config, contract, f.feeLockingScript, f.caches, f.store,
-		f.broadcaster, f.fetcher, f.headers, f.scheduler, f)
+	agent, err := NewAgent(ctx, *key, lockingScript, f.config, f.feeLockingScript, f.caches,
+		f.store, f.broadcaster, f.fetcher, f.headers, f.scheduler, f)
 	if err != nil {
 		return nil, errors.Wrap(err, "new agent")
 	}
 
 	return agent, nil
-}
-
-func (f *MockAgentFactory) ReleaseAgent(ctx context.Context, agent *Agent) {
-	agent.Release(ctx)
 }

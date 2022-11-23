@@ -1,4 +1,4 @@
-package conductors
+package service
 
 import (
 	"context"
@@ -6,7 +6,6 @@ import (
 
 	"github.com/tokenized/logger"
 	"github.com/tokenized/pkg/bitcoin"
-	"github.com/tokenized/pkg/storage"
 	"github.com/tokenized/smart_contract_agent/internal/platform"
 	"github.com/tokenized/smart_contract_agent/internal/state"
 	"github.com/tokenized/smart_contract_agent/pkg/agents"
@@ -14,10 +13,8 @@ import (
 	"github.com/pkg/errors"
 )
 
-func LoadEvents(ctx context.Context, store storage.StreamStorage, scheduler *platform.Scheduler,
-	factory agents.AgentFactory) error {
-
-	events, err := state.ListEvents(ctx, store)
+func (s *Service) LoadEvents(ctx context.Context) error {
+	events, err := state.ListEvents(ctx, s.store)
 	if err != nil {
 		return errors.Wrap(err, "list events")
 	}
@@ -25,13 +22,13 @@ func LoadEvents(ctx context.Context, store storage.StreamStorage, scheduler *pla
 	for _, event := range events {
 		switch event.Type {
 		case state.EventTypeVoteCutOff:
-			if err := loadVoteCutOffTask(ctx, scheduler, event.Start, factory,
+			if err := loadVoteCutOffTask(ctx, s.scheduler, event.Start, s,
 				event.ContractLockingScript, event.ID); err != nil {
 				return errors.Wrap(err, "load vote cut off")
 			}
 
 		case state.EventTypeTransferExpiration:
-			if err := loadCancelPendingTransferTask(ctx, scheduler, event.Start, factory,
+			if err := loadCancelPendingTransferTask(ctx, s.scheduler, event.Start, s,
 				event.ContractLockingScript, event.ID); err != nil {
 				return errors.Wrap(err, "load cancel pending transfer")
 			}
@@ -42,11 +39,8 @@ func LoadEvents(ctx context.Context, store storage.StreamStorage, scheduler *pla
 	return nil
 }
 
-func SaveEvents(ctx context.Context, store storage.StreamStorage,
-	scheduler *platform.Scheduler) error {
-
-	// Extract events from scheduler.
-	tasks := scheduler.ListTasks()
+func (s *Service) SaveEvents(ctx context.Context) error {
+	tasks := s.scheduler.ListTasks()
 
 	var events state.Events
 	for _, task := range tasks {
@@ -70,7 +64,7 @@ func SaveEvents(ctx context.Context, store storage.StreamStorage,
 		events = append(events, event)
 	}
 
-	if err := state.SaveEvents(ctx, store, events); err != nil {
+	if err := state.SaveEvents(ctx, s.store, events); err != nil {
 		return errors.Wrap(err, "save")
 	}
 

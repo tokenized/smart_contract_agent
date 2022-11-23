@@ -104,6 +104,10 @@ func appendHashIfDoesntExist(list []bitcoin.Hash32, value bitcoin.Hash32) []bitc
 	return append(list, value) // add value
 }
 
+func (id ContractHash) Equal(other ContractHash) bool {
+	return bytes.Equal(id[:], other[:])
+}
+
 func (id ContractHash) String() string {
 	return bitcoin.Hash32(id).String()
 }

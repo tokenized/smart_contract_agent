@@ -47,8 +47,8 @@ func Test_Process(t *testing.T) {
 		t.Fatalf("Failed to add contract : %s", err)
 	}
 
-	agent, err := NewAgent(contractKey, DefaultConfig(), contract, feeLockingScript, caches.Caches,
-		store, broadcaster, nil, nil, nil, nil)
+	agent, err := NewAgent(ctx, contractKey, contractLockingScript, DefaultConfig(),
+		feeLockingScript, caches.Caches, store, broadcaster, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("Failed to create agent : %s", err)
 	}
@@ -66,7 +66,6 @@ func Test_Process(t *testing.T) {
 		Tx:           offerTx,
 		State:        wallet.TxStateSafe,
 		SpentOutputs: outputs,
-		IsProcessed:  false,
 	}
 
 	contractOfferTransaction, err = caches.Caches.Transactions.Add(ctx,
@@ -115,6 +114,7 @@ func Test_Process(t *testing.T) {
 		t.Fatalf("Failed to serialize contract formation : %s", err)
 	}
 
+	contractFormationScriptOutputIndex := len(tx.TxOut)
 	tx.AddTxOut(wire.NewTxOut(0, contractFormationScript))
 	contractFormationTxID := *tx.TxHash()
 
@@ -122,7 +122,6 @@ func Test_Process(t *testing.T) {
 		Tx:           tx,
 		State:        wallet.TxStateSafe,
 		SpentOutputs: outputs,
-		IsProcessed:  false,
 	}
 
 	contractFormationTransaction, err = caches.Caches.Transactions.Add(ctx,
@@ -132,8 +131,10 @@ func Test_Process(t *testing.T) {
 	}
 
 	now := uint64(time.Now().UnixNano())
-	if err := agent.Process(ctx, contractFormationTransaction, []actions.Action{contractFormation},
-		now); err != nil {
+	if err := agent.Process(ctx, contractFormationTransaction, []Action{{
+		OutputIndex: contractFormationScriptOutputIndex,
+		Action:      contractFormation,
+	}}, now); err != nil {
 		t.Fatalf("Failed to process contract formation : %s", err)
 	}
 	caches.Caches.Transactions.Release(ctx, contractFormationTxID)
@@ -184,7 +185,6 @@ func Test_Process(t *testing.T) {
 		Tx:           definitionTx,
 		State:        wallet.TxStateSafe,
 		SpentOutputs: outputs,
-		IsProcessed:  false,
 	}
 
 	instrumentDefinitionTransaction, err = caches.Caches.Transactions.Add(ctx,
@@ -234,6 +234,7 @@ func Test_Process(t *testing.T) {
 		t.Fatalf("Failed to serialize instrument creation : %s", err)
 	}
 
+	instrumentCreationScriptOutputIndex := len(tx.TxOut)
 	tx.AddTxOut(wire.NewTxOut(0, instrumentCreationScript))
 	instrumentCreationTxID := *tx.TxHash()
 
@@ -241,7 +242,6 @@ func Test_Process(t *testing.T) {
 		Tx:           tx,
 		State:        wallet.TxStateSafe,
 		SpentOutputs: outputs,
-		IsProcessed:  false,
 	}
 
 	instrumentCreationTx, err = caches.Caches.Transactions.Add(ctx, instrumentCreationTx)
@@ -250,7 +250,10 @@ func Test_Process(t *testing.T) {
 	}
 
 	now = uint64(time.Now().UnixNano())
-	if err := agent.Process(ctx, instrumentCreationTx, []actions.Action{instrumentCreation},
+	if err := agent.Process(ctx, instrumentCreationTx, []Action{{
+		OutputIndex: instrumentCreationScriptOutputIndex,
+		Action:      instrumentCreation,
+	}},
 		now); err != nil {
 		t.Fatalf("Failed to process instrument creation : %s", err)
 	}
@@ -394,7 +397,6 @@ func Test_Process(t *testing.T) {
 			Tx:           transferTx,
 			State:        wallet.TxStateSafe,
 			SpentOutputs: outputs,
-			IsProcessed:  false,
 		}
 
 		transferTransaction, err = caches.Caches.Transactions.Add(ctx,
@@ -467,6 +469,7 @@ func Test_Process(t *testing.T) {
 			t.Fatalf("Failed to serialize settlement : %s", err)
 		}
 
+		settlementScriptOutputIndex := len(tx.TxOut)
 		tx.AddTxOut(wire.NewTxOut(0, settlementScript))
 		settlementTxID := *tx.TxHash()
 		txids = append(txids, settlementTxID)
@@ -475,7 +478,6 @@ func Test_Process(t *testing.T) {
 			Tx:           tx,
 			State:        wallet.TxStateSafe,
 			SpentOutputs: outputs,
-			IsProcessed:  false,
 		}
 
 		settlementTx, err = caches.Caches.Transactions.Add(ctx, settlementTx)
@@ -484,7 +486,10 @@ func Test_Process(t *testing.T) {
 		}
 
 		now := uint64(time.Now().UnixNano())
-		if err := agent.Process(ctx, settlementTx, []actions.Action{settlement}, now); err != nil {
+		if err := agent.Process(ctx, settlementTx, []Action{{
+			OutputIndex: settlementScriptOutputIndex,
+			Action:      settlement,
+		}}, now); err != nil {
 			t.Fatalf("Failed to process settlement : %s", err)
 		}
 		caches.Caches.Transactions.Release(ctx, settlementTxID)
@@ -569,7 +574,6 @@ func Test_Process(t *testing.T) {
 			Tx:           transferTx,
 			State:        wallet.TxStateSafe,
 			SpentOutputs: outputs,
-			IsProcessed:  false,
 		}
 
 		transferTransaction, err = caches.Caches.Transactions.Add(ctx,
@@ -642,6 +646,7 @@ func Test_Process(t *testing.T) {
 			t.Fatalf("Failed to serialize settlement : %s", err)
 		}
 
+		settlementScriptOutputIndex := len(tx.TxOut)
 		tx.AddTxOut(wire.NewTxOut(0, settlementScript))
 		settlementTxID := *tx.TxHash()
 		txids2 = append(txids2, settlementTxID)
@@ -650,7 +655,6 @@ func Test_Process(t *testing.T) {
 			Tx:           tx,
 			State:        wallet.TxStateSafe,
 			SpentOutputs: outputs,
-			IsProcessed:  false,
 		}
 
 		settlementTx, err = caches.Caches.Transactions.Add(ctx, settlementTx)
@@ -659,7 +663,10 @@ func Test_Process(t *testing.T) {
 		}
 
 		now := uint64(time.Now().UnixNano())
-		if err := agent.Process(ctx, settlementTx, []actions.Action{settlement}, now); err != nil {
+		if err := agent.Process(ctx, settlementTx, []Action{{
+			OutputIndex: settlementScriptOutputIndex,
+			Action:      settlement,
+		}}, now); err != nil {
 			t.Fatalf("Failed to process settlement : %s", err)
 		}
 		caches.Caches.Transactions.Release(ctx, settlementTxID)
@@ -697,5 +704,6 @@ func Test_Process(t *testing.T) {
 
 	caches.Caches.Contracts.Release(ctx, contractLockingScript)
 
+	agent.Release(ctx)
 	caches.StopTestCaches()
 }

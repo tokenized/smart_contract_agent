@@ -29,8 +29,8 @@ func Test_Freeze_Balances_Valid(t *testing.T) {
 		caches)
 	_, feeLockingScript, _ := state.MockKey()
 
-	agent, err := NewAgent(contractKey, DefaultConfig(), contract, feeLockingScript, caches.Caches,
-		store, broadcaster, nil, nil, nil, nil)
+	agent, err := NewAgent(ctx, contractKey, contractLockingScript, DefaultConfig(),
+		feeLockingScript, caches.Caches, store, broadcaster, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("Failed to create agent : %s", err)
 	}
@@ -116,6 +116,7 @@ func Test_Freeze_Balances_Valid(t *testing.T) {
 		t.Fatalf("Failed to serialize freeze order action : %s", err)
 	}
 
+	freezeOrderScriptOutputIndex := len(tx.Outputs)
 	if err := tx.AddOutput(freezeOrderScript, 0, false, false); err != nil {
 		t.Fatalf("Failed to add freeze order action output : %s", err)
 	}
@@ -152,7 +153,10 @@ func Test_Freeze_Balances_Valid(t *testing.T) {
 	}
 
 	now := uint64(time.Now().UnixNano())
-	if err := agent.Process(ctx, transaction, []actions.Action{freezeOrder}, now); err != nil {
+	if err := agent.Process(ctx, transaction, []Action{{
+		OutputIndex: freezeOrderScriptOutputIndex,
+		Action:      freezeOrder,
+	}}, now); err != nil {
 		t.Fatalf("Failed to process transaction : %s", err)
 	}
 
@@ -300,6 +304,7 @@ func Test_Freeze_Balances_Valid(t *testing.T) {
 		t.Fatalf("Failed to serialize thaw order action : %s", err)
 	}
 
+	thawOrderScriptOutputIndex := len(tx.Outputs)
 	if err := tx.AddOutput(thawOrderScript, 0, false, false); err != nil {
 		t.Fatalf("Failed to add thaw order action output : %s", err)
 	}
@@ -336,7 +341,10 @@ func Test_Freeze_Balances_Valid(t *testing.T) {
 	}
 
 	now = uint64(time.Now().UnixNano())
-	if err := agent.Process(ctx, transaction, []actions.Action{thawOrder}, now); err != nil {
+	if err := agent.Process(ctx, transaction, []Action{{
+		OutputIndex: thawOrderScriptOutputIndex,
+		Action:      thawOrder,
+	}}, now); err != nil {
 		t.Fatalf("Failed to process transaction : %s", err)
 	}
 
@@ -394,6 +402,7 @@ func Test_Freeze_Balances_Valid(t *testing.T) {
 	caches.Caches.Balances.ReleaseMulti(ctx, contractLockingScript, instrument.InstrumentCode,
 		gotBalances)
 
+	agent.Release(ctx)
 	caches.Caches.Instruments.Release(ctx, contractLockingScript, instrument.InstrumentCode)
 	caches.Caches.Contracts.Release(ctx, contractLockingScript)
 	caches.StopTestCaches()
@@ -410,8 +419,8 @@ func Test_Freeze_Contract_Valid(t *testing.T) {
 		caches)
 	_, feeLockingScript, _ := state.MockKey()
 
-	agent, err := NewAgent(contractKey, DefaultConfig(), contract, feeLockingScript, caches.Caches,
-		store, broadcaster, nil, nil, nil, nil)
+	agent, err := NewAgent(ctx, contractKey, contractLockingScript, DefaultConfig(),
+		feeLockingScript, caches.Caches, store, broadcaster, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("Failed to create agent : %s", err)
 	}
@@ -472,6 +481,7 @@ func Test_Freeze_Contract_Valid(t *testing.T) {
 		t.Fatalf("Failed to serialize freeze order action : %s", err)
 	}
 
+	freezeOrderScriptOutputIndex := len(tx.Outputs)
 	if err := tx.AddOutput(freezeOrderScript, 0, false, false); err != nil {
 		t.Fatalf("Failed to add freeze order action output : %s", err)
 	}
@@ -508,7 +518,10 @@ func Test_Freeze_Contract_Valid(t *testing.T) {
 	}
 
 	now := uint64(time.Now().UnixNano())
-	if err := agent.Process(ctx, transaction, []actions.Action{freezeOrder}, now); err != nil {
+	if err := agent.Process(ctx, transaction, []Action{{
+		OutputIndex: freezeOrderScriptOutputIndex,
+		Action:      freezeOrder,
+	}}, now); err != nil {
 		t.Fatalf("Failed to process transaction : %s", err)
 	}
 
@@ -617,6 +630,7 @@ func Test_Freeze_Contract_Valid(t *testing.T) {
 		t.Fatalf("Failed to serialize thaw order action : %s", err)
 	}
 
+	thawOrderScriptOutputIndex := len(tx.Outputs)
 	if err := tx.AddOutput(thawOrderScript, 0, false, false); err != nil {
 		t.Fatalf("Failed to add thaw order action output : %s", err)
 	}
@@ -653,7 +667,10 @@ func Test_Freeze_Contract_Valid(t *testing.T) {
 	}
 
 	now = uint64(time.Now().UnixNano())
-	if err := agent.Process(ctx, transaction, []actions.Action{thawOrder}, now); err != nil {
+	if err := agent.Process(ctx, transaction, []Action{{
+		OutputIndex: thawOrderScriptOutputIndex,
+		Action:      thawOrder,
+	}}, now); err != nil {
 		t.Fatalf("Failed to process transaction : %s", err)
 	}
 
@@ -697,6 +714,7 @@ func Test_Freeze_Contract_Valid(t *testing.T) {
 		t.Logf("Contract is not frozen")
 	}
 
+	agent.Release(ctx)
 	caches.Caches.Instruments.Release(ctx, contractLockingScript, instrument.InstrumentCode)
 	caches.Caches.Contracts.Release(ctx, contractLockingScript)
 	caches.StopTestCaches()
@@ -709,7 +727,7 @@ func Test_Freeze_Instrument_Valid(t *testing.T) {
 
 	caches := state.StartTestCaches(ctx, t, store, cacher.DefaultConfig(), time.Second)
 
-	contractKey, contractLockingScript, adminKey, adminLockingScript, contract, instrument := state.MockInstrument(ctx,
+	contractKey, contractLockingScript, adminKey, adminLockingScript, _, instrument := state.MockInstrument(ctx,
 		caches)
 	_, feeLockingScript, _ := state.MockKey()
 
@@ -717,8 +735,8 @@ func Test_Freeze_Instrument_Valid(t *testing.T) {
 		instrument.InstrumentCode[:])
 	t.Logf("Mocked instrument : %s", instrumentID)
 
-	agent, err := NewAgent(contractKey, DefaultConfig(), contract, feeLockingScript, caches.Caches,
-		store, broadcaster, nil, nil, nil, nil)
+	agent, err := NewAgent(ctx, contractKey, contractLockingScript, DefaultConfig(),
+		feeLockingScript, caches.Caches, store, broadcaster, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("Failed to create agent : %s", err)
 	}
@@ -779,6 +797,7 @@ func Test_Freeze_Instrument_Valid(t *testing.T) {
 		t.Fatalf("Failed to serialize freeze order action : %s", err)
 	}
 
+	freezeOrderScriptOutputIndex := len(tx.Outputs)
 	if err := tx.AddOutput(freezeOrderScript, 0, false, false); err != nil {
 		t.Fatalf("Failed to add freeze order action output : %s", err)
 	}
@@ -815,7 +834,10 @@ func Test_Freeze_Instrument_Valid(t *testing.T) {
 	}
 
 	now := uint64(time.Now().UnixNano())
-	if err := agent.Process(ctx, transaction, []actions.Action{freezeOrder}, now); err != nil {
+	if err := agent.Process(ctx, transaction, []Action{{
+		OutputIndex: freezeOrderScriptOutputIndex,
+		Action:      freezeOrder,
+	}}, now); err != nil {
 		t.Fatalf("Failed to process transaction : %s", err)
 	}
 
@@ -924,6 +946,7 @@ func Test_Freeze_Instrument_Valid(t *testing.T) {
 		t.Fatalf("Failed to serialize thaw order action : %s", err)
 	}
 
+	thawOrderScriptOutputIndex := len(tx.Outputs)
 	if err := tx.AddOutput(thawOrderScript, 0, false, false); err != nil {
 		t.Fatalf("Failed to add thaw order action output : %s", err)
 	}
@@ -960,7 +983,10 @@ func Test_Freeze_Instrument_Valid(t *testing.T) {
 	}
 
 	now = uint64(time.Now().UnixNano())
-	if err := agent.Process(ctx, transaction, []actions.Action{thawOrder}, now); err != nil {
+	if err := agent.Process(ctx, transaction, []Action{{
+		OutputIndex: thawOrderScriptOutputIndex,
+		Action:      thawOrder,
+	}}, now); err != nil {
 		t.Fatalf("Failed to process transaction : %s", err)
 	}
 
@@ -1004,6 +1030,7 @@ func Test_Freeze_Instrument_Valid(t *testing.T) {
 		t.Logf("Instrument is not frozen")
 	}
 
+	agent.Release(ctx)
 	caches.Caches.Instruments.Release(ctx, contractLockingScript, instrument.InstrumentCode)
 	caches.Caches.Contracts.Release(ctx, contractLockingScript)
 	caches.StopTestCaches()

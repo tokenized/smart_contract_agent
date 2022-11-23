@@ -25,14 +25,15 @@ func Test_BodyOfAgreement_Offer_Valid(t *testing.T) {
 
 	caches := state.StartTestCaches(ctx, t, store, cacher.DefaultConfig(), time.Second)
 
-	contractKey, contractLockingScript, adminKey, adminLockingScript, contract := state.MockContract(ctx, caches)
+	contractKey, contractLockingScript, adminKey, adminLockingScript, contract := state.MockContract(ctx,
+		caches)
 	_, feeLockingScript, _ := state.MockKey()
 
 	contract.Formation.BodyOfAgreementType = actions.ContractBodyOfAgreementTypeFull
 	contract.MarkModified()
 
-	agent, err := NewAgent(contractKey, DefaultConfig(), contract, feeLockingScript, caches.Caches,
-		store, broadcaster, nil, nil, nil, nil)
+	agent, err := NewAgent(ctx, contractKey, contractLockingScript, DefaultConfig(),
+		feeLockingScript, caches.Caches, store, broadcaster, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("Failed to create agent : %s", err)
 	}
@@ -90,6 +91,7 @@ func Test_BodyOfAgreement_Offer_Valid(t *testing.T) {
 		t.Fatalf("Failed to serialize body of agreement offer action : %s", err)
 	}
 
+	offerScriptOutputIndex := len(tx.Outputs)
 	if err := tx.AddOutput(offerScript, 0, false, false); err != nil {
 		t.Fatalf("Failed to add body of agreement offer action output : %s", err)
 	}
@@ -126,7 +128,10 @@ func Test_BodyOfAgreement_Offer_Valid(t *testing.T) {
 	}
 
 	now := uint64(time.Now().UnixNano())
-	if err := agent.Process(ctx, transaction, []actions.Action{offer}, now); err != nil {
+	if err := agent.Process(ctx, transaction, []Action{{
+		OutputIndex: offerScriptOutputIndex,
+		Action:      offer,
+	}}, now); err != nil {
 		t.Fatalf("Failed to process transaction : %s", err)
 	}
 
@@ -160,6 +165,7 @@ func Test_BodyOfAgreement_Offer_Valid(t *testing.T) {
 	js, _ := json.MarshalIndent(formation, "", "  ")
 	t.Logf("BodyOfAgreementFormation : %s", js)
 
+	agent.Release(ctx)
 	caches.Caches.Contracts.Release(ctx, contractLockingScript)
 	caches.StopTestCaches()
 }
@@ -171,14 +177,15 @@ func Test_BodyOfAgreement_Offer_UnreferencedTerm(t *testing.T) {
 
 	caches := state.StartTestCaches(ctx, t, store, cacher.DefaultConfig(), time.Second)
 
-	contractKey, contractLockingScript, adminKey, adminLockingScript, contract := state.MockContract(ctx, caches)
+	contractKey, contractLockingScript, adminKey, adminLockingScript, contract := state.MockContract(ctx,
+		caches)
 	_, feeLockingScript, _ := state.MockKey()
 
 	contract.Formation.BodyOfAgreementType = actions.ContractBodyOfAgreementTypeFull
 	contract.MarkModified()
 
-	agent, err := NewAgent(contractKey, DefaultConfig(), contract, feeLockingScript, caches.Caches,
-		store, broadcaster, nil, nil, nil, nil)
+	agent, err := NewAgent(ctx, contractKey, contractLockingScript, DefaultConfig(),
+		feeLockingScript, caches.Caches, store, broadcaster, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("Failed to create agent : %s", err)
 	}
@@ -236,6 +243,7 @@ func Test_BodyOfAgreement_Offer_UnreferencedTerm(t *testing.T) {
 		t.Fatalf("Failed to serialize body of agreement offer action : %s", err)
 	}
 
+	offerScriptOutputIndex := len(tx.Outputs)
 	if err := tx.AddOutput(offerScript, 0, false, false); err != nil {
 		t.Fatalf("Failed to add body of agreement offer action output : %s", err)
 	}
@@ -272,7 +280,10 @@ func Test_BodyOfAgreement_Offer_UnreferencedTerm(t *testing.T) {
 	}
 
 	now := uint64(time.Now().UnixNano())
-	if err := agent.Process(ctx, transaction, []actions.Action{offer}, now); err != nil {
+	if err := agent.Process(ctx, transaction, []Action{{
+		OutputIndex: offerScriptOutputIndex,
+		Action:      offer,
+	}}, now); err != nil {
 		t.Fatalf("Failed to process transaction : %s", err)
 	}
 
@@ -311,6 +322,7 @@ func Test_BodyOfAgreement_Offer_UnreferencedTerm(t *testing.T) {
 			actions.RejectionsMsgMalformed)
 	}
 
+	agent.Release(ctx)
 	caches.Caches.Contracts.Release(ctx, contractLockingScript)
 	caches.StopTestCaches()
 }
@@ -358,8 +370,8 @@ func Test_BodyOfAgreement_Amendment_Basic(t *testing.T) {
 	contract.MarkModified()
 	contract.Unlock()
 
-	agent, err := NewAgent(contractKey, DefaultConfig(), contract, feeLockingScript, caches.Caches,
-		store, broadcaster, nil, nil, nil, nil)
+	agent, err := NewAgent(ctx, contractKey, contractLockingScript, DefaultConfig(),
+		feeLockingScript, caches.Caches, store, broadcaster, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("Failed to create agent : %s", err)
 	}
@@ -423,6 +435,7 @@ func Test_BodyOfAgreement_Amendment_Basic(t *testing.T) {
 		t.Fatalf("Failed to serialize body of agreement amendment action : %s", err)
 	}
 
+	bodyAmendmentScriptOutputIndex := len(tx.Outputs)
 	if err := tx.AddOutput(bodyAmendmentScript, 0, false, false); err != nil {
 		t.Fatalf("Failed to add body of agreement amendment action output : %s", err)
 	}
@@ -459,7 +472,10 @@ func Test_BodyOfAgreement_Amendment_Basic(t *testing.T) {
 	}
 
 	now := uint64(time.Now().UnixNano())
-	if err := agent.Process(ctx, transaction, []actions.Action{bodyAmendment}, now); err != nil {
+	if err := agent.Process(ctx, transaction, []Action{{
+		OutputIndex: bodyAmendmentScriptOutputIndex,
+		Action:      bodyAmendment,
+	}}, now); err != nil {
 		t.Fatalf("Failed to process transaction : %s", err)
 	}
 
@@ -493,6 +509,7 @@ func Test_BodyOfAgreement_Amendment_Basic(t *testing.T) {
 	js, _ = json.MarshalIndent(formation, "", "  ")
 	t.Logf("BodyOfAgreementFormation : %s", js)
 
+	agent.Release(ctx)
 	caches.Caches.Contracts.Release(ctx, contractLockingScript)
 	caches.StopTestCaches()
 }
@@ -540,8 +557,8 @@ func Test_BodyOfAgreement_Amendment_Child(t *testing.T) {
 	contract.MarkModified()
 	contract.Unlock()
 
-	agent, err := NewAgent(contractKey, DefaultConfig(), contract, feeLockingScript, caches.Caches,
-		store, broadcaster, nil, nil, nil, nil)
+	agent, err := NewAgent(ctx, contractKey, contractLockingScript, DefaultConfig(),
+		feeLockingScript, caches.Caches, store, broadcaster, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("Failed to create agent : %s", err)
 	}
@@ -620,6 +637,7 @@ func Test_BodyOfAgreement_Amendment_Child(t *testing.T) {
 		t.Fatalf("Failed to serialize body of agreement amendment action : %s", err)
 	}
 
+	bodyAmendmentScriptOutputIndex := len(tx.Outputs)
 	if err := tx.AddOutput(bodyAmendmentScript, 0, false, false); err != nil {
 		t.Fatalf("Failed to add body of agreement amendment action output : %s", err)
 	}
@@ -656,7 +674,10 @@ func Test_BodyOfAgreement_Amendment_Child(t *testing.T) {
 	}
 
 	now := uint64(time.Now().UnixNano())
-	if err := agent.Process(ctx, transaction, []actions.Action{bodyAmendment}, now); err != nil {
+	if err := agent.Process(ctx, transaction, []Action{{
+		OutputIndex: bodyAmendmentScriptOutputIndex,
+		Action:      bodyAmendment,
+	}}, now); err != nil {
 		t.Fatalf("Failed to process transaction : %s", err)
 	}
 
@@ -690,6 +711,7 @@ func Test_BodyOfAgreement_Amendment_Child(t *testing.T) {
 	js, _ = json.MarshalIndent(formation, "", "  ")
 	t.Logf("BodyOfAgreementFormation : %s", js)
 
+	agent.Release(ctx)
 	caches.Caches.Contracts.Release(ctx, contractLockingScript)
 	caches.StopTestCaches()
 }
@@ -749,8 +771,8 @@ func Test_BodyOfAgreement_Amendment_Proposal(t *testing.T) {
 	contract.MarkModified()
 	contract.Unlock()
 
-	agent, err := NewAgent(contractKey, DefaultConfig(), contract, feeLockingScript, caches.Caches,
-		store, broadcaster, nil, nil, nil, nil)
+	agent, err := NewAgent(ctx, contractKey, contractLockingScript, DefaultConfig(),
+		feeLockingScript, caches.Caches, store, broadcaster, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("Failed to create agent : %s", err)
 	}
@@ -825,6 +847,7 @@ func Test_BodyOfAgreement_Amendment_Proposal(t *testing.T) {
 		t.Fatalf("Failed to serialize body of agreement amendment action : %s", err)
 	}
 
+	bodyAmendmentScriptOutputIndex := len(tx.Outputs)
 	if err := tx.AddOutput(bodyAmendmentScript, 0, false, false); err != nil {
 		t.Fatalf("Failed to add body of agreement amendment action output : %s", err)
 	}
@@ -861,7 +884,10 @@ func Test_BodyOfAgreement_Amendment_Proposal(t *testing.T) {
 	}
 
 	now := uint64(time.Now().UnixNano())
-	if err := agent.Process(ctx, transaction, []actions.Action{bodyAmendment}, now); err != nil {
+	if err := agent.Process(ctx, transaction, []Action{{
+		OutputIndex: bodyAmendmentScriptOutputIndex,
+		Action:      bodyAmendment,
+	}}, now); err != nil {
 		t.Fatalf("Failed to process transaction : %s", err)
 	}
 
@@ -895,6 +921,7 @@ func Test_BodyOfAgreement_Amendment_Proposal(t *testing.T) {
 	js, _ = json.MarshalIndent(formation, "", "  ")
 	t.Logf("BodyOfAgreementFormation : %s", js)
 
+	agent.Release(ctx)
 	caches.Caches.Votes.Release(ctx, contractLockingScript, voteTxID)
 	caches.Caches.Contracts.Release(ctx, contractLockingScript)
 	caches.StopTestCaches()

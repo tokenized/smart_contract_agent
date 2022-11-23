@@ -80,7 +80,7 @@ func (c *VoteCache) ListActive(ctx context.Context, store storage.List,
 	contractLockingScript bitcoin.Script) ([]*Vote, error) {
 
 	contractHash := CalculateContractHash(contractLockingScript)
-	pathPrefix := fmt.Sprintf("%s/%s", votePath, contractHash)
+	pathPrefix := fmt.Sprintf("%s/%s", contractHash, votePath)
 
 	paths, err := store.List(ctx, pathPrefix)
 	if err != nil {

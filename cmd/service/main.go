@@ -9,7 +9,6 @@ import (
 	"syscall"
 
 	"github.com/tokenized/cacher"
-	"github.com/tokenized/channels/wallet"
 	"github.com/tokenized/config"
 	"github.com/tokenized/logger"
 	"github.com/tokenized/pkg/bitcoin"
@@ -18,7 +17,7 @@ import (
 	"github.com/tokenized/smart_contract_agent/internal/platform"
 	"github.com/tokenized/smart_contract_agent/internal/state"
 	"github.com/tokenized/smart_contract_agent/pkg/agents"
-	"github.com/tokenized/smart_contract_agent/pkg/conductors"
+	"github.com/tokenized/smart_contract_agent/pkg/service"
 	spyNodeClient "github.com/tokenized/spynode/pkg/client"
 	"github.com/tokenized/threads"
 )
@@ -30,18 +29,14 @@ var (
 )
 
 type Config struct {
-	BaseKey bitcoin.Key `envconfig:"BASE_KEY" json:"base_key" masked:"true"`
-
-	Cache cacher.Config `json:"cache"`
-
-	Wallet  wallet.Config        `json:"wallet"`
-	Storage storage.Config       `json:"storage"`
-	SpyNode spyNodeClient.Config `json:"spynode"`
-	Logger  logger.SetupConfig   `json:"logger"`
-
+	AgentKey   bitcoin.Key     `envconfig:"AGENT_KEY" json:"agent_key" masked:"true"`
+	Agents     agents.Config   `json:"agents"`
 	FeeAddress bitcoin.Address `envconfig:"FEE_ADDRESS" json:"fee_address"`
 
-	Agents agents.Config `json:"agents"`
+	Storage storage.Config       `json:"storage"`
+	Cache   cacher.Config        `json:"cache"`
+	SpyNode spyNodeClient.Config `json:"spynode"`
+	Logger  logger.SetupConfig   `json:"logger"`
 }
 
 func main() {
@@ -50,14 +45,14 @@ func main() {
 
 	cfg := Config{}
 	if err := config.LoadConfig(ctx, &cfg); err != nil {
-		logger.Fatal(ctx, "main : LoadConfig : %s", err)
+		logger.Fatal(ctx, "LoadConfig : %s", err)
 	}
 
 	ctx = logger.ContextWithLogSetup(ctx, cfg.Logger)
 
 	logger.Info(ctx, "Starting %s : Build %s (%s on %s)", "Smart Contract Agent", buildVersion,
 		buildUser, buildDate)
-	defer logger.Info(ctx, "main : Completed")
+	defer logger.Info(ctx, "Completed")
 	defer func() {
 		if err := recover(); err != nil {
 			logger.Error(ctx, "Panic : %s : %s", err, string(debug.Stack()))
@@ -82,33 +77,38 @@ func main() {
 	store, err := storage.CreateStreamStorage(cfg.Storage.Bucket, cfg.Storage.Root,
 		cfg.Storage.MaxRetries, cfg.Storage.RetryDelay)
 	if err != nil {
-		logger.Fatal(ctx, "main : Failed to create storage : %s", err)
+		logger.Fatal(ctx, "Failed to create storage : %s", err)
 	}
 
 	scheduler := platform.NewScheduler()
 
 	if cfg.SpyNode.ConnectionType != spyNodeClient.ConnectionTypeFull {
-		logger.Fatal(ctx, "main : Spynode connection type must be full to receive data : %s", err)
+		logger.Fatal(ctx, "Spynode connection type must be full to receive data : %s", err)
 	}
 
 	spyNode, err := spyNodeClient.NewRemoteClient(&cfg.SpyNode)
 	if err != nil {
-		logger.Fatal(ctx, "main : Failed to create spynode remote client : %s", err)
+		logger.Fatal(ctx, "Failed to create spynode remote client : %s", err)
 	}
 
 	cache := cacher.NewCache(store, cfg.Cache)
 	caches, err := state.NewCaches(cache)
 	if err != nil {
-		logger.Fatal(ctx, "main : Failed to create caches : %s", err)
+		logger.Fatal(ctx, "Failed to create caches : %s", err)
 	}
 
-	conductor := conductors.NewConductor(cfg.BaseKey, cfg.Agents, feeLockingScript, spyNode,
-		caches, store, NewSpyNodeBroadcaster(spyNode), spyNode, platform.NewHeaders(spyNode),
-		scheduler)
-	spyNode.RegisterHandler(conductor)
+	lockingScript, err := cfg.AgentKey.LockingScript()
+	if err != nil {
+		logger.Fatal(ctx, "Failed to create agent locking script : %s", err)
+	}
 
-	if err := conductors.LoadEvents(ctx, store, scheduler, conductor); err != nil {
-		logger.Fatal(ctx, "main : Failed to load events : %s", err)
+	service := service.NewService(cfg.AgentKey, lockingScript, cfg.Agents, feeLockingScript,
+		spyNode, caches, store, NewSpyNodeBroadcaster(spyNode), spyNode,
+		platform.NewHeaders(spyNode), scheduler)
+	spyNode.RegisterHandler(service)
+
+	if err := service.Load(ctx); err != nil {
+		logger.Fatal(ctx, "Failed to load service : %s", err)
 	}
 
 	var spyNodeWait, cacheWait, schedulerWait sync.WaitGroup
@@ -162,13 +162,11 @@ func main() {
 	spyNodeThread.Stop(ctx)
 	spyNodeWait.Wait()
 
-	if err := conductor.Save(ctx, store); err != nil {
-		logger.Error(ctx, "main : Failed to save conductor : %s", err)
+	if err := service.Save(ctx); err != nil {
+		logger.Error(ctx, "Failed to save service : %s", err)
 	}
 
-	if err := conductors.SaveEvents(ctx, store, scheduler); err != nil {
-		logger.Fatal(ctx, "main : Failed to save events : %s", err)
-	}
+	service.Release(ctx)
 
 	cacheThread.Stop(ctx)
 	cacheWait.Wait()

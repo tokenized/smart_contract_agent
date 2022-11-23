@@ -19,7 +19,7 @@ import (
 )
 
 func (a *Agent) processBodyOfAgreementOffer(ctx context.Context, transaction *state.Transaction,
-	offer *actions.BodyOfAgreementOffer, now uint64) error {
+	offer *actions.BodyOfAgreementOffer, outputIndex int, now uint64) error {
 
 	// First output must be the agent's locking script
 	transaction.Lock()
@@ -40,17 +40,17 @@ func (a *Agent) processBodyOfAgreementOffer(ctx context.Context, transaction *st
 	defer contract.Unlock()
 
 	if err := contract.CheckIsAvailable(now); err != nil {
-		return errors.Wrap(a.sendRejection(ctx, transaction, err, now), "reject")
+		return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex, err, now), "reject")
 	}
 
 	if contract.Formation.BodyOfAgreementType != actions.ContractBodyOfAgreementTypeFull {
-		return errors.Wrap(a.sendRejection(ctx, transaction,
+		return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
 			platform.NewRejectError(actions.RejectionsMsgMalformed,
 				"Contract: BodyOfAgreementType: not Full"), now), "reject")
 	}
 
 	if contract.BodyOfAgreementFormation != nil {
-		return errors.Wrap(a.sendRejection(ctx, transaction,
+		return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
 			platform.NewRejectError(actions.RejectionsAgreementExists, ""), now), "reject")
 	}
 
@@ -66,7 +66,7 @@ func (a *Agent) processBodyOfAgreementOffer(ctx context.Context, transaction *st
 
 	if !contract.IsAdminOrOperator(firstInputOutput.LockingScript) {
 		transaction.Unlock()
-		return errors.Wrap(a.sendRejection(ctx, transaction,
+		return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
 			platform.NewRejectError(actions.RejectionsUnauthorizedAddress, ""), now), "reject")
 	}
 
@@ -98,6 +98,7 @@ func (a *Agent) processBodyOfAgreementOffer(ctx context.Context, transaction *st
 		return errors.Wrap(err, "serialize formation")
 	}
 
+	formationScriptOutputIndex := len(formationTx.Outputs)
 	if err := formationTx.AddOutput(formationScript, 0, false, false); err != nil {
 		return errors.Wrap(err, "add formation output")
 	}
@@ -117,7 +118,7 @@ func (a *Agent) processBodyOfAgreementOffer(ctx context.Context, transaction *st
 	if _, err := formationTx.Sign([]bitcoin.Key{a.Key()}); err != nil {
 		if errors.Cause(err) == txbuilder.ErrInsufficientValue {
 			logger.Warn(ctx, "Insufficient tx funding : %s", err)
-			return errors.Wrap(a.sendRejection(ctx, transaction,
+			return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
 				platform.NewRejectError(actions.RejectionsInsufficientTxFeeFunding, err.Error()),
 				now), "reject")
 		}
@@ -139,8 +140,12 @@ func (a *Agent) processBodyOfAgreementOffer(ctx context.Context, transaction *st
 
 	// Set formation tx as processed since the body of agreement is now formed.
 	formationTransaction.Lock()
-	formationTransaction.SetProcessed()
+	formationTransaction.SetProcessed(a.ContractHash(), formationScriptOutputIndex)
 	formationTransaction.Unlock()
+
+	transaction.Lock()
+	transaction.AddResponseTxID(a.ContractHash(), outputIndex, formationTxID)
+	transaction.Unlock()
 
 	if err := a.BroadcastTx(ctx, formationTx.MsgTx, nil); err != nil {
 		return errors.Wrap(err, "broadcast")
@@ -154,7 +159,7 @@ func (a *Agent) processBodyOfAgreementOffer(ctx context.Context, transaction *st
 }
 
 func (a *Agent) processBodyOfAgreementAmendment(ctx context.Context, transaction *state.Transaction,
-	amendment *actions.BodyOfAgreementAmendment, now uint64) error {
+	amendment *actions.BodyOfAgreementAmendment, outputIndex int, now uint64) error {
 
 	agentLockingScript := a.LockingScript()
 
@@ -186,11 +191,11 @@ func (a *Agent) processBodyOfAgreementAmendment(ctx context.Context, transaction
 	defer contract.Unlock()
 
 	if err := contract.CheckIsAvailable(now); err != nil {
-		return errors.Wrap(a.sendRejection(ctx, transaction, err, now), "reject")
+		return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex, err, now), "reject")
 	}
 
 	if contract.BodyOfAgreementFormation == nil {
-		return errors.Wrap(a.sendRejection(ctx, transaction,
+		return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
 			platform.NewRejectError(actions.RejectionsAgreementDoesNotExist, ""), now), "reject")
 	}
 
@@ -201,12 +206,12 @@ func (a *Agent) processBodyOfAgreementAmendment(ctx context.Context, transaction
 
 	if !bytes.Equal(contract.Formation.AdminAddress, authorizingAddress.Bytes()) &&
 		!bytes.Equal(contract.Formation.OperatorAddress, authorizingAddress.Bytes()) {
-		return errors.Wrap(a.sendRejection(ctx, transaction,
+		return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
 			platform.NewRejectError(actions.RejectionsUnauthorizedAddress, ""), now), "reject")
 	}
 
 	if contract.BodyOfAgreementFormation.Revision != amendment.Revision {
-		return errors.Wrap(a.sendRejection(ctx, transaction,
+		return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
 			platform.NewRejectError(actions.RejectionsAgreementRevision, ""), now), "reject")
 	}
 
@@ -219,7 +224,8 @@ func (a *Agent) processBodyOfAgreementAmendment(ctx context.Context, transaction
 		a.IsTest())
 	if err != nil {
 		if rejectError, ok := errors.Cause(err).(platform.RejectError); ok {
-			return errors.Wrap(a.sendRejection(ctx, transaction, rejectError, now), "reject")
+			return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex, rejectError, now),
+				"reject")
 		}
 
 		return errors.Wrap(err, "fetch vote")
@@ -231,7 +237,7 @@ func (a *Agent) processBodyOfAgreementAmendment(ctx context.Context, transaction
 		if len(vote.Result.ProposedAmendments) == 0 {
 			vote.Unlock()
 			a.caches.Votes.Release(ctx, agentLockingScript, *vote.VoteTxID)
-			return errors.Wrap(a.sendRejection(ctx, transaction,
+			return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
 				platform.NewRejectError(actions.RejectionsMsgMalformed,
 					"RefTxID: Vote Result: Vote Not For Specific Amendments"), now), "reject")
 		}
@@ -241,7 +247,7 @@ func (a *Agent) processBodyOfAgreementAmendment(ctx context.Context, transaction
 			a.caches.Votes.Release(ctx, agentLockingScript, *vote.VoteTxID)
 			instrumentID, _ := protocol.InstrumentIDForRaw(vote.Result.InstrumentType,
 				vote.Result.InstrumentCode)
-			return errors.Wrap(a.sendRejection(ctx, transaction,
+			return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
 				platform.NewRejectError(actions.RejectionsMsgMalformed,
 					fmt.Sprintf("RefTxID: Vote Result: Vote For Instrument: %s", instrumentID)),
 				now), "reject")
@@ -251,7 +257,7 @@ func (a *Agent) processBodyOfAgreementAmendment(ctx context.Context, transaction
 		if len(vote.Result.ProposedAmendments) != len(amendment.Amendments) {
 			vote.Unlock()
 			a.caches.Votes.Release(ctx, agentLockingScript, *vote.VoteTxID)
-			return errors.Wrap(a.sendRejection(ctx, transaction,
+			return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
 				platform.NewRejectError(actions.RejectionsMsgMalformed,
 					fmt.Sprintf("RefTxID: Vote Result: Wrong Vote Amendment Count: Proposal %d, Amendment %d",
 						len(vote.Result.ProposedAmendments), len(amendment.Amendments))), now),
@@ -262,7 +268,7 @@ func (a *Agent) processBodyOfAgreementAmendment(ctx context.Context, transaction
 			if !proposedAmendment.Equal(amendment.Amendments[i]) {
 				vote.Unlock()
 				a.caches.Votes.Release(ctx, agentLockingScript, *vote.VoteTxID)
-				return errors.Wrap(a.sendRejection(ctx, transaction,
+				return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
 					platform.NewRejectError(actions.RejectionsMsgMalformed,
 						fmt.Sprintf("RefTxID: Vote Result: Wrong Vote Amendment %d", i)), now),
 					"reject")
@@ -303,7 +309,8 @@ func (a *Agent) processBodyOfAgreementAmendment(ctx context.Context, transaction
 		len(contract.Formation.VotingSystems), amendment.Amendments, proposed, proposalType,
 		votingSystem); err != nil {
 		if rejectError, ok := errors.Cause(err).(platform.RejectError); ok {
-			return errors.Wrap(a.sendRejection(ctx, transaction, rejectError, now), "reject")
+			return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex, rejectError, now),
+				"reject")
 		}
 
 		return errors.Wrap(err, "apply amendments")
@@ -330,6 +337,7 @@ func (a *Agent) processBodyOfAgreementAmendment(ctx context.Context, transaction
 		return errors.Wrap(err, "serialize formation")
 	}
 
+	formationScriptOutputIndex := len(formationTx.Outputs)
 	if err := formationTx.AddOutput(formationScript, 0, false, false); err != nil {
 		return errors.Wrap(err, "add formation output")
 	}
@@ -349,7 +357,7 @@ func (a *Agent) processBodyOfAgreementAmendment(ctx context.Context, transaction
 	if _, err := formationTx.Sign([]bitcoin.Key{a.Key()}); err != nil {
 		if errors.Cause(err) == txbuilder.ErrInsufficientValue {
 			logger.Warn(ctx, "Insufficient tx funding : %s", err)
-			return errors.Wrap(a.sendRejection(ctx, transaction,
+			return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
 				platform.NewRejectError(actions.RejectionsInsufficientTxFeeFunding, err.Error()),
 				now), "reject")
 		}
@@ -371,8 +379,12 @@ func (a *Agent) processBodyOfAgreementAmendment(ctx context.Context, transaction
 
 	// Set formation tx as processed since the body of agreement is now amended.
 	formationTransaction.Lock()
-	formationTransaction.SetProcessed()
+	formationTransaction.SetProcessed(a.ContractHash(), formationScriptOutputIndex)
 	formationTransaction.Unlock()
+
+	transaction.Lock()
+	transaction.AddResponseTxID(a.ContractHash(), outputIndex, formationTxID)
+	transaction.Unlock()
 
 	if err := a.BroadcastTx(ctx, formationTx.MsgTx, nil); err != nil {
 		return errors.Wrap(err, "broadcast")
@@ -386,7 +398,7 @@ func (a *Agent) processBodyOfAgreementAmendment(ctx context.Context, transaction
 }
 
 func (a *Agent) processBodyOfAgreementFormation(ctx context.Context, transaction *state.Transaction,
-	formation *actions.BodyOfAgreementFormation, now uint64) error {
+	formation *actions.BodyOfAgreementFormation, outputIndex int, now uint64) error {
 
 	// First input must be the agent's locking script
 	transaction.Lock()

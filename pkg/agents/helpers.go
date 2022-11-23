@@ -72,8 +72,8 @@ func findBitcoinOutput(tx *wire.MsgTx, lockingScript bitcoin.Script, value uint6
 	return false
 }
 
-func (a *Agent) addResponseTxID(ctx context.Context,
-	requestTxID, responseTxID bitcoin.Hash32) (bool, error) {
+func (a *Agent) addResponseTxID(ctx context.Context, requestTxID bitcoin.Hash32, outputIndex int,
+	responseTxID bitcoin.Hash32) (bool, error) {
 
 	requestTransaction, err := a.caches.Transactions.Get(ctx, requestTxID)
 	if err != nil {
@@ -85,7 +85,7 @@ func (a *Agent) addResponseTxID(ctx context.Context,
 	}
 
 	requestTransaction.Lock()
-	result := requestTransaction.AddResponseTxID(responseTxID)
+	result := requestTransaction.AddResponseTxID(a.ContractHash(), outputIndex, responseTxID)
 	requestTransaction.Unlock()
 	a.caches.Transactions.Release(ctx, requestTxID)
 

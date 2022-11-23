@@ -34,7 +34,7 @@ func Test_Contracts_Offer_Invalid(t *testing.T) {
 	var keyHash bitcoin.Hash32
 	rand.Read(keyHash[:])
 
-	contract, err := caches.Caches.Contracts.Add(ctx, &state.Contract{
+	_, err := caches.Caches.Contracts.Add(ctx, &state.Contract{
 		KeyHash:       keyHash,
 		LockingScript: contractLockingScript,
 	})
@@ -42,8 +42,8 @@ func Test_Contracts_Offer_Invalid(t *testing.T) {
 		t.Fatalf("Failed to add contract : %s", err)
 	}
 
-	agent, err := NewAgent(contractKey, DefaultConfig(), contract, feeLockingScript, caches.Caches,
-		store, broadcaster, nil, nil, nil, nil)
+	agent, err := NewAgent(ctx, contractKey, contractLockingScript, DefaultConfig(),
+		feeLockingScript, caches.Caches, store, broadcaster, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("Failed to create agent : %s", err)
 	}
@@ -79,6 +79,7 @@ func Test_Contracts_Offer_Invalid(t *testing.T) {
 		t.Fatalf("Failed to serialize contract offer action : %s", err)
 	}
 
+	contractOfferScriptOutputIndex := len(tx.Outputs)
 	if err := tx.AddOutput(contractOfferScript, 0, false, false); err != nil {
 		t.Fatalf("Failed to add contract offer action output : %s", err)
 	}
@@ -115,7 +116,10 @@ func Test_Contracts_Offer_Invalid(t *testing.T) {
 	}
 
 	now := uint64(time.Now().UnixNano())
-	if err := agent.Process(ctx, transaction, []actions.Action{contractOffer}, now); err != nil {
+	if err := agent.Process(ctx, transaction, []Action{{
+		OutputIndex: contractOfferScriptOutputIndex,
+		Action:      contractOffer,
+	}}, now); err != nil {
 		t.Fatalf("Failed to process transaction : %s", err)
 	}
 
@@ -159,6 +163,7 @@ func Test_Contracts_Offer_Invalid(t *testing.T) {
 
 	caches.Caches.Transactions.Release(ctx, transaction.GetTxID())
 
+	agent.Release(ctx)
 	caches.Caches.Contracts.Release(ctx, contractLockingScript)
 	caches.StopTestCaches()
 }
@@ -186,8 +191,8 @@ func Test_Contracts_Offer_Valid(t *testing.T) {
 		t.Fatalf("Failed to add contract : %s", err)
 	}
 
-	agent, err := NewAgent(contractKey, DefaultConfig(), contract, feeLockingScript, caches.Caches,
-		store, broadcaster, nil, nil, nil, nil)
+	agent, err := NewAgent(ctx, contractKey, contractLockingScript, DefaultConfig(),
+		feeLockingScript, caches.Caches, store, broadcaster, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("Failed to create agent : %s", err)
 	}
@@ -227,6 +232,7 @@ func Test_Contracts_Offer_Valid(t *testing.T) {
 		t.Fatalf("Failed to serialize contract offer action : %s", err)
 	}
 
+	contractOfferScriptOutputIndex := len(tx.Outputs)
 	if err := tx.AddOutput(contractOfferScript, 0, false, false); err != nil {
 		t.Fatalf("Failed to add contract offer action output : %s", err)
 	}
@@ -263,7 +269,10 @@ func Test_Contracts_Offer_Valid(t *testing.T) {
 	}
 
 	now := uint64(time.Now().UnixNano())
-	if err := agent.Process(ctx, transaction, []actions.Action{contractOffer}, now); err != nil {
+	if err := agent.Process(ctx, transaction, []Action{{
+		OutputIndex: contractOfferScriptOutputIndex,
+		Action:      contractOffer,
+	}}, now); err != nil {
 		t.Fatalf("Failed to process transaction : %s", err)
 	}
 
@@ -345,6 +354,7 @@ func Test_Contracts_Offer_Valid(t *testing.T) {
 	}
 	contract.Unlock()
 
+	agent.Release(ctx)
 	caches.Caches.Contracts.Release(ctx, contractLockingScript)
 	caches.StopTestCaches()
 }
@@ -366,7 +376,7 @@ func Test_Contracts_Offer_AlreadyExists(t *testing.T) {
 	var formationTxID bitcoin.Hash32
 	rand.Read(formationTxID[:])
 
-	contract, err := caches.Caches.Contracts.Add(ctx, &state.Contract{
+	_, err := caches.Caches.Contracts.Add(ctx, &state.Contract{
 		KeyHash:       keyHash,
 		LockingScript: contractLockingScript,
 		Formation: &actions.ContractFormation{
@@ -378,8 +388,8 @@ func Test_Contracts_Offer_AlreadyExists(t *testing.T) {
 		t.Fatalf("Failed to add contract : %s", err)
 	}
 
-	agent, err := NewAgent(contractKey, DefaultConfig(), contract, feeLockingScript, caches.Caches,
-		store, broadcaster, nil, nil, nil, nil)
+	agent, err := NewAgent(ctx, contractKey, contractLockingScript, DefaultConfig(),
+		feeLockingScript, caches.Caches, store, broadcaster, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("Failed to create agent : %s", err)
 	}
@@ -414,6 +424,7 @@ func Test_Contracts_Offer_AlreadyExists(t *testing.T) {
 		t.Fatalf("Failed to serialize contract offer action : %s", err)
 	}
 
+	contractOfferScriptOutputIndex := len(tx.Outputs)
 	if err := tx.AddOutput(contractOfferScript, 0, false, false); err != nil {
 		t.Fatalf("Failed to add contract offer action output : %s", err)
 	}
@@ -450,7 +461,10 @@ func Test_Contracts_Offer_AlreadyExists(t *testing.T) {
 	}
 
 	now := uint64(time.Now().UnixNano())
-	if err := agent.Process(ctx, transaction, []actions.Action{contractOffer}, now); err != nil {
+	if err := agent.Process(ctx, transaction, []Action{{
+		OutputIndex: contractOfferScriptOutputIndex,
+		Action:      contractOffer,
+	}}, now); err != nil {
 		t.Fatalf("Failed to process transaction : %s", err)
 	}
 
@@ -494,6 +508,7 @@ func Test_Contracts_Offer_AlreadyExists(t *testing.T) {
 
 	caches.Caches.Transactions.Release(ctx, transaction.GetTxID())
 
+	agent.Release(ctx)
 	caches.Caches.Contracts.Release(ctx, contractLockingScript)
 	caches.StopTestCaches()
 }
@@ -510,8 +525,8 @@ func Test_Contracts_Amendment_Valid(t *testing.T) {
 	rand.Read(keyHash[:])
 	_, feeLockingScript, _ := state.MockKey()
 
-	agent, err := NewAgent(contractKey, DefaultConfig(), contract, feeLockingScript, caches.Caches,
-		store, broadcaster, nil, nil, nil, nil)
+	agent, err := NewAgent(ctx, contractKey, contractLockingScript, DefaultConfig(),
+		feeLockingScript, caches.Caches, store, broadcaster, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("Failed to create agent : %s", err)
 	}
@@ -583,6 +598,7 @@ func Test_Contracts_Amendment_Valid(t *testing.T) {
 		t.Fatalf("Failed to serialize contract offer action : %s", err)
 	}
 
+	contractAmendmentScriptOutputIndex := len(tx.Outputs)
 	if err := tx.AddOutput(contractAmendmentScript, 0, false, false); err != nil {
 		t.Fatalf("Failed to add contract offer action output : %s", err)
 	}
@@ -619,7 +635,10 @@ func Test_Contracts_Amendment_Valid(t *testing.T) {
 	}
 
 	now := uint64(time.Now().UnixNano())
-	if err := agent.Process(ctx, transaction, []actions.Action{contractAmendment}, now); err != nil {
+	if err := agent.Process(ctx, transaction, []Action{{
+		OutputIndex: contractAmendmentScriptOutputIndex,
+		Action:      contractAmendment,
+	}}, now); err != nil {
 		t.Fatalf("Failed to process transaction : %s", err)
 	}
 
@@ -679,6 +698,7 @@ func Test_Contracts_Amendment_Valid(t *testing.T) {
 	}
 	contract.Unlock()
 
+	agent.Release(ctx)
 	caches.Caches.Contracts.Release(ctx, contractLockingScript)
 	caches.StopTestCaches()
 }
@@ -689,15 +709,16 @@ func Test_Contracts_Amendment_AdminChange(t *testing.T) {
 	broadcaster := state.NewMockTxBroadcaster()
 
 	caches := state.StartTestCaches(ctx, t, store, cacher.DefaultConfig(), time.Second)
-	contractKey, contractLockingScript, adminKey, adminLockingScript, contract := state.MockContract(ctx, caches)
+	contractKey, contractLockingScript, adminKey, adminLockingScript, contract := state.MockContract(ctx,
+		caches)
 
 	var keyHash bitcoin.Hash32
 	rand.Read(keyHash[:])
 	_, feeLockingScript, _ := state.MockKey()
 	newAdminKey, newAdminLockingScript, newAdminAddress := state.MockKey()
 
-	agent, err := NewAgent(contractKey, DefaultConfig(), contract, feeLockingScript, caches.Caches,
-		store, broadcaster, nil, nil, nil, nil)
+	agent, err := NewAgent(ctx, contractKey, contractLockingScript, DefaultConfig(),
+		feeLockingScript, caches.Caches, store, broadcaster, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("Failed to create agent : %s", err)
 	}
@@ -750,6 +771,7 @@ func Test_Contracts_Amendment_AdminChange(t *testing.T) {
 		t.Fatalf("Failed to serialize contract offer action : %s", err)
 	}
 
+	contractAmendmentScriptOutputIndex := len(tx.Outputs)
 	if err := tx.AddOutput(contractAmendmentScript, 0, false, false); err != nil {
 		t.Fatalf("Failed to add contract offer action output : %s", err)
 	}
@@ -786,7 +808,10 @@ func Test_Contracts_Amendment_AdminChange(t *testing.T) {
 	}
 
 	now := uint64(time.Now().UnixNano())
-	if err := agent.Process(ctx, transaction, []actions.Action{contractAmendment}, now); err != nil {
+	if err := agent.Process(ctx, transaction, []Action{{
+		OutputIndex: contractAmendmentScriptOutputIndex,
+		Action:      contractAmendment,
+	}}, now); err != nil {
 		t.Fatalf("Failed to process transaction : %s", err)
 	}
 
@@ -846,6 +871,7 @@ func Test_Contracts_Amendment_AdminChange(t *testing.T) {
 	}
 	contract.Unlock()
 
+	agent.Release(ctx)
 	caches.Caches.Contracts.Release(ctx, contractLockingScript)
 	caches.StopTestCaches()
 }
@@ -868,14 +894,15 @@ func Test_Contracts_Amendment_Proposal(t *testing.T) {
 		},
 	}
 
-	contractKey, contractLockingScript, adminKey, adminLockingScript, contract := state.MockContractWithVoteSystems(ctx, caches, votingSystems)
+	contractKey, contractLockingScript, adminKey, adminLockingScript, contract := state.MockContractWithVoteSystems(ctx,
+		caches, votingSystems)
 
 	var keyHash bitcoin.Hash32
 	rand.Read(keyHash[:])
 	_, feeLockingScript, _ := state.MockKey()
 
-	agent, err := NewAgent(contractKey, DefaultConfig(), contract, feeLockingScript, caches.Caches,
-		store, broadcaster, nil, nil, nil, nil)
+	agent, err := NewAgent(ctx, contractKey, contractLockingScript, DefaultConfig(),
+		feeLockingScript, caches.Caches, store, broadcaster, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("Failed to create agent : %s", err)
 	}
@@ -949,6 +976,7 @@ func Test_Contracts_Amendment_Proposal(t *testing.T) {
 		t.Fatalf("Failed to serialize contract offer action : %s", err)
 	}
 
+	contractAmendmentScriptOutputIndex := len(tx.Outputs)
 	if err := tx.AddOutput(contractAmendmentScript, 0, false, false); err != nil {
 		t.Fatalf("Failed to add contract offer action output : %s", err)
 	}
@@ -985,7 +1013,10 @@ func Test_Contracts_Amendment_Proposal(t *testing.T) {
 	}
 
 	now := uint64(time.Now().UnixNano())
-	if err := agent.Process(ctx, transaction, []actions.Action{contractAmendment}, now); err != nil {
+	if err := agent.Process(ctx, transaction, []Action{{
+		OutputIndex: contractAmendmentScriptOutputIndex,
+		Action:      contractAmendment,
+	}}, now); err != nil {
 		t.Fatalf("Failed to process transaction : %s", err)
 	}
 
@@ -1045,6 +1076,7 @@ func Test_Contracts_Amendment_Proposal(t *testing.T) {
 	}
 	contract.Unlock()
 
+	agent.Release(ctx)
 	caches.Caches.Votes.Release(ctx, contractLockingScript, voteTxID)
 	caches.Caches.Contracts.Release(ctx, contractLockingScript)
 	caches.StopTestCaches()

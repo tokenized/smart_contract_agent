@@ -19,7 +19,6 @@ import (
 	"github.com/tokenized/smart_contract_agent/internal/state"
 	"github.com/tokenized/smart_contract_agent/internal/whatsonchain"
 	"github.com/tokenized/smart_contract_agent/pkg/agents"
-	"github.com/tokenized/smart_contract_agent/pkg/conductors"
 	"github.com/tokenized/threads"
 
 	"github.com/pkg/errors"
@@ -32,22 +31,16 @@ var (
 )
 
 type Config struct {
-	BaseKey bitcoin.Key `envconfig:"BASE_KEY" json:"base_key" masked:"true"`
-
-	Cache cacher.Config `json:"cache"`
-
-	Wallet  wallet.Config      `json:"wallet"`
-	Storage storage.Config     `json:"storage"`
-	Logger  logger.SetupConfig `json:"logger"`
-
-	ContractKey        bitcoin.Key `envconfig:"CONTRACT_KEY" json:"contract_key" masked:"true"`
-	WhatsOnChainAPIKey string      `envconfig:"WOC_API_KEY" json:"api_key" masked:"true"`
-
-	Network bitcoin.Network `default:"mainnet" json:"network" envconfig:"NETWORK"`
-
+	AgentKey   bitcoin.Key     `envconfig:"AGENT_KEY" json:"agent_key" masked:"true"`
+	Agents     agents.Config   `json:"agents"`
 	FeeAddress bitcoin.Address `envconfig:"FEE_ADDRESS" json:"fee_address"`
 
-	Agents agents.Config `json:"agents"`
+	WhatsOnChainAPIKey string          `envconfig:"WOC_API_KEY" json:"api_key" masked:"true"`
+	Network            bitcoin.Network `default:"mainnet" json:"network" envconfig:"NETWORK"`
+
+	Storage storage.Config     `json:"storage"`
+	Cache   cacher.Config      `json:"cache"`
+	Logger  logger.SetupConfig `json:"logger"`
 }
 
 func main() {
@@ -56,7 +49,7 @@ func main() {
 
 	cfg := Config{}
 	if err := config.LoadConfig(ctx, &cfg); err != nil {
-		logger.Fatal(ctx, "main : LoadConfig : %s", err)
+		logger.Fatal(ctx, "LoadConfig : %s", err)
 	}
 
 	ctx = logger.ContextWithLogSetup(ctx, cfg.Logger)
@@ -64,7 +57,7 @@ func main() {
 	logger.Info(ctx, "Starting %s : Build %s (%s on %s)", "Smart Contract Agent", buildVersion,
 		buildUser, buildDate)
 
-	defer logger.Info(ctx, "main : Completed")
+	defer logger.Info(ctx, "Completed")
 
 	// Config
 	maskedConfig, err := config.MarshalJSONMaskedRaw(cfg)
@@ -86,19 +79,31 @@ func main() {
 	store, err := storage.CreateStreamStorage(cfg.Storage.Bucket, cfg.Storage.Root,
 		cfg.Storage.MaxRetries, cfg.Storage.RetryDelay)
 	if err != nil {
-		logger.Fatal(ctx, "main : Failed to create storage : %s", err)
+		logger.Fatal(ctx, "Failed to create storage : %s", err)
 	}
 
 	cache := cacher.NewCache(store, cfg.Cache)
 	caches, err := state.NewCaches(cache)
 	if err != nil {
-		logger.Fatal(ctx, "main : Failed to create caches : %s", err)
+		logger.Fatal(ctx, "Failed to create caches : %s", err)
 	}
 
 	broadcaster := NewNoopBroadcaster()
 
-	conductor := conductors.NewConductor(cfg.BaseKey, cfg.Agents, feeLockingScript, nil, caches,
-		store, broadcaster, woc, woc, nil)
+	factory := NewFactory()
+
+	lockingScript, err := cfg.AgentKey.LockingScript()
+	if err != nil {
+		logger.Fatal(ctx, "Failed to create agent locking script : %s", err)
+	}
+
+	agent, err := agents.NewAgent(ctx, cfg.AgentKey, lockingScript, cfg.Agents, feeLockingScript,
+		caches, store, broadcaster, woc, woc, nil, factory)
+	if err != nil {
+		logger.Fatal(ctx, "Failed to create agent : %s", err)
+	}
+
+	factory.SetAgent(agent)
 
 	var cacheWait, loadWait sync.WaitGroup
 
@@ -110,15 +115,10 @@ func main() {
 
 	loadThread, loadComplete := threads.NewInterruptableThreadComplete("Load",
 		func(ctx context.Context, interrupt <-chan interface{}) error {
-			return load(ctx, interrupt, conductor, caches.Transactions, cfg.BaseKey,
-				cfg.ContractKey, woc)
+			return load(ctx, interrupt, agent, caches.Transactions, woc)
 		}, &loadWait)
 
 	cacheThread.Start(ctx)
-
-	if err := conductor.Load(ctx, store); err != nil {
-		logger.Fatal(ctx, "main : Failed to load conductor : %s", err)
-	}
 
 	loadThread.Start(ctx)
 
@@ -147,15 +147,13 @@ func main() {
 		}
 
 	case <-osSignals:
-		logger.Info(ctx, "main : Start shutdown...")
+		logger.Info(ctx, "Start shutdown...")
 	}
 
 	loadThread.Stop(ctx)
 	loadWait.Wait()
 
-	if err := conductor.Save(ctx, store); err != nil {
-		logger.Error(ctx, "main : Failed to save conductor : %s", err)
-	}
+	agent.Release(ctx)
 
 	cacheThread.Stop(ctx)
 	cacheWait.Wait()
@@ -210,9 +208,12 @@ func getInputs(ctx context.Context, transactions *state.TransactionCache,
 	return nil
 }
 
-func loadTx(ctx context.Context, conductor *conductors.Conductor,
-	transactions *state.TransactionCache, woc *whatsonchain.Service, txid bitcoin.Hash32) error {
-	ctx = logger.ContextWithLogFields(ctx, logger.Stringer("txid", txid))
+func loadTx(ctx context.Context, agent *agents.Agent, transactions *state.TransactionCache,
+	woc *whatsonchain.Service, txid bitcoin.Hash32) error {
+
+	logger.InfoWithFields(ctx, []logger.Field{
+		logger.Stringer("txid", txid),
+	}, "Loading transaction")
 
 	transaction, err := getTx(ctx, transactions, woc, txid)
 	if err != nil {
@@ -224,35 +225,17 @@ func loadTx(ctx context.Context, conductor *conductors.Conductor,
 		return errors.Wrapf(err, "get inputs: %s", txid)
 	}
 
-	if err := conductor.UpdateTransaction(ctx, transaction,
-		uint64(time.Now().UnixNano())); err != nil {
+	if err := agent.UpdateTransaction(ctx, transaction, uint64(time.Now().UnixNano())); err != nil {
 		return errors.Wrapf(err, "update transaction")
 	}
 
 	return nil
 }
 
-func load(ctx context.Context, interrupt <-chan interface{}, conductor *conductors.Conductor,
-	transactions *state.TransactionCache, baseKey, contractKey bitcoin.Key,
-	woc *whatsonchain.Service) error {
+func load(ctx context.Context, interrupt <-chan interface{}, agent *agents.Agent,
+	transactions *state.TransactionCache, woc *whatsonchain.Service) error {
 
-	hash, err := contractKey.Subtract(baseKey)
-	if err != nil {
-		return errors.Wrap(err, "subtract key")
-	}
-
-	lockingScript, err := contractKey.LockingScript()
-	if err != nil {
-		return errors.Wrap(err, "locking script")
-	}
-
-	agent, err := conductor.AddAgent(ctx, hash)
-	if err != nil {
-		return errors.Wrap(err, "add agent")
-	}
-	defer conductor.ReleaseAgent(ctx, agent)
-
-	history, err := woc.GetLockingScriptHistory(ctx, lockingScript)
+	history, err := woc.GetLockingScriptHistory(ctx, agent.LockingScript())
 	if err != nil {
 		return errors.Wrap(err, "get history")
 	}
@@ -274,7 +257,7 @@ func load(ctx context.Context, interrupt <-chan interface{}, conductor *conducto
 			logger.Stringer("txid", txid),
 		}, "Loading transaction")
 
-		if err := loadTx(ctx, conductor, transactions, woc, history[index].TxID); err != nil {
+		if err := loadTx(ctx, agent, transactions, woc, history[index].TxID); err != nil {
 			return errors.Wrapf(err, "load transaction: %s", txid)
 		}
 
@@ -300,4 +283,35 @@ func (*NoopBroadcaster) BroadcastTx(ctx context.Context, tx *wire.MsgTx, indexes
 		logger.Uint32s("indexes", indexes),
 	}, "No operation broadcaster received tx")
 	return nil
+}
+
+type Factory struct {
+	lockingScript bitcoin.Script
+	agent         *agents.Agent
+
+	lock sync.Mutex
+}
+
+func NewFactory() *Factory {
+	return &Factory{}
+}
+
+func (f *Factory) SetAgent(agent *agents.Agent) {
+	f.lock.Lock()
+	defer f.lock.Unlock()
+
+	f.lockingScript = agent.LockingScript()
+	f.agent = agent
+}
+
+func (f *Factory) GetAgent(ctx context.Context,
+	lockingScript bitcoin.Script) (*agents.Agent, error) {
+	f.lock.Lock()
+	defer f.lock.Unlock()
+
+	if !f.lockingScript.Equal(lockingScript) {
+		return nil, nil
+	}
+
+	return f.agent.Copy(ctx), nil
 }

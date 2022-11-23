@@ -1,4 +1,4 @@
-package conductors
+package service
 
 import (
 	"context"
@@ -9,31 +9,31 @@ import (
 	spynode "github.com/tokenized/spynode/pkg/client"
 )
 
-func (c *Conductor) HandleTx(ctx context.Context, spyNodeTx *spynode.Tx) {
+func (s *Service) HandleTx(ctx context.Context, spyNodeTx *spynode.Tx) {
 	txid := *spyNodeTx.Tx.TxHash()
-	ctx = logger.ContextWithLogFields(ctx, logger.Stringer("txid", txid))
 
-	c.UpdateNextSpyNodeMessageID(spyNodeTx.ID)
+	s.UpdateNextSpyNodeMessageID(spyNodeTx.ID)
 
-	transaction, err := c.addTx(ctx, txid, spyNodeTx)
+	transaction, err := s.addTx(ctx, txid, spyNodeTx)
 	if err != nil {
 		logger.Error(ctx, "Failed to add tx : %s", err)
 		return
 	}
-	defer c.caches.Transactions.Release(ctx, txid)
+	defer s.caches.Transactions.Release(ctx, txid)
 
-	if err := c.UpdateTransaction(ctx, transaction, uint64(time.Now().UnixNano())); err != nil {
+	if err := s.agent.UpdateTransaction(ctx, transaction,
+		uint64(time.Now().UnixNano())); err != nil {
 		logger.Error(ctx, "Failed to update tx : %s", err)
 		return
 	}
 }
 
-func (c *Conductor) HandleTxUpdate(ctx context.Context, txUpdate *spynode.TxUpdate) {
-	ctx = logger.ContextWithLogFields(ctx, logger.Stringer("txid", txUpdate.TxID))
-
-	transaction, err := c.caches.Transactions.Get(ctx, txUpdate.TxID)
+func (s *Service) HandleTxUpdate(ctx context.Context, txUpdate *spynode.TxUpdate) {
+	transaction, err := s.caches.Transactions.Get(ctx, txUpdate.TxID)
 	if err != nil {
-		logger.Error(ctx, "Failed to get tx : %s", err)
+		logger.ErrorWithFields(ctx, []logger.Field{
+			logger.Stringer("txid", txUpdate.TxID),
+		}, "Failed to get tx : %s", err)
 		return
 	}
 
@@ -43,7 +43,7 @@ func (c *Conductor) HandleTxUpdate(ctx context.Context, txUpdate *spynode.TxUpda
 		}, "Update transaction not found")
 		return
 	}
-	defer c.caches.Transactions.Release(ctx, txUpdate.TxID)
+	defer s.caches.Transactions.Release(ctx, txUpdate.TxID)
 
 	transaction.Lock()
 
@@ -76,31 +76,36 @@ func (c *Conductor) HandleTxUpdate(ctx context.Context, txUpdate *spynode.TxUpda
 
 	transaction.Unlock()
 
-	if err := c.UpdateTransaction(ctx, transaction, uint64(time.Now().UnixNano())); err != nil {
-		logger.Error(ctx, "Failed to update tx : %s", err)
+	if err := s.agent.UpdateTransaction(ctx, transaction,
+		uint64(time.Now().UnixNano())); err != nil {
+		logger.ErrorWithFields(ctx, []logger.Field{
+			logger.Stringer("txid", txUpdate.TxID),
+		}, "Failed to update tx : %s", err)
 		return
 	}
 }
 
-func (c *Conductor) HandleHeaders(ctx context.Context, headers *spynode.Headers) {
+func (s *Service) HandleHeaders(ctx context.Context, headers *spynode.Headers) {
+	// TODO Track headers for merkle proofs and to determine when RectifiedSettlement actions should
+	// be sent. --ce
 
 }
 
-func (c *Conductor) HandleInSync(ctx context.Context) {
+func (s *Service) HandleInSync(ctx context.Context) {
 
 }
 
-func (c *Conductor) HandleMessage(ctx context.Context, payload spynode.MessagePayload) {
+func (s *Service) HandleMessage(ctx context.Context, payload spynode.MessagePayload) {
 	switch msg := payload.(type) {
 	case *spynode.AcceptRegister:
 		logger.Info(ctx, "Spynode registration accepted")
 
-		if err := c.spyNodeClient.SubscribeContracts(ctx); err != nil {
+		if err := s.spyNodeClient.SubscribeContracts(ctx); err != nil {
 			logger.Error(ctx, "Failed to subscribe to contracts : %s", err)
 		}
 
-		nextMessageID := c.NextSpyNodeMessageID()
-		if err := c.spyNodeClient.Ready(ctx, nextMessageID); err != nil {
+		nextMessageID := s.NextSpyNodeMessageID()
+		if err := s.spyNodeClient.Ready(ctx, nextMessageID); err != nil {
 			logger.Error(ctx, "Failed to notify spynode ready : %s", err)
 		}
 

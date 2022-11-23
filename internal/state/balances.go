@@ -674,8 +674,8 @@ func (b *Balance) Deserialize(r io.Reader) error {
 }
 
 func balancePathPrefix(contractLockingScript bitcoin.Script, instrumentCode InstrumentCode) string {
-	return fmt.Sprintf("%s/%s/%s", balancePath, CalculateContractHash(contractLockingScript),
-		instrumentCode)
+	return fmt.Sprintf("%s/%s/%s", CalculateContractHash(contractLockingScript), instrumentCode,
+		balancePath)
 }
 
 func (v BalanceAdjustmentCode) MarshalText() ([]byte, error) {

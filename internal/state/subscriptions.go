@@ -214,7 +214,7 @@ func (c *SubscriptionCache) ReleaseMulti(ctx context.Context, contractLockingScr
 }
 
 func subscriptionPathPrefix(contractLockingScript bitcoin.Script) string {
-	return fmt.Sprintf("%s/%s", subscriptionPath, CalculateContractHash(contractLockingScript))
+	return fmt.Sprintf("%s/%s", CalculateContractHash(contractLockingScript), subscriptionPath)
 }
 
 func SubscriptionForType(typ SubscriptionType) SubscriptionValue {

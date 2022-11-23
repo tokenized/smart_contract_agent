@@ -216,8 +216,8 @@ func (c *BallotCache) ReleaseMulti(ctx context.Context, contractLockingScript bi
 }
 
 func ballotPathPrefix(contractLockingScript bitcoin.Script, voteTxID bitcoin.Hash32) string {
-	return fmt.Sprintf("%s/%s/%s", ballotPath, CalculateContractHash(contractLockingScript),
-		voteTxID)
+	return fmt.Sprintf("%s/%s/%s", CalculateContractHash(contractLockingScript), voteTxID,
+		ballotPath)
 }
 
 func (b *Ballot) MarkModified() {

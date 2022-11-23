@@ -14,7 +14,6 @@ import (
 	"github.com/tokenized/logger"
 	"github.com/tokenized/pkg/bitcoin"
 	"github.com/tokenized/pkg/bsor"
-	"github.com/tokenized/pkg/storage"
 	"github.com/tokenized/smart_contract_agent/internal/platform"
 	"github.com/tokenized/specification/dist/golang/actions"
 	"github.com/tokenized/specification/dist/golang/protocol"
@@ -24,7 +23,7 @@ import (
 
 const (
 	contractVersion = uint8(0)
-	contractPath    = "contracts"
+	contractPath    = "contract"
 )
 
 type ContractCache struct {
@@ -55,11 +54,6 @@ type Contract struct {
 	sync.Mutex `bsor:"-"`
 }
 
-type ContractLookup struct {
-	KeyHash       bitcoin.Hash32 `json:"key_hash"`
-	LockingScript bitcoin.Script `json:"locking_script"`
-}
-
 func NewContractCache(cache *cacher.Cache) (*ContractCache, error) {
 	typ := reflect.TypeOf(&Contract{})
 
@@ -84,38 +78,17 @@ func NewContractCache(cache *cacher.Cache) (*ContractCache, error) {
 	}, nil
 }
 
-func CopyContractData(ctx context.Context, store storage.CopyList,
+func (c *ContractCache) CopyContractData(ctx context.Context,
 	fromScript, toScript bitcoin.Script) error {
-
-	// TODO Check if any of these objects are in the cache and modified. --ce
-
-	fromHash := CalculateContractHash(fromScript)
-	toHash := CalculateContractHash(toScript)
-
 	start := time.Now()
 
-	from := fmt.Sprintf("%s/%s", instrumentPath, fromHash)
-	to := fmt.Sprintf("%s/%s", instrumentPath, toHash)
-	if err := CopyRecursive(ctx, store, from, to); err != nil {
-		return errors.Wrap(err, "copy instruments")
-	}
+	fromHash := CalculateContractHash(fromScript)
+	fromPathPrefix := fromHash.String()
+	toHash := CalculateContractHash(toScript)
+	toPathPrefix := toHash.String()
 
-	from = fmt.Sprintf("%s/%s", balancePath, fromHash)
-	to = fmt.Sprintf("%s/%s", balancePath, toHash)
-	if err := CopyRecursive(ctx, store, from, to); err != nil {
-		return errors.Wrap(err, "copy balances")
-	}
-
-	from = fmt.Sprintf("%s/%s", votePath, fromHash)
-	to = fmt.Sprintf("%s/%s", votePath, toHash)
-	if err := CopyRecursive(ctx, store, from, to); err != nil {
-		return errors.Wrap(err, "copy votes")
-	}
-
-	from = fmt.Sprintf("%s/%s", subscriptionPath, fromHash)
-	to = fmt.Sprintf("%s/%s", subscriptionPath, toHash)
-	if err := CopyRecursive(ctx, store, from, to); err != nil {
-		return errors.Wrap(err, "copy subscriptions")
+	if err := c.cacher.CopyRecursive(ctx, fromPathPrefix, toPathPrefix); err != nil {
+		return errors.Wrap(err, "copy recursive")
 	}
 
 	logger.InfoWithFields(ctx, []logger.Field{
@@ -124,37 +97,6 @@ func CopyContractData(ctx context.Context, store storage.CopyList,
 		logger.Stringer("to_locking_script", toScript),
 	}, "Copied contract data")
 	return nil
-}
-
-func (c *ContractCache) List(ctx context.Context, store storage.List) ([]*ContractLookup, error) {
-	paths, err := store.List(ctx, contractPath)
-	if err != nil {
-		return nil, errors.Wrap(err, "list")
-	}
-
-	var result []*ContractLookup
-	for _, path := range paths {
-		item, err := c.cacher.Get(ctx, c.typ, path)
-		if err != nil {
-			return nil, errors.Wrap(err, "get")
-		}
-
-		if item == nil {
-			return nil, fmt.Errorf("Not found: %s", path)
-		}
-
-		contract := item.(*Contract)
-		contract.Lock()
-		result = append(result, &ContractLookup{
-			KeyHash:       contract.KeyHash,
-			LockingScript: contract.LockingScript,
-		})
-		contract.Unlock()
-
-		c.cacher.Release(ctx, path)
-	}
-
-	return result, nil
 }
 
 func (c *ContractCache) Save(ctx context.Context, contract *Contract) {
@@ -196,7 +138,7 @@ func (c *ContractCache) Release(ctx context.Context, lockingScript bitcoin.Scrip
 }
 
 func ContractPath(lockingScript bitcoin.Script) string {
-	return fmt.Sprintf("%s/%s", contractPath, CalculateContractHash(lockingScript))
+	return fmt.Sprintf("%s/%s", CalculateContractHash(lockingScript), contractPath)
 }
 
 func (c *Contract) CheckIsAvailable(now uint64) error {

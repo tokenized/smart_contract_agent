@@ -66,8 +66,8 @@ func Test_Proposal_Valid(t *testing.T) {
 
 	balances := state.MockBalances(ctx, caches, contract, instrument, 1000)
 
-	agent, err := NewAgent(contractKey, DefaultConfig(), contract, feeLockingScript, caches.Caches,
-		store, broadcaster, nil, nil, scheduler, mockAgentFactory)
+	agent, err := NewAgent(ctx, contractKey, contractLockingScript, DefaultConfig(),
+		feeLockingScript, caches.Caches, store, broadcaster, nil, nil, scheduler, mockAgentFactory)
 	if err != nil {
 		t.Fatalf("Failed to create agent : %s", err)
 	}
@@ -116,6 +116,7 @@ func Test_Proposal_Valid(t *testing.T) {
 		t.Fatalf("Failed to serialize proposal action : %s", err)
 	}
 
+	proposalScriptOutputIndex := len(tx.Outputs)
 	if err := tx.AddOutput(proposalScript, 0, false, false); err != nil {
 		t.Fatalf("Failed to add proposal action output : %s", err)
 	}
@@ -153,7 +154,10 @@ func Test_Proposal_Valid(t *testing.T) {
 	}
 
 	now := uint64(time.Now().UnixNano())
-	if err := agent.Process(ctx, transaction, []actions.Action{proposal}, now); err != nil {
+	if err := agent.Process(ctx, transaction, []Action{{
+		OutputIndex: proposalScriptOutputIndex,
+		Action:      proposal,
+	}}, now); err != nil {
 		t.Fatalf("Failed to process transaction : %s", err)
 	}
 
@@ -263,6 +267,7 @@ func Test_Proposal_Valid(t *testing.T) {
 	}
 
 	close(schedulerInterrupt)
+	agent.Release(ctx)
 	caches.Caches.Instruments.Release(ctx, contractLockingScript, instrument.InstrumentCode)
 	caches.Caches.Contracts.Release(ctx, contractLockingScript)
 	caches.StopTestCaches()
@@ -296,8 +301,8 @@ func Test_Ballots_Valid(t *testing.T) {
 	balancesToVote := balances
 
 	_, feeLockingScript, _ := state.MockKey()
-	agent, err := NewAgent(contractKey, DefaultConfig(), contract, feeLockingScript, caches.Caches,
-		store, broadcaster, nil, nil, nil, nil)
+	agent, err := NewAgent(ctx, contractKey, contractLockingScript, DefaultConfig(),
+		feeLockingScript, caches.Caches, store, broadcaster, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("Failed to create agent : %s", err)
 	}
@@ -346,6 +351,7 @@ func Test_Ballots_Valid(t *testing.T) {
 			t.Fatalf("Failed to serialize ballot cast action : %s", err)
 		}
 
+		ballotCastScriptOutputIndex := len(tx.Outputs)
 		if err := tx.AddOutput(ballotCastScript, 0, false, false); err != nil {
 			t.Fatalf("Failed to add ballot cast action output : %s", err)
 		}
@@ -384,7 +390,10 @@ func Test_Ballots_Valid(t *testing.T) {
 		}
 
 		now := uint64(time.Now().UnixNano())
-		if err := agent.Process(ctx, transaction, []actions.Action{ballotCast}, now); err != nil {
+		if err := agent.Process(ctx, transaction, []Action{{
+			OutputIndex: ballotCastScriptOutputIndex,
+			Action:      ballotCast,
+		}}, now); err != nil {
 			t.Fatalf("Failed to process transaction : %s", err)
 		}
 
@@ -487,6 +496,7 @@ func Test_Ballots_Valid(t *testing.T) {
 		}
 	}
 
+	agent.Release(ctx)
 	caches.Caches.Votes.Release(ctx, contractLockingScript, voteTxID)
 	caches.Caches.Instruments.Release(ctx, contractLockingScript, instrument.InstrumentCode)
 	caches.Caches.Contracts.Release(ctx, contractLockingScript)

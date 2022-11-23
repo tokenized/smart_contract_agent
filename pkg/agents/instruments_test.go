@@ -28,11 +28,12 @@ func Test_Instruments_Definition(t *testing.T) {
 
 	caches := state.StartTestCaches(ctx, t, store, cacher.DefaultConfig(), time.Second)
 
-	contractKey, contractLockingScript, adminKey, adminLockingScript, contract := state.MockContract(ctx, caches)
+	contractKey, contractLockingScript, adminKey, adminLockingScript, _ := state.MockContract(ctx,
+		caches)
 	_, feeLockingScript, _ := state.MockKey()
 
-	agent, err := NewAgent(contractKey, DefaultConfig(), contract, feeLockingScript, caches.Caches,
-		store, broadcaster, nil, nil, nil, nil)
+	agent, err := NewAgent(ctx, contractKey, contractLockingScript, DefaultConfig(),
+		feeLockingScript, caches.Caches, store, broadcaster, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("Failed to create agent : %s", err)
 	}
@@ -96,6 +97,7 @@ func Test_Instruments_Definition(t *testing.T) {
 			t.Fatalf("Failed to serialize instrument definition action : %s", err)
 		}
 
+		definitionScriptOutputIndex := len(tx.Outputs)
 		if err := tx.AddOutput(definitionScript, 0, false, false); err != nil {
 			t.Fatalf("Failed to add instrument definition action output : %s", err)
 		}
@@ -132,7 +134,10 @@ func Test_Instruments_Definition(t *testing.T) {
 		}
 
 		now := uint64(time.Now().UnixNano())
-		if err := agent.Process(ctx, transaction, []actions.Action{definition}, now); err != nil {
+		if err := agent.Process(ctx, transaction, []Action{{
+			OutputIndex: definitionScriptOutputIndex,
+			Action:      definition,
+		}}, now); err != nil {
 			t.Fatalf("Failed to process transaction : %s", err)
 		}
 
@@ -190,6 +195,7 @@ func Test_Instruments_Definition(t *testing.T) {
 		}
 	}
 
+	agent.Release(ctx)
 	caches.Caches.Contracts.Release(ctx, contractLockingScript)
 	caches.StopTestCaches()
 }
@@ -201,11 +207,11 @@ func Test_Instruments_Amendment_Basic(t *testing.T) {
 
 	caches := state.StartTestCaches(ctx, t, store, cacher.DefaultConfig(), time.Second)
 
-	contractKey, contractLockingScript, adminKey, adminLockingScript, contract, instrument := state.MockInstrument(ctx, caches)
+	contractKey, contractLockingScript, adminKey, adminLockingScript, _, instrument := state.MockInstrument(ctx, caches)
 	_, feeLockingScript, _ := state.MockKey()
 
-	agent, err := NewAgent(contractKey, DefaultConfig(), contract, feeLockingScript, caches.Caches,
-		store, broadcaster, nil, nil, nil, nil)
+	agent, err := NewAgent(ctx, contractKey, contractLockingScript, DefaultConfig(),
+		feeLockingScript, caches.Caches, store, broadcaster, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("Failed to create agent : %s", err)
 	}
@@ -262,6 +268,7 @@ func Test_Instruments_Amendment_Basic(t *testing.T) {
 		t.Fatalf("Failed to serialize instrument modification action : %s", err)
 	}
 
+	modificationScriptOutputIndex := len(tx.Outputs)
 	if err := tx.AddOutput(modificationScript, 0, false, false); err != nil {
 		t.Fatalf("Failed to add instrument modification action output : %s", err)
 	}
@@ -298,7 +305,10 @@ func Test_Instruments_Amendment_Basic(t *testing.T) {
 	}
 
 	now := uint64(time.Now().UnixNano())
-	if err := agent.Process(ctx, transaction, []actions.Action{modification}, now); err != nil {
+	if err := agent.Process(ctx, transaction, []Action{{
+		OutputIndex: modificationScriptOutputIndex,
+		Action:      modification,
+	}}, now); err != nil {
 		t.Fatalf("Failed to process transaction : %s", err)
 	}
 
@@ -346,6 +356,7 @@ func Test_Instruments_Amendment_Basic(t *testing.T) {
 		t.Errorf("Instrument payload not a currency")
 	}
 
+	agent.Release(ctx)
 	caches.Caches.Instruments.Release(ctx, contractLockingScript, instrument.InstrumentCode)
 	caches.Caches.Contracts.Release(ctx, contractLockingScript)
 	caches.StopTestCaches()
@@ -358,11 +369,12 @@ func Test_Instruments_Amendment_Payload(t *testing.T) {
 
 	caches := state.StartTestCaches(ctx, t, store, cacher.DefaultConfig(), time.Second)
 
-	contractKey, contractLockingScript, adminKey, adminLockingScript, contract, instrument := state.MockInstrument(ctx, caches)
+	contractKey, contractLockingScript, adminKey, adminLockingScript, _, instrument := state.MockInstrument(ctx,
+		caches)
 	_, feeLockingScript, _ := state.MockKey()
 
-	agent, err := NewAgent(contractKey, DefaultConfig(), contract, feeLockingScript, caches.Caches,
-		store, broadcaster, nil, nil, nil, nil)
+	agent, err := NewAgent(ctx, contractKey, contractLockingScript, DefaultConfig(),
+		feeLockingScript, caches.Caches, store, broadcaster, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("Failed to create agent : %s", err)
 	}
@@ -437,6 +449,7 @@ func Test_Instruments_Amendment_Payload(t *testing.T) {
 		t.Fatalf("Failed to serialize instrument modification action : %s", err)
 	}
 
+	modificationScriptOutputIndex := len(tx.Outputs)
 	if err := tx.AddOutput(modificationScript, 0, false, false); err != nil {
 		t.Fatalf("Failed to add instrument modification action output : %s", err)
 	}
@@ -473,7 +486,10 @@ func Test_Instruments_Amendment_Payload(t *testing.T) {
 	}
 
 	now := uint64(time.Now().UnixNano())
-	if err := agent.Process(ctx, transaction, []actions.Action{modification}, now); err != nil {
+	if err := agent.Process(ctx, transaction, []Action{{
+		OutputIndex: modificationScriptOutputIndex,
+		Action:      modification,
+	}}, now); err != nil {
 		t.Fatalf("Failed to process transaction : %s", err)
 	}
 
@@ -526,6 +542,7 @@ func Test_Instruments_Amendment_Payload(t *testing.T) {
 			instruments.CurrenciesAustralianDollar)
 	}
 
+	agent.Release(ctx)
 	caches.Caches.Instruments.Release(ctx, contractLockingScript, instrument.InstrumentCode)
 	caches.Caches.Contracts.Release(ctx, contractLockingScript)
 	caches.StopTestCaches()
@@ -555,8 +572,8 @@ func Test_Instruments_Amendment_Proposal(t *testing.T) {
 
 	instrument := state.MockInstrumentOnly(ctx, caches, contract)
 
-	agent, err := NewAgent(contractKey, DefaultConfig(), contract, feeLockingScript, caches.Caches,
-		store, broadcaster, nil, nil, nil, nil)
+	agent, err := NewAgent(ctx, contractKey, contractLockingScript, DefaultConfig(),
+		feeLockingScript, caches.Caches, store, broadcaster, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("Failed to create agent : %s", err)
 	}
@@ -624,6 +641,7 @@ func Test_Instruments_Amendment_Proposal(t *testing.T) {
 		t.Fatalf("Failed to serialize instrument modification action : %s", err)
 	}
 
+	modificationScriptOutputIndex := len(tx.Outputs)
 	if err := tx.AddOutput(modificationScript, 0, false, false); err != nil {
 		t.Fatalf("Failed to add instrument modification action output : %s", err)
 	}
@@ -660,7 +678,10 @@ func Test_Instruments_Amendment_Proposal(t *testing.T) {
 	}
 
 	now := uint64(time.Now().UnixNano())
-	if err := agent.Process(ctx, transaction, []actions.Action{modification}, now); err != nil {
+	if err := agent.Process(ctx, transaction, []Action{{
+		OutputIndex: modificationScriptOutputIndex,
+		Action:      modification,
+	}}, now); err != nil {
 		t.Fatalf("Failed to process transaction : %s", err)
 	}
 
@@ -708,6 +729,7 @@ func Test_Instruments_Amendment_Proposal(t *testing.T) {
 		t.Errorf("Instrument payload not a currency")
 	}
 
+	agent.Release(ctx)
 	caches.Caches.Votes.Release(ctx, contractLockingScript, voteTxID)
 	caches.Caches.Instruments.Release(ctx, contractLockingScript, instrument.InstrumentCode)
 	caches.Caches.Contracts.Release(ctx, contractLockingScript)

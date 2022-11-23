@@ -12,7 +12,7 @@ import (
 )
 
 func (a *Agent) processMessage(ctx context.Context, transaction *state.Transaction,
-	message *actions.Message, now uint64) error {
+	message *actions.Message, outputIndex int, now uint64) error {
 
 	// Verify appropriate output belongs to this contract.
 	if len(message.ReceiverIndexes) > 1 {
@@ -66,12 +66,12 @@ func (a *Agent) processMessage(ctx context.Context, transaction *state.Transacti
 
 	switch p := payload.(type) {
 	case *messages.SettlementRequest:
-		if err := a.processSettlementRequest(ctx, transaction, p, now); err != nil {
+		if err := a.processSettlementRequest(ctx, transaction, outputIndex, p, now); err != nil {
 			return errors.Wrapf(err, "settlement request")
 		}
 
 	case *messages.SignatureRequest:
-		if err := a.processSignatureRequest(ctx, transaction, p, now); err != nil {
+		if err := a.processSignatureRequest(ctx, transaction, outputIndex, p, now); err != nil {
 			return errors.Wrapf(err, "settlement request")
 		}
 	}

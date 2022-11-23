@@ -26,7 +26,7 @@ var (
 type Config struct {
 	IsTest                  bool            `default:"true" envconfig:"IS_TEST" json:"is_test"`
 	FeeRate                 float32         `default:"0.05" envconfig:"FEE_RATE" json:"fee_rate"`
-	DustFeeRate             float32         `default:"0.00" envconfig:"DUST_FEE_RATE" json:"dust_fee_rate"`
+	DustFeeRate             float32         `default:"0.0" envconfig:"DUST_FEE_RATE" json:"dust_fee_rate"`
 	MinFeeRate              float32         `default:"0.05" envconfig:"MIN_FEE_RATE" json:"min_fee_rate"`
 	MultiContractExpiration config.Duration `default:"1h" envconfig:"MULTI_CONTRACT_EXPIRATION" json:"multi_contract_expiration"`
 }
@@ -65,12 +65,12 @@ type Agent struct {
 	lock sync.Mutex
 }
 
-type Fetcher interface {
-	GetTx(context.Context, bitcoin.Hash32) (*wire.MsgTx, error)
-}
-
 type Broadcaster interface {
 	BroadcastTx(context.Context, *wire.MsgTx, []uint32) error
+}
+
+type Fetcher interface {
+	GetTx(context.Context, bitcoin.Hash32) (*wire.MsgTx, error)
 }
 
 type BlockHeaders interface {
@@ -78,31 +78,23 @@ type BlockHeaders interface {
 	GetHeader(context.Context, int) (*wire.BlockHeader, error)
 }
 
-type TransactionWithOutputs interface {
-	TxID() bitcoin.Hash32
-	GetMsgTx() *wire.MsgTx
-
-	InputCount() int
-	Input(index int) *wire.TxIn
-	InputOutput(index int) (*wire.TxOut, error) // The output being spent by the input
-
-	OutputCount() int
-	Output(index int) *wire.TxOut
-}
-
 type AgentFactory interface {
 	GetAgent(ctx context.Context, lockingScript bitcoin.Script) (*Agent, error)
-	ReleaseAgent(ctx context.Context, agent *Agent)
 }
 
-func NewAgent(key bitcoin.Key, config Config, contract *state.Contract,
+func NewAgent(ctx context.Context, key bitcoin.Key, lockingScript bitcoin.Script, config Config,
 	feeLockingScript bitcoin.Script, caches *state.Caches, store storage.CopyList,
-	broadcaster Broadcaster, fetcher Fetcher, headers BlockHeaders,
-	scheduler *platform.Scheduler, factory AgentFactory) (*Agent, error) {
+	broadcaster Broadcaster, fetcher Fetcher, headers BlockHeaders, scheduler *platform.Scheduler,
+	factory AgentFactory) (*Agent, error) {
 
-	contract.Lock()
-	lockingScript := contract.LockingScript
-	contract.Unlock()
+	contract, err := caches.Contracts.Get(ctx, lockingScript)
+	if err != nil {
+		return nil, errors.Wrap(err, "get contract")
+	}
+
+	if contract == nil {
+		return nil, errors.New("Contract not found")
+	}
 
 	result := &Agent{
 		key:              key,
@@ -122,12 +114,27 @@ func NewAgent(key bitcoin.Key, config Config, contract *state.Contract,
 	return result, nil
 }
 
+func (a *Agent) Copy(ctx context.Context) *Agent {
+	// Call get on the contract again to increment its users so the release of this copy will be
+	// accurate.
+	a.caches.Contracts.Get(ctx, a.LockingScript())
+
+	return a
+}
+
 func (a *Agent) Release(ctx context.Context) {
 	a.caches.Contracts.Release(ctx, a.LockingScript())
 }
 
 func (a *Agent) Contract() *state.Contract {
 	return a.contract
+}
+
+func (a *Agent) ContractHash() state.ContractHash {
+	a.lock.Lock()
+	defer a.lock.Unlock()
+
+	return state.CalculateContractHash(a.lockingScript)
 }
 
 func (a *Agent) LockingScript() bitcoin.Script {
@@ -164,22 +171,18 @@ type IdentityOracle struct {
 }
 
 func (a *Agent) GetIdentityOracles(ctx context.Context) ([]*IdentityOracle, error) {
-	a.lock.Lock()
-	contract := a.contract
-	a.lock.Unlock()
+	a.contract.Lock()
+	defer a.contract.Unlock()
 
-	contract.Lock()
-	defer contract.Unlock()
-
-	if contract.Formation == nil {
+	if a.contract.Formation == nil {
 		logger.WarnWithFields(ctx, []logger.Field{
-			logger.Stringer("contract_locking_script", contract.LockingScript),
+			logger.Stringer("contract_locking_script", a.contract.LockingScript),
 		}, "Missing contract formation")
 		return nil, errors.New("Missing contract formation")
 	}
 
 	var result []*IdentityOracle
-	for i, oracle := range contract.Formation.Oracles {
+	for i, oracle := range a.contract.Formation.Oracles {
 		if len(oracle.OracleTypes) != 0 {
 			isIdentity := false
 			for _, typ := range oracle.OracleTypes {
@@ -197,7 +200,7 @@ func (a *Agent) GetIdentityOracles(ctx context.Context) ([]*IdentityOracle, erro
 		ra, err := bitcoin.DecodeRawAddress(oracle.EntityContract)
 		if err != nil {
 			logger.WarnWithFields(ctx, []logger.Field{
-				logger.Stringer("contract_locking_script", contract.LockingScript),
+				logger.Stringer("contract_locking_script", a.contract.LockingScript),
 			}, "Invalid oracle entity contract address %d : %s", i, err)
 			continue
 		}
@@ -205,7 +208,7 @@ func (a *Agent) GetIdentityOracles(ctx context.Context) ([]*IdentityOracle, erro
 		lockingScript, err := ra.LockingScript()
 		if err != nil {
 			logger.WarnWithFields(ctx, []logger.Field{
-				logger.Stringer("contract_locking_script", contract.LockingScript),
+				logger.Stringer("contract_locking_script", a.contract.LockingScript),
 			}, "Failed to create oracle entity contract locking script %d : %s", i, err)
 			continue
 		}
@@ -213,7 +216,7 @@ func (a *Agent) GetIdentityOracles(ctx context.Context) ([]*IdentityOracle, erro
 		services, err := a.caches.Services.Get(ctx, lockingScript)
 		if err != nil {
 			logger.WarnWithFields(ctx, []logger.Field{
-				logger.Stringer("contract_locking_script", contract.LockingScript),
+				logger.Stringer("contract_locking_script", a.contract.LockingScript),
 				logger.Stringer("service_locking_script", lockingScript),
 			}, "Failed to get oracle entity contract service %d : %s", i, err)
 			continue
@@ -221,7 +224,7 @@ func (a *Agent) GetIdentityOracles(ctx context.Context) ([]*IdentityOracle, erro
 
 		if services == nil {
 			logger.WarnWithFields(ctx, []logger.Field{
-				logger.Stringer("contract_locking_script", contract.LockingScript),
+				logger.Stringer("contract_locking_script", a.contract.LockingScript),
 				logger.Stringer("service_locking_script", lockingScript),
 			}, "Oracle entity contract service not found %d : %s", i, err)
 			continue
@@ -332,7 +335,7 @@ func (a *Agent) ActionIsSupported(action actions.Action) bool {
 		*actions.InstrumentModification:
 		return true
 
-	case *actions.Transfer, *actions.Settlement:
+	case *actions.Transfer, *actions.Settlement, *actions.RectificationSettlement:
 		return true
 
 	case *actions.Proposal, *actions.Vote, *actions.BallotCast, *actions.BallotCounted,
@@ -340,7 +343,7 @@ func (a *Agent) ActionIsSupported(action actions.Action) bool {
 		return true
 
 	case *actions.Order, *actions.Freeze, *actions.Thaw, *actions.Confiscation,
-		*actions.Reconciliation:
+		*actions.DeprecatedReconciliation:
 		return true
 
 	case *actions.Message, *actions.Rejection:
@@ -352,7 +355,7 @@ func (a *Agent) ActionIsSupported(action actions.Action) bool {
 }
 
 func (a *Agent) Process(ctx context.Context, transaction *state.Transaction,
-	actions []actions.Action, now uint64) error {
+	actions []Action, now uint64) error {
 
 	ctx = logger.ContextWithLogFields(ctx, logger.Stringer("trace", uuid.New()))
 
@@ -364,8 +367,9 @@ func (a *Agent) Process(ctx context.Context, transaction *state.Transaction,
 	}, "Processing transaction")
 
 	for i, action := range actions {
-		if err := a.processAction(ctx, transaction, txid, action, now); err != nil {
-			return errors.Wrapf(err, "process action %d: %s", i, action.Code())
+		if err := a.processAction(ctx, transaction, txid, action.Action, action.OutputIndex,
+			now); err != nil {
+			return errors.Wrapf(err, "process action %d: %s", i, action.Action.Code())
 		}
 	}
 
@@ -373,91 +377,112 @@ func (a *Agent) Process(ctx context.Context, transaction *state.Transaction,
 }
 
 func (a *Agent) processAction(ctx context.Context, transaction *state.Transaction,
-	txid bitcoin.Hash32, action actions.Action, now uint64) error {
+	txid bitcoin.Hash32, action actions.Action, outputIndex int, now uint64) error {
+
+	processed := transaction.ContractProcessed(a.ContractHash(), outputIndex)
+	if len(processed) > 0 {
+		if processed[0].ResponseTxID == nil {
+			println("response txid is nil")
+		}
+		logger.InfoWithFields(ctx, []logger.Field{
+			logger.Stringer("txid", txid),
+			logger.Int("output_index", outputIndex),
+			logger.String("action_code", action.Code()),
+			logger.String("action_name", action.TypeName()),
+			logger.Stringer("response_txid", processed[0].ResponseTxID),
+		}, "Action already processed")
+		return nil
+	}
 
 	logger.InfoWithFields(ctx, []logger.Field{
 		logger.Stringer("txid", txid),
+		logger.Int("output_index", outputIndex),
 		logger.String("action_code", action.Code()),
 		logger.String("action_name", action.TypeName()),
 	}, "Processing action")
 
 	if err := action.Validate(); err != nil {
-		return errors.Wrap(a.sendRejection(ctx, transaction,
+		return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
 			platform.NewRejectError(actions.RejectionsMsgMalformed, err.Error()), now), "reject")
 	}
 
 	switch act := action.(type) {
 	case *actions.ContractOffer:
-		return a.processContractOffer(ctx, transaction, act, now)
+		return a.processContractOffer(ctx, transaction, act, outputIndex, now)
 
 	case *actions.ContractAmendment:
-		return a.processContractAmendment(ctx, transaction, act, now)
+		return a.processContractAmendment(ctx, transaction, act, outputIndex, now)
 
 	case *actions.ContractFormation:
-		return a.processContractFormation(ctx, transaction, act, now)
+		return a.processContractFormation(ctx, transaction, act, outputIndex, now)
 
 	case *actions.ContractAddressChange:
-		return a.processContractAddressChange(ctx, transaction, act, now)
+		return a.processContractAddressChange(ctx, transaction, act, outputIndex, now)
 
 	case *actions.BodyOfAgreementOffer:
-		return a.processBodyOfAgreementOffer(ctx, transaction, act, now)
+		return a.processBodyOfAgreementOffer(ctx, transaction, act, outputIndex, now)
 
 	case *actions.BodyOfAgreementAmendment:
-		return a.processBodyOfAgreementAmendment(ctx, transaction, act, now)
+		return a.processBodyOfAgreementAmendment(ctx, transaction, act, outputIndex, now)
 
 	case *actions.BodyOfAgreementFormation:
-		return a.processBodyOfAgreementFormation(ctx, transaction, act, now)
+		return a.processBodyOfAgreementFormation(ctx, transaction, act, outputIndex, now)
 
 	case *actions.InstrumentDefinition:
-		return a.processInstrumentDefinition(ctx, transaction, act, now)
+		return a.processInstrumentDefinition(ctx, transaction, act, outputIndex, now)
 
 	case *actions.InstrumentModification:
-		return a.processInstrumentModification(ctx, transaction, act, now)
+		return a.processInstrumentModification(ctx, transaction, act, outputIndex, now)
 
 	case *actions.InstrumentCreation:
-		return a.processInstrumentCreation(ctx, transaction, act, now)
+		return a.processInstrumentCreation(ctx, transaction, act, outputIndex, now)
 
 	case *actions.Transfer:
-		return a.processTransfer(ctx, transaction, act, now)
+		return a.processTransfer(ctx, transaction, act, outputIndex, now)
 
 	case *actions.Settlement:
-		return a.processSettlement(ctx, transaction, act, now)
+		return a.processSettlement(ctx, transaction, act, outputIndex, now)
+
+	case *actions.RectificationSettlement:
+		// TODO Create function that watches for "double spent" requests and sends Rectification
+		// Settlements. --ce
+		return a.processRectificationSettlement(ctx, transaction, act, outputIndex, now)
 
 	case *actions.Proposal:
-		return a.processProposal(ctx, transaction, act, now)
+		return a.processProposal(ctx, transaction, act, outputIndex, now)
 
 	case *actions.Vote:
-		return a.processVote(ctx, transaction, act, now)
+		return a.processVote(ctx, transaction, act, outputIndex, now)
 
 	case *actions.BallotCast:
-		return a.processBallotCast(ctx, transaction, act, now)
+		return a.processBallotCast(ctx, transaction, act, outputIndex, now)
 
 	case *actions.BallotCounted:
-		return a.processBallotCounted(ctx, transaction, act, now)
+		return a.processBallotCounted(ctx, transaction, act, outputIndex, now)
 
 	case *actions.Result:
-		return a.processVoteResult(ctx, transaction, act, now)
+		return a.processVoteResult(ctx, transaction, act, outputIndex, now)
 
 	case *actions.Order:
-		return a.processOrder(ctx, transaction, act, now)
+		return a.processOrder(ctx, transaction, act, outputIndex, now)
 
 	case *actions.Freeze:
-		return a.processFreeze(ctx, transaction, act, now)
+		return a.processFreeze(ctx, transaction, act, outputIndex, now)
 
 	case *actions.Thaw:
-		return a.processThaw(ctx, transaction, act, now)
+		return a.processThaw(ctx, transaction, act, outputIndex, now)
 
 	case *actions.Confiscation:
-		return a.processConfiscation(ctx, transaction, act, now)
+		return a.processConfiscation(ctx, transaction, act, outputIndex, now)
 
-	case *actions.Reconciliation:
-		return a.processReconciliation(ctx, transaction, act, now)
+	case *actions.DeprecatedReconciliation:
+		return a.processReconciliation(ctx, transaction, act, outputIndex, now)
 
 	case *actions.Message:
-		return a.processMessage(ctx, transaction, act, now)
+		return a.processMessage(ctx, transaction, act, outputIndex, now)
 
 	case *actions.Rejection:
-		return a.processRejection(ctx, transaction, act, now)
+		return a.processRejection(ctx, transaction, act, outputIndex, now)
 
 	default:
 		return fmt.Errorf("Action not supported: %s", action.Code())

@@ -31,14 +31,19 @@ type TransactionCache struct {
 	typ    reflect.Type
 }
 
+type Processed struct {
+	Contract     ContractHash    `bsor:"1" json:"contract"`
+	OutputIndex  int             `bsor:"2" json:"output_index"`
+	ResponseTxID *bitcoin.Hash32 `bsor:"3" json:"response_txid"`
+}
+
 type Transaction struct {
 	Tx           *wire.MsgTx                 `bsor:"1" json:"tx"`
 	State        wallet.TxState              `bsor:"2" json:"state,omitempty"`
 	MerkleProofs []*merkle_proof.MerkleProof `bsor:"3" json:"merkle_proofs,omitempty"`
 	SpentOutputs []*expanded_tx.Output       `bsor:"4" json:"spent_outputs,omitempty"` // outputs being spent by inputs in Tx
 
-	IsProcessed   bool             `bsor:"5" json:"is_processed"`
-	ResponseTxIDs []bitcoin.Hash32 `bsor:"6" json:"response_txids"`
+	Processed []*Processed `bsor:"6" json:"processed,omitempty"`
 
 	// ConflictingTxIDs lists txs that have conflicting inputs and will "double spend" this tx if
 	// confirmed.
@@ -46,7 +51,7 @@ type Transaction struct {
 
 	Ancestors expanded_tx.AncestorTxs `bsor:"-" json:"ancestors,omitempty"`
 
-	isProcessing bool
+	isProcessing []ContractHash
 	isModified   bool
 	sync.Mutex   `bsor:"-"`
 }
@@ -272,38 +277,69 @@ func (c *TransactionCache) Release(ctx context.Context, txid bitcoin.Hash32) {
 	c.cacher.Release(ctx, TransactionPath(txid))
 }
 
-func (tx *Transaction) SetIsProcessing() bool {
-	if tx.isProcessing {
-		return false
-	}
-
-	tx.isProcessing = true
-	return true
-}
-
-func (tx *Transaction) ClearIsProcessing() {
-	tx.isProcessing = false
-}
-
-func (tx *Transaction) SetProcessed() {
-	if tx.IsProcessed {
-		return
-	}
-
-	tx.IsProcessed = true
-	tx.isModified = true
-}
-
-func (tx *Transaction) AddResponseTxID(txid bitcoin.Hash32) bool {
-	for _, id := range tx.ResponseTxIDs {
-		if id.Equal(&txid) {
+func (tx *Transaction) SetIsProcessing(contract ContractHash) bool {
+	for _, c := range tx.isProcessing {
+		if c.Equal(contract) {
 			return false
 		}
 	}
 
-	tx.ResponseTxIDs = append(tx.ResponseTxIDs, txid)
+	tx.isProcessing = append(tx.isProcessing, contract)
+	return true
+}
+
+func (tx *Transaction) ClearIsProcessing(contract ContractHash) {
+	for i, c := range tx.isProcessing {
+		if c.Equal(contract) {
+			tx.isProcessing = append(tx.isProcessing[:i], tx.isProcessing[i+1:]...)
+			return
+		}
+	}
+}
+
+func (tx *Transaction) SetProcessed(contract ContractHash, outputIndex int) bool {
+	for _, processed := range tx.Processed {
+		if processed.Contract.Equal(contract) && processed.OutputIndex == outputIndex {
+			return false
+		}
+	}
+
+	tx.Processed = append(tx.Processed, &Processed{
+		Contract:    contract,
+		OutputIndex: outputIndex,
+	})
 	tx.isModified = true
 	return true
+}
+
+func (tx *Transaction) AddResponseTxID(contract ContractHash, outputIndex int,
+	txid bitcoin.Hash32) bool {
+
+	for _, processed := range tx.Processed {
+		if processed.Contract.Equal(contract) && processed.OutputIndex == outputIndex &&
+			processed.ResponseTxID != nil && processed.ResponseTxID.Equal(&txid) {
+			return false
+		}
+	}
+
+	tx.Processed = append(tx.Processed, &Processed{
+		Contract:     contract,
+		OutputIndex:  outputIndex,
+		ResponseTxID: &txid,
+	})
+	tx.isModified = true
+	return true
+}
+
+func (tx *Transaction) ContractProcessed(contract ContractHash, outputIndex int) []*Processed {
+	var result []*Processed
+	for _, r := range tx.Processed {
+		if r.Contract.Equal(contract) && r.OutputIndex == outputIndex {
+			result = append(result, r)
+		}
+	}
+
+	return result
 }
 
 func TransactionPath(txid bitcoin.Hash32) string {
@@ -328,12 +364,12 @@ func (tx *Transaction) IsModified() bool {
 
 func (t *Transaction) CacheCopy() cacher.CacheValue {
 	result := &Transaction{
-		State:         t.State,
-		MerkleProofs:  make([]*merkle_proof.MerkleProof, len(t.MerkleProofs)),
-		SpentOutputs:  make([]*expanded_tx.Output, len(t.SpentOutputs)),
-		IsProcessed:   t.IsProcessed,
-		ResponseTxIDs: make([]bitcoin.Hash32, len(t.ResponseTxIDs)),
-		Ancestors:     make(expanded_tx.AncestorTxs, len(t.Ancestors)),
+		State:        t.State,
+		MerkleProofs: make([]*merkle_proof.MerkleProof, len(t.MerkleProofs)),
+		SpentOutputs: make([]*expanded_tx.Output, len(t.SpentOutputs)),
+		Processed:    make([]*Processed, len(t.Processed)),
+		Ancestors:    make(expanded_tx.AncestorTxs, len(t.Ancestors)),
+		// isProcessing: make([]ContractHash, len(t.isProcessing)),
 	}
 
 	if t.Tx != nil {
@@ -350,14 +386,19 @@ func (t *Transaction) CacheCopy() cacher.CacheValue {
 		result.SpentOutputs[i] = &so
 	}
 
-	for i, responseTxID := range t.ResponseTxIDs {
-		result.ResponseTxIDs[i] = responseTxID
+	for i, response := range t.Processed {
+		r := response.Copy()
+		result.Processed[i] = &r
 	}
 
 	for i, ancestor := range t.Ancestors {
 		a := *ancestor
 		result.Ancestors[i] = &a
 	}
+
+	// for i, ip := range t.isProcessing {
+	// 	copy(result.isProcessing[i][:], ip[:])
+	// }
 
 	return result
 }
@@ -484,4 +525,15 @@ func (tx *Transaction) GetTxID() bitcoin.Hash32 {
 	tx.Lock()
 	defer tx.Unlock()
 	return *tx.Tx.TxHash()
+}
+
+func (r Processed) Copy() Processed {
+	var result Processed
+	copy(result.Contract[:], r.Contract[:])
+	result.OutputIndex = r.OutputIndex
+	if r.ResponseTxID != nil {
+		result.ResponseTxID = &bitcoin.Hash32{}
+		copy(result.ResponseTxID[:], r.ResponseTxID[:])
+	}
+	return result
 }
