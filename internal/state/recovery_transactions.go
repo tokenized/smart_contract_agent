@@ -110,14 +110,29 @@ func (txs *RecoveryTransactions) Append(tx *RecoveryTransaction) {
 	txs.isModified = true
 }
 
-func (txs *RecoveryTransactions) Remove(txid bitcoin.Hash32, outputIndex int) bool {
+func (txs *RecoveryTransactions) Remove(txid bitcoin.Hash32) bool {
 	// Remove from recovery requests.
 	for i, tx := range txs.Transactions {
 		if !tx.TxID.Equal(&txid) {
 			continue
 		}
 
-		if tx.Remove(outputIndex) {
+		txs.Transactions = append(txs.Transactions[:i], txs.Transactions[i+1:]...)
+		txs.isModified = true
+		return true
+	}
+
+	return false
+}
+
+func (txs *RecoveryTransactions) RemoveOutput(txid bitcoin.Hash32, outputIndex int) bool {
+	// Remove from recovery requests.
+	for i, tx := range txs.Transactions {
+		if !tx.TxID.Equal(&txid) {
+			continue
+		}
+
+		if tx.RemoveOutput(outputIndex) {
 			if len(tx.OutputIndexes) == 0 {
 				txs.Transactions = append(txs.Transactions[:i], txs.Transactions[i+1:]...)
 			}
@@ -132,7 +147,7 @@ func (txs *RecoveryTransactions) Remove(txid bitcoin.Hash32, outputIndex int) bo
 	return false
 }
 
-func (tx *RecoveryTransaction) Remove(outputIndex int) bool {
+func (tx *RecoveryTransaction) RemoveOutput(outputIndex int) bool {
 	for i, oi := range tx.OutputIndexes {
 		if oi == outputIndex {
 			tx.OutputIndexes = append(tx.OutputIndexes[:i], tx.OutputIndexes[i+1:]...)
@@ -156,6 +171,10 @@ func (txs *RecoveryTransactions) IsModified() bool {
 }
 
 func (txs *RecoveryTransactions) CacheCopy() cacher.CacheValue {
+	return txs.Copy()
+}
+
+func (txs *RecoveryTransactions) Copy() *RecoveryTransactions {
 	result := &RecoveryTransactions{
 		Transactions: make([]*RecoveryTransaction, len(txs.Transactions)),
 	}

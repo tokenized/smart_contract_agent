@@ -29,7 +29,7 @@ type Config struct {
 	DustFeeRate             float32         `default:"0.0" envconfig:"DUST_FEE_RATE" json:"dust_fee_rate"`
 	MinFeeRate              float32         `default:"0.05" envconfig:"MIN_FEE_RATE" json:"min_fee_rate"`
 	MultiContractExpiration config.Duration `default:"1h" envconfig:"MULTI_CONTRACT_EXPIRATION" json:"multi_contract_expiration"`
-	RecoveryMode            bool            `default:"true" envconfig:"RECOVERY_MODE" json:"recovery_mode"`
+	RecoveryMode            bool            `default:"false" envconfig:"RECOVERY_MODE" json:"recovery_mode"`
 }
 
 func DefaultConfig() Config {
@@ -39,6 +39,7 @@ func DefaultConfig() Config {
 		DustFeeRate:             0.00,
 		MinFeeRate:              0.05,
 		MultiContractExpiration: config.NewDuration(time.Hour),
+		RecoveryMode:            false,
 	}
 }
 
@@ -174,7 +175,12 @@ func (a *Agent) InRecoveryMode() bool {
 }
 
 func (a *Agent) addRecoveryRequests(ctx context.Context, txid bitcoin.Hash32,
-	actionList []Action) (bool, error) {
+	requestActions []Action) (bool, error) {
+
+	if len(requestActions) == 0 {
+		return false, nil // no requests
+	}
+
 	a.lock.Lock()
 	defer a.lock.Unlock()
 
@@ -184,10 +190,10 @@ func (a *Agent) addRecoveryRequests(ctx context.Context, txid bitcoin.Hash32,
 
 	recoveryTx := &state.RecoveryTransaction{
 		TxID:          txid,
-		OutputIndexes: make([]int, len(actionList)),
+		OutputIndexes: make([]int, len(requestActions)),
 	}
 
-	for i, action := range actionList {
+	for i, action := range requestActions {
 		recoveryTx.OutputIndexes[i] = action.OutputIndex
 	}
 
@@ -230,8 +236,16 @@ func (a *Agent) removeRecoveryRequest(ctx context.Context, txid bitcoin.Hash32,
 	defer a.caches.RecoveryTransactions.Release(ctx, a.lockingScript)
 
 	recoveryTxs.Lock()
-	result := recoveryTxs.Remove(txid, outputIndex)
+	result := recoveryTxs.RemoveOutput(txid, outputIndex)
 	recoveryTxs.Unlock()
+
+	if result {
+		logger.InfoWithFields(ctx, []logger.Field{
+			logger.Stringer("request_txid", txid),
+			logger.Int("request_output_index", outputIndex),
+		}, "Removed recovery request")
+	}
+
 	return result, nil
 }
 
@@ -462,6 +476,95 @@ func containsRequest(actions []Action) bool {
 	return false
 }
 
+func (a *Agent) ProcessRecoveryRequests(ctx context.Context, now uint64) error {
+	ctx = logger.ContextWithLogFields(ctx, logger.Stringer("recovery", uuid.New()))
+
+	agentLockingScript := a.LockingScript()
+	recoveryTxs, err := a.caches.RecoveryTransactions.Get(ctx, agentLockingScript)
+	if err != nil {
+		return errors.Wrap(err, "get recovery txs")
+	}
+
+	if recoveryTxs == nil {
+		logger.InfoWithFields(ctx, []logger.Field{
+			logger.Stringer("contract_locking_script", agentLockingScript),
+		}, "No recovery requests to process")
+		return nil
+	}
+	defer a.caches.RecoveryTransactions.Release(ctx, agentLockingScript)
+
+	recoveryTxs.Lock()
+	copyTxs := recoveryTxs.Copy()
+	recoveryTxs.Unlock()
+
+	if len(copyTxs.Transactions) == 0 {
+		logger.InfoWithFields(ctx, []logger.Field{
+			logger.Stringer("contract_locking_script", agentLockingScript),
+		}, "No recovery requests to process")
+		return nil
+	}
+
+	logger.InfoWithFields(ctx, []logger.Field{
+		logger.Stringer("contract_locking_script", agentLockingScript),
+		logger.Int("request_count", len(copyTxs.Transactions)),
+	}, "Processing recovery requests")
+
+	for _, request := range copyTxs.Transactions {
+		if err := a.processRecoveryRequest(ctx, request, now); err != nil {
+			return errors.Wrapf(err, "process recovery request: %s", request.TxID)
+		}
+
+		recoveryTxs.Lock()
+		recoveryTxs.Remove(request.TxID)
+		recoveryTxs.Unlock()
+	}
+
+	return nil
+}
+
+func (a *Agent) processRecoveryRequest(ctx context.Context, request *state.RecoveryTransaction,
+	now uint64) error {
+
+	transaction, err := a.caches.Transactions.Get(ctx, request.TxID)
+	if err != nil {
+		return errors.Wrap(err, "get tx")
+	}
+
+	if transaction == nil {
+		return errors.New("Transaction Not Found")
+	}
+	defer a.caches.Transactions.Release(ctx, request.TxID)
+
+	agentLockingScript := a.LockingScript()
+	isTest := a.IsTest()
+	actionList, err := compileActions(transaction, agentLockingScript, isTest)
+	if err != nil {
+		return errors.Wrap(err, "compile tx")
+	}
+
+	var recoveryActions []Action
+	for _, outputIndex := range request.OutputIndexes {
+		found := false
+		for _, action := range actionList {
+			if outputIndex == action.OutputIndex {
+				found = true
+				recoveryActions = append(recoveryActions, action)
+				break
+			}
+		}
+
+		if !found {
+			return fmt.Errorf("Output action %d not found", outputIndex)
+		}
+	}
+
+	if err := a.Process(ctx, transaction, recoveryActions, now); err != nil {
+		return errors.Wrap(err, "process")
+	}
+
+	return nil
+}
+
 func (a *Agent) Process(ctx context.Context, transaction *state.Transaction,
 	actionList []Action, now uint64) error {
 
@@ -540,9 +643,6 @@ func (a *Agent) processAction(ctx context.Context, transaction *state.Transactio
 
 	processed := transaction.ContractProcessed(a.ContractHash(), outputIndex)
 	if len(processed) > 0 {
-		if processed[0].ResponseTxID == nil {
-			println("response txid is nil")
-		}
 		logger.InfoWithFields(ctx, []logger.Field{
 			logger.Stringer("txid", txid),
 			logger.Int("output_index", outputIndex),
