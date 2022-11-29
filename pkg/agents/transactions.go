@@ -7,10 +7,12 @@ import (
 	"github.com/tokenized/channels/wallet"
 	"github.com/tokenized/logger"
 	"github.com/tokenized/pkg/bitcoin"
+	"github.com/tokenized/smart_contract_agent/internal/platform"
 	"github.com/tokenized/smart_contract_agent/internal/state"
 	"github.com/tokenized/specification/dist/golang/actions"
 	"github.com/tokenized/specification/dist/golang/protocol"
 
+	"github.com/google/uuid"
 	"github.com/pkg/errors"
 )
 
@@ -56,6 +58,220 @@ func (a *Agent) UpdateTransaction(ctx context.Context, transaction *state.Transa
 			return errors.Wrap(err, "process unsafe")
 		}
 
+	}
+
+	return nil
+}
+
+func (a *Agent) Process(ctx context.Context, transaction *state.Transaction,
+	actionList []Action, now uint64) error {
+
+	ctx = logger.ContextWithLogFields(ctx, logger.Stringer("trace", uuid.New()))
+
+	txid := transaction.GetTxID()
+	agentLockingScript := a.LockingScript()
+
+	var requestActions []Action
+	var responseActions []Action
+	for _, action := range actionList {
+		if isRequest(action.Action) {
+			requestActions = append(requestActions, action)
+		} else {
+			responseActions = append(responseActions, action)
+		}
+	}
+
+	if inRecovery, err := a.addRecoveryRequests(ctx, txid, requestActions); err != nil {
+		return errors.Wrap(err, "recovery request")
+	} else if inRecovery {
+		logger.InfoWithFields(ctx, []logger.Field{
+			logger.Stringer("txid", txid),
+			logger.Stringer("contract_locking_script", agentLockingScript),
+		}, "Saving transaction requests for recovery")
+
+		if len(responseActions) == 0 {
+			return nil
+		}
+
+		// Process only the responses
+		actionList = responseActions
+	}
+
+	logger.InfoWithFields(ctx, []logger.Field{
+		logger.Stringer("txid", txid),
+		logger.Stringer("contract_locking_script", agentLockingScript),
+	}, "Processing transaction")
+
+	var feeRate, minFeeRate float32
+	if containsRequest(actionList) {
+		transaction.Lock()
+		fee, err := transaction.CalculateFee()
+		if err != nil {
+			transaction.Unlock()
+			return errors.Wrap(err, "calculate fee")
+		}
+		size := transaction.Size()
+		transaction.Unlock()
+
+		minFeeRate = a.MinFeeRate()
+		feeRate = float32(fee) / float32(size)
+	}
+
+	for i, action := range actionList {
+		if isRequest(action.Action) {
+			if feeRate < minFeeRate {
+				return errors.Wrap(a.sendRejection(ctx, transaction, action.OutputIndex,
+					platform.NewRejectError(actions.RejectionsInsufficientTxFeeFunding,
+						fmt.Sprintf("fee rate %.4f, minimum %.4f", feeRate, minFeeRate)), now),
+					"reject")
+			}
+		}
+
+		if err := a.processAction(ctx, transaction, txid, action.Action, action.OutputIndex,
+			now); err != nil {
+			return errors.Wrapf(err, "process action %d: %s", i, action.Action.Code())
+		}
+	}
+
+	return nil
+}
+
+func (a *Agent) processAction(ctx context.Context, transaction *state.Transaction,
+	txid bitcoin.Hash32, action actions.Action, outputIndex int, now uint64) error {
+
+	processed := transaction.ContractProcessed(a.ContractHash(), outputIndex)
+	if len(processed) > 0 {
+		logger.InfoWithFields(ctx, []logger.Field{
+			logger.Stringer("txid", txid),
+			logger.Int("output_index", outputIndex),
+			logger.String("action_code", action.Code()),
+			logger.String("action_name", action.TypeName()),
+			logger.Stringer("response_txid", processed[0].ResponseTxID),
+		}, "Action already processed")
+		return nil
+	}
+
+	logger.InfoWithFields(ctx, []logger.Field{
+		logger.Stringer("txid", txid),
+		logger.Int("output_index", outputIndex),
+		logger.String("action_code", action.Code()),
+		logger.String("action_name", action.TypeName()),
+	}, "Processing action")
+
+	if err := action.Validate(); err != nil {
+		return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
+			platform.NewRejectError(actions.RejectionsMsgMalformed, err.Error()), now), "reject")
+	}
+
+	switch act := action.(type) {
+	case *actions.ContractOffer:
+		return a.processContractOffer(ctx, transaction, act, outputIndex, now)
+
+	case *actions.ContractAmendment:
+		return a.processContractAmendment(ctx, transaction, act, outputIndex, now)
+
+	case *actions.ContractFormation:
+		return a.processContractFormation(ctx, transaction, act, outputIndex, now)
+
+	case *actions.ContractAddressChange:
+		return a.processContractAddressChange(ctx, transaction, act, outputIndex, now)
+
+	case *actions.BodyOfAgreementOffer:
+		return a.processBodyOfAgreementOffer(ctx, transaction, act, outputIndex, now)
+
+	case *actions.BodyOfAgreementAmendment:
+		return a.processBodyOfAgreementAmendment(ctx, transaction, act, outputIndex, now)
+
+	case *actions.BodyOfAgreementFormation:
+		return a.processBodyOfAgreementFormation(ctx, transaction, act, outputIndex, now)
+
+	case *actions.InstrumentDefinition:
+		return a.processInstrumentDefinition(ctx, transaction, act, outputIndex, now)
+
+	case *actions.InstrumentModification:
+		return a.processInstrumentModification(ctx, transaction, act, outputIndex, now)
+
+	case *actions.InstrumentCreation:
+		return a.processInstrumentCreation(ctx, transaction, act, outputIndex, now)
+
+	case *actions.Transfer:
+		return a.processTransfer(ctx, transaction, act, outputIndex, now)
+
+	case *actions.Settlement:
+		return a.processSettlement(ctx, transaction, act, outputIndex, now)
+
+	case *actions.RectificationSettlement:
+		// TODO Create function that watches for "double spent" requests and sends Rectification
+		// Settlements. --ce
+		return a.processRectificationSettlement(ctx, transaction, act, outputIndex, now)
+
+	case *actions.Proposal:
+		return a.processProposal(ctx, transaction, act, outputIndex, now)
+
+	case *actions.Vote:
+		return a.processVote(ctx, transaction, act, outputIndex, now)
+
+	case *actions.BallotCast:
+		return a.processBallotCast(ctx, transaction, act, outputIndex, now)
+
+	case *actions.BallotCounted:
+		return a.processBallotCounted(ctx, transaction, act, outputIndex, now)
+
+	case *actions.Result:
+		return a.processVoteResult(ctx, transaction, act, outputIndex, now)
+
+	case *actions.Order:
+		return a.processOrder(ctx, transaction, act, outputIndex, now)
+
+	case *actions.Freeze:
+		return a.processFreeze(ctx, transaction, act, outputIndex, now)
+
+	case *actions.Thaw:
+		return a.processThaw(ctx, transaction, act, outputIndex, now)
+
+	case *actions.Confiscation:
+		return a.processConfiscation(ctx, transaction, act, outputIndex, now)
+
+	case *actions.DeprecatedReconciliation:
+		return a.processReconciliation(ctx, transaction, act, outputIndex, now)
+
+	case *actions.Message:
+		return a.processMessage(ctx, transaction, act, outputIndex, now)
+
+	case *actions.Rejection:
+		return a.processRejection(ctx, transaction, act, outputIndex, now)
+
+	default:
+		return fmt.Errorf("Action not supported: %s", action.Code())
+	}
+
+	return nil
+}
+
+// ProcessUnsafe performs actions to resolve unsafe or double spent tx.
+func (a *Agent) ProcessUnsafe(ctx context.Context, transaction *state.Transaction,
+	actionList []Action, now uint64) error {
+
+	ctx = logger.ContextWithLogFields(ctx, logger.Stringer("trace", uuid.New()))
+
+	txid := transaction.GetTxID()
+	agentLockingScript := a.LockingScript()
+	logger.WarnWithFields(ctx, []logger.Field{
+		logger.Stringer("txid", txid),
+		logger.Stringer("contract_locking_script", agentLockingScript),
+	}, "Processing unsafe transaction")
+
+	for i, action := range actionList {
+		if isRequest(action.Action) {
+			return errors.Wrap(a.sendRejection(ctx, transaction, action.OutputIndex,
+				platform.NewRejectError(actions.RejectionsDoubleSpend, ""), now), "reject")
+		}
+
+		// If it isn't a request then we can process it like normal.
+		if err := a.processAction(ctx, transaction, txid, action.Action, action.OutputIndex,
+			now); err != nil {
+			return errors.Wrapf(err, "process action %d: %s", i, action.Action.Code())
+		}
 	}
 
 	return nil

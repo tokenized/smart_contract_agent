@@ -6,6 +6,7 @@ import (
 	"github.com/tokenized/pkg/bitcoin"
 	"github.com/tokenized/pkg/txbuilder"
 	"github.com/tokenized/pkg/wire"
+	"github.com/tokenized/specification/dist/golang/actions"
 
 	"github.com/pkg/errors"
 )
@@ -94,4 +95,42 @@ func (a *Agent) addResponseTxID(ctx context.Context, requestTxID bitcoin.Hash32,
 	a.caches.Transactions.Release(ctx, requestTxID)
 
 	return result, nil
+}
+
+func isRequest(action actions.Action) bool {
+	switch action.(type) {
+	case *actions.ContractOffer, *actions.ContractAmendment, *actions.ContractAddressChange:
+		return true
+
+	case *actions.BodyOfAgreementOffer, *actions.BodyOfAgreementAmendment:
+		return true
+
+	case *actions.InstrumentDefinition, *actions.InstrumentModification:
+		return true
+
+	case *actions.Transfer:
+		return true
+
+	case *actions.Proposal, *actions.BallotCast:
+		return true
+
+	case *actions.Order:
+		return true
+
+	case *actions.Message:
+		return true
+
+	default:
+		return false
+	}
+}
+
+func containsRequest(actions []Action) bool {
+	for _, action := range actions {
+		if isRequest(action.Action) {
+			return true
+		}
+	}
+
+	return false
 }
