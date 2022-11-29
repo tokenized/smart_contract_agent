@@ -14,6 +14,11 @@ import (
 	"github.com/pkg/errors"
 )
 
+type RecoveryRequest struct {
+	TxID          bitcoin.Hash32 `bsor:"1" json:"txid"`
+	OutputIndexes []int          `bsor:"2" json:"output_indexes"`
+}
+
 type Action struct {
 	OutputIndex int
 	Action      actions.Action

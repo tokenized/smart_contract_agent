@@ -29,6 +29,7 @@ type Config struct {
 	DustFeeRate             float32         `default:"0.0" envconfig:"DUST_FEE_RATE" json:"dust_fee_rate"`
 	MinFeeRate              float32         `default:"0.05" envconfig:"MIN_FEE_RATE" json:"min_fee_rate"`
 	MultiContractExpiration config.Duration `default:"1h" envconfig:"MULTI_CONTRACT_EXPIRATION" json:"multi_contract_expiration"`
+	RecoveryMode            bool            `default:"true" envconfig:"RECOVERY_MODE" json:"recovery_mode"`
 }
 
 func DefaultConfig() Config {
@@ -163,6 +164,75 @@ func (a *Agent) CheckContractIsAvailable(now uint64) error {
 	defer a.contract.Unlock()
 
 	return a.contract.CheckIsAvailable(now)
+}
+
+func (a *Agent) InRecoveryMode() bool {
+	a.lock.Lock()
+	defer a.lock.Unlock()
+
+	return a.config.RecoveryMode
+}
+
+func (a *Agent) addRecoveryRequests(ctx context.Context, txid bitcoin.Hash32,
+	actionList []Action) (bool, error) {
+	a.lock.Lock()
+	defer a.lock.Unlock()
+
+	if !a.config.RecoveryMode {
+		return false, nil
+	}
+
+	recoveryTx := &state.RecoveryTransaction{
+		TxID:          txid,
+		OutputIndexes: make([]int, len(actionList)),
+	}
+
+	for i, action := range actionList {
+		recoveryTx.OutputIndexes[i] = action.OutputIndex
+	}
+
+	newRecoveryTxs := &state.RecoveryTransactions{
+		Transactions: []*state.RecoveryTransaction{recoveryTx},
+	}
+
+	recoveryTxs, err := a.caches.RecoveryTransactions.Add(ctx, a.lockingScript, newRecoveryTxs)
+	if err != nil {
+		return false, errors.Wrap(err, "get recovery txs")
+	}
+	defer a.caches.RecoveryTransactions.Release(ctx, a.lockingScript)
+
+	if recoveryTxs != newRecoveryTxs {
+		recoveryTxs.Lock()
+		recoveryTxs.Append(recoveryTx)
+		recoveryTxs.Unlock()
+	}
+
+	return true, nil
+}
+
+func (a *Agent) removeRecoveryRequest(ctx context.Context, txid bitcoin.Hash32,
+	outputIndex int) (bool, error) {
+	a.lock.Lock()
+	defer a.lock.Unlock()
+
+	if !a.config.RecoveryMode {
+		return false, nil
+	}
+
+	recoveryTxs, err := a.caches.RecoveryTransactions.Get(ctx, a.lockingScript)
+	if err != nil {
+		return false, errors.Wrap(err, "get recovery txs")
+	}
+
+	if recoveryTxs == nil {
+		return false, nil
+	}
+	defer a.caches.RecoveryTransactions.Release(ctx, a.lockingScript)
+
+	recoveryTxs.Lock()
+	result := recoveryTxs.Remove(txid, outputIndex)
+	recoveryTxs.Unlock()
+	return result, nil
 }
 
 type IdentityOracle struct {
@@ -399,6 +469,33 @@ func (a *Agent) Process(ctx context.Context, transaction *state.Transaction,
 
 	txid := transaction.GetTxID()
 	agentLockingScript := a.LockingScript()
+
+	var requestActions []Action
+	var responseActions []Action
+	for _, action := range actionList {
+		if isRequest(action.Action) {
+			requestActions = append(requestActions, action)
+		} else {
+			responseActions = append(responseActions, action)
+		}
+	}
+
+	if inRecovery, err := a.addRecoveryRequests(ctx, txid, requestActions); err != nil {
+		return errors.Wrap(err, "recovery request")
+	} else if inRecovery {
+		logger.InfoWithFields(ctx, []logger.Field{
+			logger.Stringer("txid", txid),
+			logger.Stringer("contract_locking_script", agentLockingScript),
+		}, "Saving transaction requests for recovery")
+
+		if len(responseActions) == 0 {
+			return nil
+		}
+
+		// Process only the responses
+		actionList = responseActions
+	}
+
 	logger.InfoWithFields(ctx, []logger.Field{
 		logger.Stringer("txid", txid),
 		logger.Stringer("contract_locking_script", agentLockingScript),

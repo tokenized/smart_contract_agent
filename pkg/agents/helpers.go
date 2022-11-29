@@ -75,6 +75,10 @@ func findBitcoinOutput(tx *wire.MsgTx, lockingScript bitcoin.Script, value uint6
 func (a *Agent) addResponseTxID(ctx context.Context, requestTxID bitcoin.Hash32, outputIndex int,
 	responseTxID bitcoin.Hash32) (bool, error) {
 
+	if _, err := a.removeRecoveryRequest(ctx, requestTxID, outputIndex); err != nil {
+		return false, errors.Wrap(err, "recovery request")
+	}
+
 	requestTransaction, err := a.caches.Transactions.Get(ctx, requestTxID)
 	if err != nil {
 		return false, errors.Wrap(err, "get tx")
