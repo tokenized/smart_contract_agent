@@ -161,18 +161,18 @@ func Test_Recovery_AcceptContractOffer(t *testing.T) {
 	if responseTx == nil {
 		t.Fatalf("No response tx")
 	}
-	responseTxID := *responseTx.TxHash()
+	responseTxID := *responseTx.Tx.TxHash()
 
 	t.Logf("Response Tx : %s", responseTx)
 
-	if !responseTx.TxOut[0].LockingScript.Equal(contractLockingScript) {
+	if !responseTx.Tx.TxOut[0].LockingScript.Equal(contractLockingScript) {
 		t.Errorf("Wrong contract output locking script : got %s, want %s",
-			responseTx.TxOut[0].LockingScript, contractLockingScript)
+			responseTx.Tx.TxOut[0].LockingScript, contractLockingScript)
 	}
 
 	// Find formation action
 	var formation *actions.ContractFormation
-	for _, txout := range responseTx.TxOut {
+	for _, txout := range responseTx.Tx.TxOut {
 		action, err := protocol.Deserialize(txout.LockingScript, true)
 		if err != nil {
 			continue

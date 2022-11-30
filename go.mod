@@ -12,6 +12,6 @@ require (
 	github.com/tokenized/logger v0.1.2-0.20221123201255-3047489d4997
 	github.com/tokenized/pkg v0.4.1-0.20221130201305-cdaf7c6390e9
 	github.com/tokenized/specification v1.1.2-0.20221123201652-68412329e451
-	github.com/tokenized/spynode v0.2.2-0.20220902163745-06e7a19f49ee
+	github.com/tokenized/spynode v0.2.2-0.20221130210815-5c680ff76a56
 	github.com/tokenized/threads v0.1.1-0.20221115220050-91bea32c8aa2
 )

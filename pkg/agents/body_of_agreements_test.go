@@ -148,7 +148,7 @@ func Test_BodyOfAgreement_Offer_Valid(t *testing.T) {
 
 	// Find formation action
 	var formation *actions.BodyOfAgreementFormation
-	for _, txout := range responseTx.TxOut {
+	for _, txout := range responseTx.Tx.TxOut {
 		action, err := protocol.Deserialize(txout.LockingScript, true)
 		if err != nil {
 			continue
@@ -301,7 +301,7 @@ func Test_BodyOfAgreement_Offer_UnreferencedTerm(t *testing.T) {
 
 	// Find rejection action
 	var rejection *actions.Rejection
-	for _, txout := range responseTx.TxOut {
+	for _, txout := range responseTx.Tx.TxOut {
 		action, err := protocol.Deserialize(txout.LockingScript, true)
 		if err != nil {
 			continue
@@ -494,7 +494,7 @@ func Test_BodyOfAgreement_Amendment_Basic(t *testing.T) {
 
 	// Find formation action
 	var formation *actions.BodyOfAgreementFormation
-	for _, txout := range responseTx.TxOut {
+	for _, txout := range responseTx.Tx.TxOut {
 		action, err := protocol.Deserialize(txout.LockingScript, true)
 		if err != nil {
 			continue
@@ -697,7 +697,7 @@ func Test_BodyOfAgreement_Amendment_Child(t *testing.T) {
 
 	// Find formation action
 	var formation *actions.BodyOfAgreementFormation
-	for _, txout := range responseTx.TxOut {
+	for _, txout := range responseTx.Tx.TxOut {
 		action, err := protocol.Deserialize(txout.LockingScript, true)
 		if err != nil {
 			continue
@@ -908,7 +908,7 @@ func Test_BodyOfAgreement_Amendment_Proposal(t *testing.T) {
 
 	// Find formation action
 	var formation *actions.BodyOfAgreementFormation
-	for _, txout := range responseTx.TxOut {
+	for _, txout := range responseTx.Tx.TxOut {
 		action, err := protocol.Deserialize(txout.LockingScript, true)
 		if err != nil {
 			continue

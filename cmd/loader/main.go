@@ -16,7 +16,6 @@ import (
 	"github.com/tokenized/pkg/expanded_tx"
 	"github.com/tokenized/pkg/peer_channels"
 	"github.com/tokenized/pkg/storage"
-	"github.com/tokenized/pkg/wire"
 	"github.com/tokenized/smart_contract_agent/internal/state"
 	"github.com/tokenized/smart_contract_agent/internal/whatsonchain"
 	"github.com/tokenized/smart_contract_agent/pkg/agents"
@@ -280,9 +279,11 @@ func NewNoopBroadcaster() *NoopBroadcaster {
 	return &NoopBroadcaster{}
 }
 
-func (*NoopBroadcaster) BroadcastTx(ctx context.Context, tx *wire.MsgTx, indexes []uint32) error {
+func (*NoopBroadcaster) BroadcastTx(ctx context.Context, etx *expanded_tx.ExpandedTx,
+	indexes []uint32) error {
+
 	logger.InfoWithFields(ctx, []logger.Field{
-		logger.Stringer("broadcast_txid", tx.TxHash()),
+		logger.Stringer("broadcast_txid", etx.Tx.TxHash()),
 		logger.Uint32s("indexes", indexes),
 	}, "No operation broadcaster received tx")
 	return nil

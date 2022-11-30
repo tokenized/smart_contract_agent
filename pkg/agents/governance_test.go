@@ -172,7 +172,7 @@ func Test_Proposal_Valid(t *testing.T) {
 
 	// Find vote action
 	var vote *actions.Vote
-	for _, txout := range responseTx.TxOut {
+	for _, txout := range responseTx.Tx.TxOut {
 		action, err := protocol.Deserialize(txout.LockingScript, true)
 		if err != nil {
 			continue
@@ -200,7 +200,7 @@ func Test_Proposal_Valid(t *testing.T) {
 	js, _ := json.MarshalIndent(vote, "", "  ")
 	t.Logf("Vote : %s", js)
 
-	voteTxID := *responseTx.TxHash()
+	voteTxID := *responseTx.Tx.TxHash()
 
 	// Check that ballots exist.
 	ballots, err := caches.Caches.Ballots.List(ctx, contractLockingScript, voteTxID)
@@ -228,7 +228,7 @@ func Test_Proposal_Valid(t *testing.T) {
 
 	// Find vote result action
 	var voteResult *actions.Result
-	for _, txout := range responseTx2.TxOut {
+	for _, txout := range responseTx2.Tx.TxOut {
 		action, err := protocol.Deserialize(txout.LockingScript, true)
 		if err != nil {
 			continue
@@ -409,7 +409,7 @@ func Test_Ballots_Valid(t *testing.T) {
 
 		// Find ballot counted action
 		var ballotCounted *actions.BallotCounted
-		for _, txout := range responseTx.TxOut {
+		for _, txout := range responseTx.Tx.TxOut {
 			action, err := protocol.Deserialize(txout.LockingScript, true)
 			if err != nil {
 				continue
@@ -458,7 +458,7 @@ func Test_Ballots_Valid(t *testing.T) {
 
 	// Find vote result action
 	var voteResult *actions.Result
-	for _, txout := range responseTx2.TxOut {
+	for _, txout := range responseTx2.Tx.TxOut {
 		action, err := protocol.Deserialize(txout.LockingScript, true)
 		if err != nil {
 			continue

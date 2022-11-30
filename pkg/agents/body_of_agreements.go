@@ -145,9 +145,15 @@ func (a *Agent) processBodyOfAgreementOffer(ctx context.Context, transaction *st
 
 	transaction.Lock()
 	transaction.AddResponseTxID(a.ContractHash(), outputIndex, formationTxID)
+	tx := transaction.Tx.Copy()
 	transaction.Unlock()
 
-	if err := a.BroadcastTx(ctx, formationTx.MsgTx, nil); err != nil {
+	etx, err := buildExpandedTx(formationTx.MsgTx, []*wire.MsgTx{tx})
+	if err != nil {
+		return errors.Wrap(err, "expanded tx")
+	}
+
+	if err := a.BroadcastTx(ctx, etx, nil); err != nil {
 		return errors.Wrap(err, "broadcast")
 	}
 
@@ -388,9 +394,15 @@ func (a *Agent) processBodyOfAgreementAmendment(ctx context.Context, transaction
 
 	transaction.Lock()
 	transaction.AddResponseTxID(a.ContractHash(), outputIndex, formationTxID)
+	tx := transaction.Tx.Copy()
 	transaction.Unlock()
 
-	if err := a.BroadcastTx(ctx, formationTx.MsgTx, nil); err != nil {
+	etx, err := buildExpandedTx(formationTx.MsgTx, []*wire.MsgTx{tx})
+	if err != nil {
+		return errors.Wrap(err, "expanded tx")
+	}
+
+	if err := a.BroadcastTx(ctx, etx, nil); err != nil {
 		return errors.Wrap(err, "broadcast")
 	}
 

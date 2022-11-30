@@ -450,9 +450,15 @@ func (a *Agent) processProposal(ctx context.Context, transaction *state.Transact
 
 	transaction.Lock()
 	transaction.AddResponseTxID(a.ContractHash(), outputIndex, voteTxID)
+	tx := transaction.Tx.Copy()
 	transaction.Unlock()
 
-	if err := a.BroadcastTx(ctx, voteTx.MsgTx, nil); err != nil {
+	etx, err := buildExpandedTx(voteTx.MsgTx, []*wire.MsgTx{tx})
+	if err != nil {
+		return errors.Wrap(err, "expanded tx")
+	}
+
+	if err := a.BroadcastTx(ctx, etx, nil); err != nil {
 		return errors.Wrap(err, "broadcast")
 	}
 
@@ -778,9 +784,15 @@ func (a *Agent) processBallotCast(ctx context.Context, transaction *state.Transa
 
 	transaction.Lock()
 	transaction.AddResponseTxID(a.ContractHash(), outputIndex, ballotCountedTxID)
+	tx := transaction.Tx.Copy()
 	transaction.Unlock()
 
-	if err := a.BroadcastTx(ctx, ballotCountedTx.MsgTx, nil); err != nil {
+	etx, err := buildExpandedTx(ballotCountedTx.MsgTx, []*wire.MsgTx{tx})
+	if err != nil {
+		return errors.Wrap(err, "expanded tx")
+	}
+
+	if err := a.BroadcastTx(ctx, etx, nil); err != nil {
 		return errors.Wrap(err, "broadcast")
 	}
 

@@ -529,13 +529,23 @@ func (a *Agent) sendSettlementRequest(ctx context.Context,
 
 	currentTransaction.Lock()
 	currentTransaction.AddResponseTxID(a.ContractHash(), currentOutputIndex, messageTxID)
+	currentTx := currentTransaction.Tx.Copy()
 	currentTransaction.Unlock()
+
+	transferTransaction.Lock()
+	transferTx := transferTransaction.Tx.Copy()
+	transferTransaction.Unlock()
+
+	etx, err := buildExpandedTx(messageTx.MsgTx, []*wire.MsgTx{currentTx, transferTx})
+	if err != nil {
+		return errors.Wrap(err, "expanded tx")
+	}
 
 	logger.InfoWithFields(ctx, []logger.Field{
 		logger.Stringer("next_contract_locking_script", transferContracts.NextLockingScript),
 		logger.Stringer("response_txid", messageTxID),
 	}, "Sending settlement request to next contract")
-	if err := a.BroadcastTx(ctx, messageTx.MsgTx, message.ReceiverIndexes); err != nil {
+	if err := a.BroadcastTx(ctx, etx, message.ReceiverIndexes); err != nil {
 		return errors.Wrap(err, "broadcast")
 	}
 

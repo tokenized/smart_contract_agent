@@ -159,7 +159,7 @@ func Test_Transfers_Basic(t *testing.T) {
 
 		// Find settlement action
 		var settlement *actions.Settlement
-		for _, txout := range responseTx.TxOut {
+		for _, txout := range responseTx.Tx.TxOut {
 			action, err := protocol.Deserialize(txout.LockingScript, true)
 			if err != nil {
 				continue
@@ -320,7 +320,7 @@ func Test_Transfers_Basic(t *testing.T) {
 
 		// Find settlement action
 		var settlement *actions.Settlement
-		for _, txout := range responseTx.TxOut {
+		for _, txout := range responseTx.Tx.TxOut {
 			action, err := protocol.Deserialize(txout.LockingScript, true)
 			if err != nil {
 				continue
@@ -532,7 +532,7 @@ func Test_Transfers_InsufficientQuantity(t *testing.T) {
 
 	// Find rejection action
 	var rejection *actions.Rejection
-	for _, txout := range responseTx.TxOut {
+	for _, txout := range responseTx.Tx.TxOut {
 		action, err := protocol.Deserialize(txout.LockingScript, true)
 		if err != nil {
 			continue
@@ -707,7 +707,7 @@ func Test_Transfers_IdentityOracle_MissingSignature(t *testing.T) {
 
 	// Find rejection action
 	var rejection *actions.Rejection
-	for _, txout := range responseTx.TxOut {
+	for _, txout := range responseTx.Tx.TxOut {
 		action, err := protocol.Deserialize(txout.LockingScript, true)
 		if err != nil {
 			continue
@@ -911,7 +911,7 @@ func Test_Transfers_IdentityOracle_Valid(t *testing.T) {
 
 	// Find settlement action
 	var settlement *actions.Settlement
-	for _, txout := range responseTx.TxOut {
+	for _, txout := range responseTx.Tx.TxOut {
 		action, err := protocol.Deserialize(txout.LockingScript, true)
 		if err != nil {
 			continue
@@ -1106,7 +1106,7 @@ func Test_Transfers_IdentityOracle_BadSignature(t *testing.T) {
 
 	// Find rejection action
 	var rejection *actions.Rejection
-	for _, txout := range responseTx.TxOut {
+	for _, txout := range responseTx.Tx.TxOut {
 		action, err := protocol.Deserialize(txout.LockingScript, true)
 		if err != nil {
 			continue
@@ -1329,7 +1329,7 @@ func Test_Transfers_Multi_Basic(t *testing.T) {
 		// Find settlement request action
 		var message *actions.Message
 		messageScriptOutputIndex := 0
-		for outputIndex, txout := range agent1ResponseTx.TxOut {
+		for outputIndex, txout := range agent1ResponseTx.Tx.TxOut {
 			action, err := protocol.Deserialize(txout.LockingScript, true)
 			if err != nil {
 				continue
@@ -1380,7 +1380,7 @@ func Test_Transfers_Multi_Basic(t *testing.T) {
 		}
 
 		addMessageTransaction := &state.Transaction{
-			Tx:           agent1ResponseTx,
+			Tx:           agent1ResponseTx.Tx,
 			SpentOutputs: messageSpentOutputs,
 		}
 
@@ -1422,7 +1422,7 @@ func Test_Transfers_Multi_Basic(t *testing.T) {
 		// Find signature request action
 		var message2 *actions.Message
 		message2ScriptOutputIndex := 0
-		for outputIndex, txout := range agent2ResponseTx2.TxOut {
+		for outputIndex, txout := range agent2ResponseTx2.Tx.TxOut {
 			action, err := protocol.Deserialize(txout.LockingScript, true)
 			if err != nil {
 				continue
@@ -1482,13 +1482,13 @@ func Test_Transfers_Multi_Basic(t *testing.T) {
 
 		message2SpentOutputs := []*expanded_tx.Output{
 			{
-				LockingScript: agent1ResponseTx.TxOut[0].LockingScript,
-				Value:         agent1ResponseTx.TxOut[0].Value,
+				LockingScript: agent1ResponseTx.Tx.TxOut[0].LockingScript,
+				Value:         agent1ResponseTx.Tx.TxOut[0].Value,
 			},
 		}
 
 		addMessage2Transaction := &state.Transaction{
-			Tx:           agent2ResponseTx2,
+			Tx:           agent2ResponseTx2.Tx,
 			SpentOutputs: message2SpentOutputs,
 		}
 
@@ -1528,7 +1528,7 @@ func Test_Transfers_Multi_Basic(t *testing.T) {
 		t.Logf("Agent 1 response tx 3 : %s", agent1ResponseTx3)
 
 		var settlement *actions.Settlement
-		for _, txout := range agent1ResponseTx3.TxOut {
+		for _, txout := range agent1ResponseTx3.Tx.TxOut {
 			action, err := protocol.Deserialize(txout.LockingScript, true)
 			if err != nil {
 				continue
@@ -1779,7 +1779,7 @@ func Test_Transfers_Multi_Expire(t *testing.T) {
 		// Find settlement request action
 		var message *actions.Message
 		messageScriptOutputIndex := 0
-		for outputIndex, txout := range agent1ResponseTx.TxOut {
+		for outputIndex, txout := range agent1ResponseTx.Tx.TxOut {
 			action, err := protocol.Deserialize(txout.LockingScript, true)
 			if err != nil {
 				continue
@@ -1832,7 +1832,7 @@ func Test_Transfers_Multi_Expire(t *testing.T) {
 		}
 
 		addMessageTransaction := &state.Transaction{
-			Tx:           agent1ResponseTx,
+			Tx:           agent1ResponseTx.Tx,
 			SpentOutputs: messageSpentOutputs,
 		}
 
@@ -1874,7 +1874,7 @@ func Test_Transfers_Multi_Expire(t *testing.T) {
 		// Find signature request action
 		var message2 *actions.Message
 		message2ScriptOutputIndex := 0
-		for outputIndex, txout := range agent2ResponseTx2.TxOut {
+		for outputIndex, txout := range agent2ResponseTx2.Tx.TxOut {
 			action, err := protocol.Deserialize(txout.LockingScript, true)
 			if err != nil {
 				continue
@@ -1934,13 +1934,13 @@ func Test_Transfers_Multi_Expire(t *testing.T) {
 
 		message2SpentOutputs := []*expanded_tx.Output{
 			{
-				LockingScript: agent1ResponseTx.TxOut[0].LockingScript,
-				Value:         agent1ResponseTx.TxOut[0].Value,
+				LockingScript: agent1ResponseTx.Tx.TxOut[0].LockingScript,
+				Value:         agent1ResponseTx.Tx.TxOut[0].Value,
 			},
 		}
 
 		addMessage2Transaction := &state.Transaction{
-			Tx:           agent2ResponseTx2,
+			Tx:           agent2ResponseTx2.Tx,
 			SpentOutputs: message2SpentOutputs,
 		}
 
@@ -1980,7 +1980,7 @@ func Test_Transfers_Multi_Expire(t *testing.T) {
 		t.Logf("Agent 1 response tx 3 : %s", agent1ResponseTx3)
 
 		var rejection *actions.Rejection
-		for _, txout := range agent1ResponseTx3.TxOut {
+		for _, txout := range agent1ResponseTx3.Tx.TxOut {
 			action, err := protocol.Deserialize(txout.LockingScript, true)
 			if err != nil {
 				continue
@@ -2214,7 +2214,7 @@ func Test_Transfers_Multi_Reject_First(t *testing.T) {
 
 		// Find rejection action
 		var rejection *actions.Rejection
-		for _, txout := range agent1ResponseTx.TxOut {
+		for _, txout := range agent1ResponseTx.Tx.TxOut {
 			action, err := protocol.Deserialize(txout.LockingScript, true)
 			if err != nil {
 				continue
@@ -2460,7 +2460,7 @@ func Test_Transfers_Multi_Reject_Second(t *testing.T) {
 		// Find settlement request action
 		var message *actions.Message
 		messageScriptOutputIndex := 0
-		for outputIndex, txout := range agent1ResponseTx.TxOut {
+		for outputIndex, txout := range agent1ResponseTx.Tx.TxOut {
 			action, err := protocol.Deserialize(txout.LockingScript, true)
 			if err != nil {
 				continue
@@ -2511,7 +2511,7 @@ func Test_Transfers_Multi_Reject_Second(t *testing.T) {
 		}
 
 		addMessageTransaction := &state.Transaction{
-			Tx:           agent1ResponseTx,
+			Tx:           agent1ResponseTx.Tx,
 			SpentOutputs: messageSpentOutputs,
 		}
 
@@ -2553,7 +2553,7 @@ func Test_Transfers_Multi_Reject_Second(t *testing.T) {
 		// Find rejection action
 		var rejection *actions.Rejection
 		rejectionScriptOutputIndex := 0
-		for outputIndex, txout := range agent2ResponseTx2.TxOut {
+		for outputIndex, txout := range agent2ResponseTx2.Tx.TxOut {
 			action, err := protocol.Deserialize(txout.LockingScript, true)
 			if err != nil {
 				continue
@@ -2581,13 +2581,13 @@ func Test_Transfers_Multi_Reject_Second(t *testing.T) {
 
 		rejectionSpentOutputs := []*expanded_tx.Output{
 			{
-				LockingScript: agent1ResponseTx.TxOut[0].LockingScript,
-				Value:         agent1ResponseTx.TxOut[0].Value,
+				LockingScript: agent1ResponseTx.Tx.TxOut[0].LockingScript,
+				Value:         agent1ResponseTx.Tx.TxOut[0].Value,
 			},
 		}
 
 		addRejectionTransaction := &state.Transaction{
-			Tx:           agent2ResponseTx2,
+			Tx:           agent2ResponseTx2.Tx,
 			SpentOutputs: rejectionSpentOutputs,
 		}
 
@@ -2614,7 +2614,7 @@ func Test_Transfers_Multi_Reject_Second(t *testing.T) {
 
 		// Find rejection action
 		rejection = nil
-		for _, txout := range agent1ResponseTx3.TxOut {
+		for _, txout := range agent1ResponseTx3.Tx.TxOut {
 			action, err := protocol.Deserialize(txout.LockingScript, true)
 			if err != nil {
 				continue
@@ -2637,9 +2637,9 @@ func Test_Transfers_Multi_Reject_Second(t *testing.T) {
 		js, _ = json.MarshalIndent(rejection, "", "  ")
 		t.Logf("Rejection : %s", js)
 
-		if !agent1ResponseTx3.TxIn[0].PreviousOutPoint.Hash.Equal(transferTxID) {
+		if !agent1ResponseTx3.Tx.TxIn[0].PreviousOutPoint.Hash.Equal(transferTxID) {
 			t.Errorf("Wrong rejection input txid : got %s, want %s",
-				agent1ResponseTx3.TxIn[0].PreviousOutPoint.Hash, transferTxID)
+				agent1ResponseTx3.Tx.TxIn[0].PreviousOutPoint.Hash, transferTxID)
 		}
 
 		caches.Caches.Transactions.Release(ctx, rejectionTransaction.GetTxID())

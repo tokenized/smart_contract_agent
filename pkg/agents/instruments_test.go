@@ -154,7 +154,7 @@ func Test_Instruments_Definition(t *testing.T) {
 
 		// Find creation action
 		var creation *actions.InstrumentCreation
-		for _, txout := range responseTx.TxOut {
+		for _, txout := range responseTx.Tx.TxOut {
 			action, err := protocol.Deserialize(txout.LockingScript, true)
 			if err != nil {
 				continue
@@ -326,7 +326,7 @@ func Test_Instruments_Amendment_Basic(t *testing.T) {
 
 	// Find creation action
 	var creation *actions.InstrumentCreation
-	for _, txout := range responseTx.TxOut {
+	for _, txout := range responseTx.Tx.TxOut {
 		action, err := protocol.Deserialize(txout.LockingScript, true)
 		if err != nil {
 			continue
@@ -508,7 +508,7 @@ func Test_Instruments_Amendment_Payload(t *testing.T) {
 
 	// Find creation action
 	var creation *actions.InstrumentCreation
-	for _, txout := range responseTx.TxOut {
+	for _, txout := range responseTx.Tx.TxOut {
 		action, err := protocol.Deserialize(txout.LockingScript, true)
 		if err != nil {
 			continue
@@ -701,7 +701,7 @@ func Test_Instruments_Amendment_Proposal(t *testing.T) {
 
 	// Find creation action
 	var creation *actions.InstrumentCreation
-	for _, txout := range responseTx.TxOut {
+	for _, txout := range responseTx.Tx.TxOut {
 		action, err := protocol.Deserialize(txout.LockingScript, true)
 		if err != nil {
 			continue

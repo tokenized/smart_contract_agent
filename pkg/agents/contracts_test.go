@@ -134,7 +134,7 @@ func Test_Contracts_Offer_Invalid(t *testing.T) {
 
 	// Find rejection action
 	var rejection *actions.Rejection
-	for _, txout := range responseTx.TxOut {
+	for _, txout := range responseTx.Tx.TxOut {
 		action, err := protocol.Deserialize(txout.LockingScript, true)
 		if err != nil {
 			continue
@@ -285,18 +285,18 @@ func Test_Contracts_Offer_Valid(t *testing.T) {
 	if responseTx == nil {
 		t.Fatalf("No response tx")
 	}
-	responseTxID := *responseTx.TxHash()
+	responseTxID := *responseTx.Tx.TxHash()
 
 	t.Logf("Response Tx : %s", responseTx)
 
-	if !responseTx.TxOut[0].LockingScript.Equal(contractLockingScript) {
+	if !responseTx.Tx.TxOut[0].LockingScript.Equal(contractLockingScript) {
 		t.Errorf("Wrong contract output locking script : got %s, want %s",
-			responseTx.TxOut[0].LockingScript, contractLockingScript)
+			responseTx.Tx.TxOut[0].LockingScript, contractLockingScript)
 	}
 
 	// Find formation action
 	var formation *actions.ContractFormation
-	for _, txout := range responseTx.TxOut {
+	for _, txout := range responseTx.Tx.TxOut {
 		action, err := protocol.Deserialize(txout.LockingScript, true)
 		if err != nil {
 			continue
@@ -481,7 +481,7 @@ func Test_Contracts_Offer_AlreadyExists(t *testing.T) {
 
 	// Find rejection action
 	var rejection *actions.Rejection
-	for _, txout := range responseTx.TxOut {
+	for _, txout := range responseTx.Tx.TxOut {
 		action, err := protocol.Deserialize(txout.LockingScript, true)
 		if err != nil {
 			continue
@@ -653,18 +653,18 @@ func Test_Contracts_Amendment_Valid(t *testing.T) {
 	if responseTx == nil {
 		t.Fatalf("No response tx")
 	}
-	responseTxID := *responseTx.TxHash()
+	responseTxID := *responseTx.Tx.TxHash()
 
 	t.Logf("Response Tx : %s", responseTx)
 
-	if !responseTx.TxOut[0].LockingScript.Equal(contractLockingScript) {
+	if !responseTx.Tx.TxOut[0].LockingScript.Equal(contractLockingScript) {
 		t.Errorf("Wrong contract output locking script : got %s, want %s",
-			responseTx.TxOut[0].LockingScript, contractLockingScript)
+			responseTx.Tx.TxOut[0].LockingScript, contractLockingScript)
 	}
 
 	// Find formation action
 	var formation *actions.ContractFormation
-	for _, txout := range responseTx.TxOut {
+	for _, txout := range responseTx.Tx.TxOut {
 		action, err := protocol.Deserialize(txout.LockingScript, true)
 		if err != nil {
 			continue
@@ -827,18 +827,18 @@ func Test_Contracts_Amendment_AdminChange(t *testing.T) {
 	if responseTx == nil {
 		t.Fatalf("No response tx")
 	}
-	responseTxID := *responseTx.TxHash()
+	responseTxID := *responseTx.Tx.TxHash()
 
 	t.Logf("Response Tx : %s", responseTx)
 
-	if !responseTx.TxOut[0].LockingScript.Equal(contractLockingScript) {
+	if !responseTx.Tx.TxOut[0].LockingScript.Equal(contractLockingScript) {
 		t.Errorf("Wrong contract output locking script : got %s, want %s",
-			responseTx.TxOut[0].LockingScript, contractLockingScript)
+			responseTx.Tx.TxOut[0].LockingScript, contractLockingScript)
 	}
 
 	// Find formation action
 	var formation *actions.ContractFormation
-	for _, txout := range responseTx.TxOut {
+	for _, txout := range responseTx.Tx.TxOut {
 		action, err := protocol.Deserialize(txout.LockingScript, true)
 		if err != nil {
 			continue
@@ -1033,18 +1033,18 @@ func Test_Contracts_Amendment_Proposal(t *testing.T) {
 	if responseTx == nil {
 		t.Fatalf("No response tx")
 	}
-	responseTxID := *responseTx.TxHash()
+	responseTxID := *responseTx.Tx.TxHash()
 
 	t.Logf("Response Tx : %s", responseTx)
 
-	if !responseTx.TxOut[0].LockingScript.Equal(contractLockingScript) {
+	if !responseTx.Tx.TxOut[0].LockingScript.Equal(contractLockingScript) {
 		t.Errorf("Wrong contract output locking script : got %s, want %s",
-			responseTx.TxOut[0].LockingScript, contractLockingScript)
+			responseTx.Tx.TxOut[0].LockingScript, contractLockingScript)
 	}
 
 	// Find formation action
 	var formation *actions.ContractFormation
-	for _, txout := range responseTx.TxOut {
+	for _, txout := range responseTx.Tx.TxOut {
 		action, err := protocol.Deserialize(txout.LockingScript, true)
 		if err != nil {
 			continue

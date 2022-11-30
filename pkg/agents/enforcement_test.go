@@ -173,7 +173,7 @@ func Test_Freeze_Balances_Valid(t *testing.T) {
 
 	// Find creation action
 	var freeze *actions.Freeze
-	for _, txout := range responseTx.TxOut {
+	for _, txout := range responseTx.Tx.TxOut {
 		action, err := protocol.Deserialize(txout.LockingScript, true)
 		if err != nil {
 			continue
@@ -194,12 +194,12 @@ func Test_Freeze_Balances_Valid(t *testing.T) {
 
 	// Check freeze action
 	for i, target := range freeze.Quantities {
-		if int(target.Index) >= len(responseTx.TxOut) {
+		if int(target.Index) >= len(responseTx.Tx.TxOut) {
 			t.Fatalf("Invalid output index %d : %d >= %d", i, target.Index,
-				len(responseTx.TxOut))
+				len(responseTx.Tx.TxOut))
 		}
 
-		lockingScript := responseTx.TxOut[target.Index].LockingScript
+		lockingScript := responseTx.Tx.TxOut[target.Index].LockingScript
 		if !lockingScript.Equal(freezeBalances[i].LockingScript) {
 			t.Errorf("Wrong freeze locking script : got %s, want %s", lockingScript,
 				freezeBalances[i].LockingScript)
@@ -259,7 +259,7 @@ func Test_Freeze_Balances_Valid(t *testing.T) {
 	caches.Caches.Balances.ReleaseMulti(ctx, contractLockingScript, instrument.InstrumentCode,
 		gotBalances)
 
-	freezeTxID := *responseTx.TxHash()
+	freezeTxID := *responseTx.Tx.TxHash()
 
 	thawOrder := &actions.Order{
 		ComplianceAction: actions.ComplianceActionThaw,
@@ -361,7 +361,7 @@ func Test_Freeze_Balances_Valid(t *testing.T) {
 
 	// Find creation action
 	var thaw *actions.Thaw
-	for _, txout := range responseTx.TxOut {
+	for _, txout := range responseTx.Tx.TxOut {
 		action, err := protocol.Deserialize(txout.LockingScript, true)
 		if err != nil {
 			continue
@@ -539,7 +539,7 @@ func Test_Freeze_Contract_Valid(t *testing.T) {
 
 	// Find creation action
 	var freeze *actions.Freeze
-	for _, txout := range responseTx.TxOut {
+	for _, txout := range responseTx.Tx.TxOut {
 		action, err := protocol.Deserialize(txout.LockingScript, true)
 		if err != nil {
 			continue
@@ -564,11 +564,11 @@ func Test_Freeze_Contract_Valid(t *testing.T) {
 
 	contractTarget := freeze.Quantities[0]
 
-	if int(contractTarget.Index) >= len(responseTx.TxOut) {
-		t.Fatalf("Invalid output index : %d >= %d", contractTarget.Index, len(responseTx.TxOut))
+	if int(contractTarget.Index) >= len(responseTx.Tx.TxOut) {
+		t.Fatalf("Invalid output index : %d >= %d", contractTarget.Index, len(responseTx.Tx.TxOut))
 	}
 
-	lockingScript := responseTx.TxOut[contractTarget.Quantity].LockingScript
+	lockingScript := responseTx.Tx.TxOut[contractTarget.Quantity].LockingScript
 	if !lockingScript.Equal(contractLockingScript) {
 		t.Errorf("Wrong freeze locking script : got %s, want %s", lockingScript,
 			contractLockingScript)
@@ -584,7 +584,7 @@ func Test_Freeze_Contract_Valid(t *testing.T) {
 		t.Logf("Contract is frozen")
 	}
 
-	freezeTxID := *responseTx.TxHash()
+	freezeTxID := *responseTx.Tx.TxHash()
 
 	thawOrder := &actions.Order{
 		ComplianceAction: actions.ComplianceActionThaw,
@@ -688,7 +688,7 @@ func Test_Freeze_Contract_Valid(t *testing.T) {
 
 	// Find creation action
 	var thaw *actions.Thaw
-	for _, txout := range responseTx.TxOut {
+	for _, txout := range responseTx.Tx.TxOut {
 		action, err := protocol.Deserialize(txout.LockingScript, true)
 		if err != nil {
 			continue
@@ -856,7 +856,7 @@ func Test_Freeze_Instrument_Valid(t *testing.T) {
 
 	// Find creation action
 	var freeze *actions.Freeze
-	for _, txout := range responseTx.TxOut {
+	for _, txout := range responseTx.Tx.TxOut {
 		action, err := protocol.Deserialize(txout.LockingScript, true)
 		if err != nil {
 			continue
@@ -881,11 +881,11 @@ func Test_Freeze_Instrument_Valid(t *testing.T) {
 
 	contractTarget := freeze.Quantities[0]
 
-	if int(contractTarget.Index) >= len(responseTx.TxOut) {
-		t.Fatalf("Invalid output index : %d >= %d", contractTarget.Index, len(responseTx.TxOut))
+	if int(contractTarget.Index) >= len(responseTx.Tx.TxOut) {
+		t.Fatalf("Invalid output index : %d >= %d", contractTarget.Index, len(responseTx.Tx.TxOut))
 	}
 
-	lockingScript := responseTx.TxOut[contractTarget.Quantity].LockingScript
+	lockingScript := responseTx.Tx.TxOut[contractTarget.Quantity].LockingScript
 	if !lockingScript.Equal(contractLockingScript) {
 		t.Errorf("Wrong freeze locking script : got %s, want %s", lockingScript,
 			contractLockingScript)
@@ -901,7 +901,7 @@ func Test_Freeze_Instrument_Valid(t *testing.T) {
 		t.Logf("Instrument is frozen")
 	}
 
-	freezeTxID := *responseTx.TxHash()
+	freezeTxID := *responseTx.Tx.TxHash()
 
 	thawOrder := &actions.Order{
 		ComplianceAction: actions.ComplianceActionThaw,
@@ -1005,7 +1005,7 @@ func Test_Freeze_Instrument_Valid(t *testing.T) {
 
 	// Find creation action
 	var thaw *actions.Thaw
-	for _, txout := range responseTx.TxOut {
+	for _, txout := range responseTx.Tx.TxOut {
 		action, err := protocol.Deserialize(txout.LockingScript, true)
 		if err != nil {
 			continue

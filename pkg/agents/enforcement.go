@@ -424,12 +424,18 @@ func (a *Agent) processFreezeOrder(ctx context.Context, transaction *state.Trans
 
 	transaction.Lock()
 	transaction.AddResponseTxID(a.ContractHash(), outputIndex, freezeTxID)
+	tx := transaction.Tx.Copy()
 	transaction.Unlock()
+
+	etx, err := buildExpandedTx(freezeTx.MsgTx, []*wire.MsgTx{tx})
+	if err != nil {
+		return errors.Wrap(err, "expanded tx")
+	}
 
 	logger.InfoWithFields(ctx, []logger.Field{
 		logger.Stringer("response_txid", freezeTxID),
 	}, "Responding with freeze")
-	if err := a.BroadcastTx(ctx, freezeTx.MsgTx, nil); err != nil {
+	if err := a.BroadcastTx(ctx, etx, nil); err != nil {
 		return errors.Wrap(err, "broadcast")
 	}
 
@@ -694,12 +700,18 @@ func (a *Agent) processThawOrder(ctx context.Context, transaction *state.Transac
 
 	transaction.Lock()
 	transaction.AddResponseTxID(a.ContractHash(), outputIndex, thawTxID)
+	tx := transaction.Tx.Copy()
 	transaction.Unlock()
+
+	etx, err := buildExpandedTx(thawTx.MsgTx, []*wire.MsgTx{tx})
+	if err != nil {
+		return errors.Wrap(err, "expanded tx")
+	}
 
 	logger.InfoWithFields(ctx, []logger.Field{
 		logger.Stringer("response_txid", thawTxID),
 	}, "Responding with thaw")
-	if err := a.BroadcastTx(ctx, thawTx.MsgTx, nil); err != nil {
+	if err := a.BroadcastTx(ctx, etx, nil); err != nil {
 		return errors.Wrap(err, "broadcast")
 	}
 
@@ -996,12 +1008,18 @@ func (a *Agent) processConfiscateOrder(ctx context.Context, transaction *state.T
 
 	transaction.Lock()
 	transaction.AddResponseTxID(a.ContractHash(), outputIndex, confiscationTxID)
+	tx := transaction.Tx.Copy()
 	transaction.Unlock()
+
+	etx, err := buildExpandedTx(confiscationTx.MsgTx, []*wire.MsgTx{tx})
+	if err != nil {
+		return errors.Wrap(err, "expanded tx")
+	}
 
 	logger.InfoWithFields(ctx, []logger.Field{
 		logger.Stringer("response_txid", confiscationTxID),
 	}, "Responding with confiscation")
-	if err := a.BroadcastTx(ctx, confiscationTx.MsgTx, nil); err != nil {
+	if err := a.BroadcastTx(ctx, etx, nil); err != nil {
 		return errors.Wrap(err, "broadcast")
 	}
 

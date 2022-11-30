@@ -977,7 +977,7 @@ func MockOutPointTx(lockingScript bitcoin.Script, value uint64) (*wire.MsgTx, *w
 }
 
 type MockTxBroadcaster struct {
-	txs []*wire.MsgTx
+	txs []*expanded_tx.ExpandedTx
 
 	lock sync.Mutex
 }
@@ -986,12 +986,12 @@ func NewMockTxBroadcaster() *MockTxBroadcaster {
 	return &MockTxBroadcaster{}
 }
 
-func (b *MockTxBroadcaster) BroadcastTx(ctx context.Context, tx *wire.MsgTx,
+func (b *MockTxBroadcaster) BroadcastTx(ctx context.Context, etx *expanded_tx.ExpandedTx,
 	indexes []uint32) error {
 	b.lock.Lock()
 	defer b.lock.Unlock()
 
-	b.txs = append(b.txs, tx)
+	b.txs = append(b.txs, etx)
 	return nil
 }
 
@@ -1002,7 +1002,7 @@ func (b *MockTxBroadcaster) ClearTxs() {
 	b.txs = nil
 }
 
-func (b *MockTxBroadcaster) GetLastTx() *wire.MsgTx {
+func (b *MockTxBroadcaster) GetLastTx() *expanded_tx.ExpandedTx {
 	b.lock.Lock()
 	defer b.lock.Unlock()
 

@@ -533,14 +533,20 @@ func (a *Agent) sendSignatureRequest(ctx context.Context, currentTransaction *st
 
 	currentTransaction.Lock()
 	currentTransaction.AddResponseTxID(a.ContractHash(), currentOutputIndex, messageTxID)
+	currentTx := currentTransaction.Tx.Copy()
 	currentTransaction.Unlock()
+
+	etx, err := buildExpandedTx(messageTx.MsgTx, []*wire.MsgTx{currentTx})
+	if err != nil {
+		return errors.Wrap(err, "expanded tx")
+	}
 
 	logger.InfoWithFields(ctx, []logger.Field{
 		logger.Stringer("previous_contract_locking_script",
 			transferContracts.PreviousLockingScript),
 		logger.Stringer("response_txid", messageTxID),
 	}, "Sending signature request to previous contract")
-	if err := a.BroadcastTx(ctx, messageTx.MsgTx, message.ReceiverIndexes); err != nil {
+	if err := a.BroadcastTx(ctx, etx, message.ReceiverIndexes); err != nil {
 		return errors.Wrap(err, "broadcast")
 	}
 

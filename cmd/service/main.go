@@ -12,9 +12,9 @@ import (
 	"github.com/tokenized/config"
 	"github.com/tokenized/logger"
 	"github.com/tokenized/pkg/bitcoin"
+	"github.com/tokenized/pkg/expanded_tx"
 	"github.com/tokenized/pkg/peer_channels"
 	"github.com/tokenized/pkg/storage"
-	"github.com/tokenized/pkg/wire"
 	"github.com/tokenized/smart_contract_agent/internal/platform"
 	"github.com/tokenized/smart_contract_agent/internal/state"
 	"github.com/tokenized/smart_contract_agent/pkg/agents"
@@ -185,7 +185,7 @@ func NewSpyNodeBroadcaster(client spyNodeClient.Client) *SpyNodeBroadcaster {
 	}
 }
 
-func (b *SpyNodeBroadcaster) BroadcastTx(ctx context.Context, tx *wire.MsgTx,
+func (b *SpyNodeBroadcaster) BroadcastTx(ctx context.Context, etx *expanded_tx.ExpandedTx,
 	indexes []uint32) error {
-	return b.client.SendTxAndMarkOutputs(ctx, tx, indexes)
+	return b.client.SendExpandedTxAndMarkOutputs(ctx, etx, indexes)
 }

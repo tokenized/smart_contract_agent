@@ -202,7 +202,7 @@ func (a *Agent) ProcessPeerChannelMessage(ctx context.Context, msg peer_channels
 		}
 		a.caches.Transactions.Release(ctx, txid)
 
-		if err := a.BroadcastTx(ctx, etx.Tx, nil); err != nil {
+		if err := a.BroadcastTx(ctx, etx, nil); err != nil {
 			if _, ok := errors.Cause(err).(spyNodeClient.RejectError); ok {
 				if replyTo != nil && replyTo.PeerChannel != nil {
 					if err := a.sendPeerChannelReject(ctx, replyTo.PeerChannel, etx,

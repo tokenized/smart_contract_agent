@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/tokenized/pkg/bitcoin"
+	"github.com/tokenized/pkg/expanded_tx"
 	"github.com/tokenized/pkg/txbuilder"
 	"github.com/tokenized/pkg/wire"
 	"github.com/tokenized/specification/dist/golang/actions"
@@ -133,4 +134,39 @@ func containsRequest(actions []Action) bool {
 	}
 
 	return false
+}
+
+func buildExpandedTx(tx *wire.MsgTx, ancestors []*wire.MsgTx) (*expanded_tx.ExpandedTx, error) {
+	etx := &expanded_tx.ExpandedTx{
+		Tx: tx,
+	}
+
+	for _, txin := range tx.TxIn {
+		parentTx := etx.Ancestors.GetTx(txin.PreviousOutPoint.Hash)
+		if parentTx != nil {
+			ptx := parentTx.GetTx()
+			if ptx == nil {
+				continue // already have this ancestor
+			}
+		}
+
+		found := false
+		for _, ancestor := range ancestors {
+			txid := *ancestor.TxHash()
+			if txid.Equal(&txin.PreviousOutPoint.Hash) {
+				found = true
+				etx.Ancestors = append(etx.Ancestors, &expanded_tx.AncestorTx{
+					Tx: ancestor,
+				})
+				break
+			}
+		}
+
+		if !found {
+			return nil, errors.Wrap(expanded_tx.MissingInput,
+				"parent tx: "+txin.PreviousOutPoint.Hash.String())
+		}
+	}
+
+	return etx, nil
 }

@@ -9,6 +9,7 @@ import (
 	channelsExpandedTx "github.com/tokenized/channels/expanded_tx"
 	"github.com/tokenized/config"
 	"github.com/tokenized/pkg/bitcoin"
+	"github.com/tokenized/pkg/expanded_tx"
 	"github.com/tokenized/pkg/peer_channels"
 	"github.com/tokenized/pkg/storage"
 	"github.com/tokenized/pkg/wire"
@@ -71,7 +72,7 @@ type Agent struct {
 }
 
 type Broadcaster interface {
-	BroadcastTx(context.Context, *wire.MsgTx, []uint32) error
+	BroadcastTx(context.Context, *expanded_tx.ExpandedTx, []uint32) error
 }
 
 type Fetcher interface {
@@ -193,7 +194,9 @@ func (a *Agent) Key() bitcoin.Key {
 	return a.key
 }
 
-func (a *Agent) BroadcastTx(ctx context.Context, tx *wire.MsgTx, indexes []uint32) error {
+func (a *Agent) BroadcastTx(ctx context.Context, etx *expanded_tx.ExpandedTx,
+	indexes []uint32) error {
+
 	a.lock.Lock()
 	broadcaster := a.broadcaster
 	a.lock.Unlock()
@@ -202,7 +205,7 @@ func (a *Agent) BroadcastTx(ctx context.Context, tx *wire.MsgTx, indexes []uint3
 		return nil
 	}
 
-	return broadcaster.BroadcastTx(ctx, tx, indexes)
+	return broadcaster.BroadcastTx(ctx, etx, indexes)
 }
 
 func (a *Agent) FetchTx(ctx context.Context, txid bitcoin.Hash32) (*wire.MsgTx, error) {

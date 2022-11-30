@@ -317,13 +317,19 @@ func (a *Agent) completeSettlement(ctx context.Context, transferTransaction *sta
 
 	transferTransaction.Lock()
 	transferTransaction.AddResponseTxID(a.ContractHash(), transferOutputIndex, settlementTxID)
+	transferTx := transferTransaction.Tx.Copy()
 	transferTransaction.Unlock()
+
+	etx, err := buildExpandedTx(settlementTx.MsgTx, []*wire.MsgTx{transferTx})
+	if err != nil {
+		return errors.Wrap(err, "expanded tx")
+	}
 
 	// Broadcast settlement tx.
 	logger.InfoWithFields(ctx, []logger.Field{
 		logger.Stringer("response_txid", settlementTxID),
 	}, "Responding with settlement")
-	if err := a.BroadcastTx(ctx, settlementTx.MsgTx, nil); err != nil {
+	if err := a.BroadcastTx(ctx, etx, nil); err != nil {
 		return errors.Wrap(err, "broadcast")
 	}
 

@@ -240,9 +240,15 @@ func (a *Agent) FinalizeVote(ctx context.Context, voteTxID bitcoin.Hash32, now u
 
 	proposalTransaction.Lock()
 	proposalTransaction.AddResponseTxID(a.ContractHash(), outputIndex, voteResultTxID)
+	proposalTx := proposalTransaction.Tx.Copy()
 	proposalTransaction.Unlock()
 
-	if err := a.BroadcastTx(ctx, voteResultTx.MsgTx, nil); err != nil {
+	etx, err := buildExpandedTx(voteResultTx.MsgTx, []*wire.MsgTx{proposalTx})
+	if err != nil {
+		return errors.Wrap(err, "expanded tx")
+	}
+
+	if err := a.BroadcastTx(ctx, etx, nil); err != nil {
 		return errors.Wrap(err, "broadcast")
 	}
 

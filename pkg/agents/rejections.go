@@ -398,7 +398,13 @@ func (a *Agent) sendRejection(ctx context.Context, transaction *state.Transactio
 
 	transaction.Lock()
 	transaction.AddResponseTxID(a.ContractHash(), outputIndex, rejectTxID)
+	tx := transaction.Tx.Copy()
 	transaction.Unlock()
+
+	etx, err := buildExpandedTx(rejectTx.MsgTx, []*wire.MsgTx{tx})
+	if err != nil {
+		return errors.Wrap(err, "expanded tx")
+	}
 
 	var rejectLabel string
 	rejectData := actions.RejectionsData(rejection.RejectionCode)
@@ -414,7 +420,7 @@ func (a *Agent) sendRejection(ctx context.Context, transaction *state.Transactio
 		logger.String("reject_label", rejectLabel),
 		logger.String("reject_message", rejection.Message),
 	}, "Responding with rejection")
-	if err := a.BroadcastTx(ctx, rejectTx.MsgTx, nil); err != nil {
+	if err := a.BroadcastTx(ctx, etx, nil); err != nil {
 		return errors.Wrap(err, "broadcast")
 	}
 
