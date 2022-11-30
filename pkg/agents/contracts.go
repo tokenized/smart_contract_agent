@@ -244,6 +244,10 @@ func (a *Agent) processContractOffer(ctx context.Context, transaction *state.Tra
 		return errors.Wrap(err, "broadcast")
 	}
 
+	if err := a.Respond(ctx, txid, formationTransaction); err != nil {
+		return errors.Wrap(err, "respond")
+	}
+
 	if err := a.postTransactionToContractSubscriptions(ctx, formationTransaction); err != nil {
 		return errors.Wrap(err, "post formation")
 	}
@@ -680,6 +684,10 @@ func (a *Agent) processContractAmendment(ctx context.Context, transaction *state
 
 	if err := a.BroadcastTx(ctx, formationTx.MsgTx, nil); err != nil {
 		return errors.Wrap(err, "broadcast")
+	}
+
+	if err := a.Respond(ctx, txid, formationTransaction); err != nil {
+		return errors.Wrap(err, "respond")
 	}
 
 	if err := a.postTransactionToContractSubscriptions(ctx, formationTransaction); err != nil {

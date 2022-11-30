@@ -5,8 +5,11 @@ import (
 	"sync"
 	"time"
 
+	"github.com/tokenized/channels"
+	channelsExpandedTx "github.com/tokenized/channels/expanded_tx"
 	"github.com/tokenized/config"
 	"github.com/tokenized/pkg/bitcoin"
+	"github.com/tokenized/pkg/peer_channels"
 	"github.com/tokenized/pkg/storage"
 	"github.com/tokenized/pkg/wire"
 	"github.com/tokenized/smart_contract_agent/internal/platform"
@@ -61,6 +64,9 @@ type Agent struct {
 	scheduler *platform.Scheduler
 	factory   AgentFactory
 
+	peerChannelsFactory   *peer_channels.Factory
+	peerChannelsProtocols *channels.Protocols
+
 	lock sync.Mutex
 }
 
@@ -84,7 +90,7 @@ type AgentFactory interface {
 func NewAgent(ctx context.Context, key bitcoin.Key, lockingScript bitcoin.Script, config Config,
 	feeLockingScript bitcoin.Script, caches *state.Caches, store storage.CopyList,
 	broadcaster Broadcaster, fetcher Fetcher, headers BlockHeaders, scheduler *platform.Scheduler,
-	factory AgentFactory) (*Agent, error) {
+	factory AgentFactory, peerChannelsFactory *peer_channels.Factory) (*Agent, error) {
 
 	contract, err := caches.Contracts.Get(ctx, lockingScript)
 	if err != nil {
@@ -96,18 +102,20 @@ func NewAgent(ctx context.Context, key bitcoin.Key, lockingScript bitcoin.Script
 	}
 
 	result := &Agent{
-		key:              key,
-		config:           config,
-		contract:         contract,
-		lockingScript:    lockingScript,
-		feeLockingScript: feeLockingScript,
-		caches:           caches,
-		store:            store,
-		broadcaster:      broadcaster,
-		fetcher:          fetcher,
-		headers:          headers,
-		scheduler:        scheduler,
-		factory:          factory,
+		key:                   key,
+		config:                config,
+		contract:              contract,
+		lockingScript:         lockingScript,
+		feeLockingScript:      feeLockingScript,
+		caches:                caches,
+		store:                 store,
+		broadcaster:           broadcaster,
+		fetcher:               fetcher,
+		headers:               headers,
+		scheduler:             scheduler,
+		factory:               factory,
+		peerChannelsFactory:   peerChannelsFactory,
+		peerChannelsProtocols: channels.NewProtocols(channelsExpandedTx.NewProtocol()),
 	}
 
 	return result, nil

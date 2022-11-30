@@ -12,6 +12,7 @@ import (
 	"github.com/tokenized/config"
 	"github.com/tokenized/logger"
 	"github.com/tokenized/pkg/bitcoin"
+	"github.com/tokenized/pkg/peer_channels"
 	"github.com/tokenized/pkg/storage"
 	"github.com/tokenized/pkg/wire"
 	"github.com/tokenized/smart_contract_agent/internal/platform"
@@ -82,6 +83,8 @@ func main() {
 
 	scheduler := platform.NewScheduler()
 
+	peerChannelsFactory := peer_channels.NewFactory()
+
 	if cfg.SpyNode.ConnectionType != spyNodeClient.ConnectionTypeFull {
 		logger.Fatal(ctx, "Spynode connection type must be full to receive data : %s", err)
 	}
@@ -104,7 +107,7 @@ func main() {
 
 	service := service.NewService(cfg.AgentKey, lockingScript, cfg.Agents, feeLockingScript,
 		spyNode, caches, store, NewSpyNodeBroadcaster(spyNode), spyNode,
-		platform.NewHeaders(spyNode), scheduler)
+		platform.NewHeaders(spyNode), scheduler, peerChannelsFactory)
 	spyNode.RegisterHandler(service)
 
 	if err := service.Load(ctx); err != nil {

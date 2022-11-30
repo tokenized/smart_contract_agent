@@ -2,13 +2,11 @@ package state
 
 import (
 	"bytes"
-	"context"
 	"crypto/sha256"
 	"encoding/binary"
 
 	"github.com/tokenized/cacher"
 	"github.com/tokenized/pkg/bitcoin"
-	"github.com/tokenized/pkg/storage"
 
 	"github.com/pkg/errors"
 )
@@ -27,6 +25,7 @@ type Caches struct {
 	Votes                *VoteCache
 	Ballots              *BallotCache
 	RecoveryTransactions *RecoveryTransactionsCache
+	Responders           *ResponderCache
 }
 
 func NewCaches(cache *cacher.Cache) (*Caches, error) {
@@ -85,6 +84,12 @@ func NewCaches(cache *cacher.Cache) (*Caches, error) {
 		return nil, errors.Wrap(err, "recovery transactions")
 	}
 	result.RecoveryTransactions = recoveryTransactions
+
+	responders, err := NewResponderCache(cache)
+	if err != nil {
+		return nil, errors.Wrap(err, "responders")
+	}
+	result.Responders = responders
 
 	return result, nil
 }
@@ -156,23 +161,5 @@ func (id *InstrumentCode) UnmarshalText(text []byte) error {
 	}
 
 	*id = InstrumentCode(*h)
-	return nil
-}
-
-func CopyRecursive(ctx context.Context, store storage.CopyList, fromPrefix, toPrefix string) error {
-	items, err := store.List(ctx, fromPrefix)
-	if err != nil {
-		return errors.Wrap(err, "list")
-	}
-
-	fromPrefixLength := len(fromPrefix)
-
-	for i, from := range items {
-		to := toPrefix + from[fromPrefixLength:]
-		if err := store.Copy(ctx, from, to); err != nil {
-			return errors.Wrapf(err, "copy %d/%d", i, len(items))
-		}
-	}
-
 	return nil
 }

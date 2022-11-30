@@ -433,6 +433,10 @@ func (a *Agent) processFreezeOrder(ctx context.Context, transaction *state.Trans
 		return errors.Wrap(err, "broadcast")
 	}
 
+	if err := a.Respond(ctx, txid, freezeTransaction); err != nil {
+		return errors.Wrap(err, "respond")
+	}
+
 	if isFull {
 		if err := a.postTransactionToContractSubscriptions(ctx, freezeTransaction); err != nil {
 			return errors.Wrap(err, "post freeze to contract")
@@ -697,6 +701,10 @@ func (a *Agent) processThawOrder(ctx context.Context, transaction *state.Transac
 	}, "Responding with thaw")
 	if err := a.BroadcastTx(ctx, thawTx.MsgTx, nil); err != nil {
 		return errors.Wrap(err, "broadcast")
+	}
+
+	if err := a.Respond(ctx, txid, thawTransaction); err != nil {
+		return errors.Wrap(err, "respond")
 	}
 
 	if isFull {
@@ -995,6 +1003,10 @@ func (a *Agent) processConfiscateOrder(ctx context.Context, transaction *state.T
 	}, "Responding with confiscation")
 	if err := a.BroadcastTx(ctx, confiscationTx.MsgTx, nil); err != nil {
 		return errors.Wrap(err, "broadcast")
+	}
+
+	if err := a.Respond(ctx, txid, confiscationTransaction); err != nil {
+		return errors.Wrap(err, "respond")
 	}
 
 	if err := a.postTransactionToSubscriptions(ctx, append(lockingScripts, depositLockingScript),

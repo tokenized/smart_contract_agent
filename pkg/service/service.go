@@ -7,6 +7,7 @@ import (
 	"sync"
 
 	"github.com/tokenized/pkg/bitcoin"
+	"github.com/tokenized/pkg/peer_channels"
 	"github.com/tokenized/pkg/storage"
 	"github.com/tokenized/smart_contract_agent/internal/platform"
 	"github.com/tokenized/smart_contract_agent/internal/state"
@@ -34,10 +35,11 @@ type Service struct {
 	caches        *state.Caches
 	store         storage.StreamStorage
 
-	broadcaster agents.Broadcaster
-	fetcher     agents.Fetcher
-	headers     agents.BlockHeaders
-	scheduler   *platform.Scheduler
+	broadcaster         agents.Broadcaster
+	fetcher             agents.Fetcher
+	headers             agents.BlockHeaders
+	scheduler           *platform.Scheduler
+	peerChannelsFactory *peer_channels.Factory
 
 	nextSpyNodeMessageID uint64
 
@@ -47,7 +49,8 @@ type Service struct {
 func NewService(key bitcoin.Key, lockingScript bitcoin.Script, config agents.Config,
 	feeLockingScript bitcoin.Script, spyNodeClient spynode.Client, caches *state.Caches,
 	store storage.StreamStorage, broadcaster agents.Broadcaster, fetcher agents.Fetcher,
-	headers agents.BlockHeaders, scheduler *platform.Scheduler) *Service {
+	headers agents.BlockHeaders, scheduler *platform.Scheduler,
+	peerChannelsFactory *peer_channels.Factory) *Service {
 
 	return &Service{
 		key:                  key,
@@ -61,6 +64,7 @@ func NewService(key bitcoin.Key, lockingScript bitcoin.Script, config agents.Con
 		fetcher:              fetcher,
 		headers:              headers,
 		scheduler:            scheduler,
+		peerChannelsFactory:  peerChannelsFactory,
 		nextSpyNodeMessageID: 1,
 	}
 }
@@ -83,7 +87,8 @@ func (s *Service) Load(ctx context.Context) error {
 	}
 
 	agent, err := agents.NewAgent(ctx, s.key, s.lockingScript, s.config, s.feeLockingScript,
-		s.caches, s.store, s.broadcaster, s.fetcher, s.headers, s.scheduler, s)
+		s.caches, s.store, s.broadcaster, s.fetcher, s.headers, s.scheduler, s,
+		s.peerChannelsFactory)
 	if err != nil {
 		return errors.Wrap(err, "new agent")
 	}

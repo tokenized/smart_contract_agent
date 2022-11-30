@@ -576,6 +576,7 @@ func MockVoteContractAmendmentCompleted(ctx context.Context, caches *TestCaches,
 	}); err != nil {
 		panic(fmt.Sprintf("Failed to add proposal tx : %s", err))
 	}
+	caches.Caches.Transactions.Release(ctx, *vote.ProposalTxID)
 
 	voteTx := wire.NewMsgTx(1)
 	voteTx.AddTxIn(wire.NewTxIn(wire.NewOutPoint(vote.ProposalTxID, 0), contractLockingScript))
@@ -600,6 +601,7 @@ func MockVoteContractAmendmentCompleted(ctx context.Context, caches *TestCaches,
 	}); err != nil {
 		panic(fmt.Sprintf("Failed to add vote tx : %s", err))
 	}
+	caches.Caches.Transactions.Release(ctx, *vote.VoteTxID)
 
 	vote.Result.VoteTxId = vote.VoteTxID[:]
 
@@ -626,6 +628,7 @@ func MockVoteContractAmendmentCompleted(ctx context.Context, caches *TestCaches,
 	}); err != nil {
 		panic(fmt.Sprintf("Failed to add result tx : %s", err))
 	}
+	caches.Caches.Transactions.Release(ctx, *vote.ResultTxID)
 
 	addedVote, err := caches.Caches.Votes.Add(ctx, contractLockingScript, vote)
 	if err != nil {
@@ -697,6 +700,7 @@ func MockVoteInstrumentAmendmentCompleted(ctx context.Context, caches *TestCache
 	}); err != nil {
 		panic(fmt.Sprintf("Failed to add proposal tx : %s", err))
 	}
+	caches.Caches.Transactions.Release(ctx, *vote.ProposalTxID)
 
 	voteTx := wire.NewMsgTx(1)
 	voteTx.AddTxIn(wire.NewTxIn(wire.NewOutPoint(vote.ProposalTxID, 0), contractLockingScript))
@@ -721,6 +725,7 @@ func MockVoteInstrumentAmendmentCompleted(ctx context.Context, caches *TestCache
 	}); err != nil {
 		panic(fmt.Sprintf("Failed to add vote tx : %s", err))
 	}
+	caches.Caches.Transactions.Release(ctx, *vote.VoteTxID)
 
 	vote.Result.VoteTxId = vote.VoteTxID[:]
 
@@ -747,6 +752,7 @@ func MockVoteInstrumentAmendmentCompleted(ctx context.Context, caches *TestCache
 	}); err != nil {
 		panic(fmt.Sprintf("Failed to add result tx : %s", err))
 	}
+	caches.Caches.Transactions.Release(ctx, *vote.ResultTxID)
 
 	addedVote, err := caches.Caches.Votes.Add(ctx, contractLockingScript, vote)
 	if err != nil {
@@ -827,6 +833,7 @@ func MockProposal(ctx context.Context, caches *TestCaches, contract *Contract,
 	}); err != nil {
 		panic(fmt.Sprintf("Failed to add proposal tx : %s", err))
 	}
+	caches.Caches.Transactions.Release(ctx, *vote.ProposalTxID)
 
 	voteTx := wire.NewMsgTx(1)
 	voteTx.AddTxIn(wire.NewTxIn(wire.NewOutPoint(vote.ProposalTxID, 0), contractLockingScript))
@@ -851,6 +858,7 @@ func MockProposal(ctx context.Context, caches *TestCaches, contract *Contract,
 	}); err != nil {
 		panic(fmt.Sprintf("Failed to add vote tx : %s", err))
 	}
+	caches.Caches.Transactions.Release(ctx, *vote.VoteTxID)
 
 	addedVote, err := caches.Caches.Votes.Add(ctx, contractLockingScript, vote)
 	if err != nil {
@@ -944,6 +952,28 @@ func MockOutPoint(lockingScript bitcoin.Script, value uint64) *wire.OutPoint {
 	rand.Read(outpoint.Hash[:])
 
 	return outpoint
+}
+
+func MockOutPointTx(lockingScript bitcoin.Script, value uint64) (*wire.MsgTx, *wire.OutPoint) {
+	tx := wire.NewMsgTx(1)
+
+	for i := 0; i < rand.Intn(3); i++ {
+		tx.AddTxOut(wire.NewTxOut(uint64(rand.Intn(1000)+1), nil))
+	}
+
+	index := len(tx.TxOut)
+	tx.AddTxOut(wire.NewTxOut(value, lockingScript))
+
+	for i := 0; i < rand.Intn(3); i++ {
+		tx.AddTxOut(wire.NewTxOut(uint64(rand.Intn(1000)+1), nil))
+	}
+
+	outpoint := &wire.OutPoint{
+		Hash:  *tx.TxHash(),
+		Index: uint32(index),
+	}
+
+	return tx, outpoint
 }
 
 type MockTxBroadcaster struct {

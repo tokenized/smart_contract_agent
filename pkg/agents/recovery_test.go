@@ -10,6 +10,7 @@ import (
 	"github.com/tokenized/logger"
 	"github.com/tokenized/pkg/bitcoin"
 	"github.com/tokenized/pkg/expanded_tx"
+	"github.com/tokenized/pkg/peer_channels"
 	"github.com/tokenized/pkg/storage"
 	"github.com/tokenized/pkg/txbuilder"
 	"github.com/tokenized/pkg/wire"
@@ -45,7 +46,7 @@ func Test_Recovery_AcceptContractOffer(t *testing.T) {
 	}
 
 	agent, err := NewAgent(ctx, contractKey, contractLockingScript, agentConfig, feeLockingScript,
-		caches.Caches, store, broadcaster, nil, nil, nil, nil)
+		caches.Caches, store, broadcaster, nil, nil, nil, nil, peer_channels.NewFactory())
 	if err != nil {
 		t.Fatalf("Failed to create agent : %s", err)
 	}
@@ -234,7 +235,7 @@ func Test_Recovery_ContractOfferAlreadyAccepted(t *testing.T) {
 	}
 
 	agent, err := NewAgent(ctx, contractKey, contractLockingScript, agentConfig, feeLockingScript,
-		caches.Caches, store, broadcaster, nil, nil, nil, nil)
+		caches.Caches, store, broadcaster, nil, nil, nil, nil, peer_channels.NewFactory())
 	if err != nil {
 		t.Fatalf("Failed to create agent : %s", err)
 	}

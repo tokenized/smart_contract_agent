@@ -456,6 +456,10 @@ func (a *Agent) processProposal(ctx context.Context, transaction *state.Transact
 		return errors.Wrap(err, "broadcast")
 	}
 
+	if err := a.Respond(ctx, txid, voteTransaction); err != nil {
+		return errors.Wrap(err, "respond")
+	}
+
 	if err := a.postTransactionToContractSubscriptions(ctx, voteTransaction); err != nil {
 		return errors.Wrap(err, "post vote")
 	}
@@ -778,6 +782,10 @@ func (a *Agent) processBallotCast(ctx context.Context, transaction *state.Transa
 
 	if err := a.BroadcastTx(ctx, ballotCountedTx.MsgTx, nil); err != nil {
 		return errors.Wrap(err, "broadcast")
+	}
+
+	if err := a.Respond(ctx, txid, ballotCountedTransaction); err != nil {
+		return errors.Wrap(err, "respond")
 	}
 
 	if err := a.postTransactionToSubscriptions(ctx, []bitcoin.Script{lockingScript},

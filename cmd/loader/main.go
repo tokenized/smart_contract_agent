@@ -14,6 +14,7 @@ import (
 	"github.com/tokenized/logger"
 	"github.com/tokenized/pkg/bitcoin"
 	"github.com/tokenized/pkg/expanded_tx"
+	"github.com/tokenized/pkg/peer_channels"
 	"github.com/tokenized/pkg/storage"
 	"github.com/tokenized/pkg/wire"
 	"github.com/tokenized/smart_contract_agent/internal/state"
@@ -92,13 +93,15 @@ func main() {
 
 	factory := NewFactory()
 
+	peerChannelsFactory := peer_channels.NewFactory()
+
 	lockingScript, err := cfg.AgentKey.LockingScript()
 	if err != nil {
 		logger.Fatal(ctx, "Failed to create agent locking script : %s", err)
 	}
 
 	agent, err := agents.NewAgent(ctx, cfg.AgentKey, lockingScript, cfg.Agents, feeLockingScript,
-		caches, store, broadcaster, woc, woc, nil, factory)
+		caches, store, broadcaster, woc, woc, nil, factory, peerChannelsFactory)
 	if err != nil {
 		logger.Fatal(ctx, "Failed to create agent : %s", err)
 	}

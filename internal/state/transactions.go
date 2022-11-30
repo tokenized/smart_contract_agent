@@ -124,13 +124,39 @@ func (c *TransactionCache) AddExpandedTx(ctx context.Context,
 	}
 
 	txid := *etx.Tx.TxHash()
-	tx, err := c.AddRaw(ctx, etx.Tx, nil)
+	tx, err := c.AddRawWithOutputs(ctx, etx.Tx, etx.SpentOutputs)
 	if err != nil {
 		return nil, errors.Wrapf(err, "add: %s", txid)
 	}
-	c.Release(ctx, txid)
 
 	return tx, nil
+}
+
+func (c *TransactionCache) AddRawWithOutputs(ctx context.Context, tx *wire.MsgTx,
+	spentOutputs []*expanded_tx.Output) (*Transaction, error) {
+
+	itx := &Transaction{
+		Tx:           tx,
+		SpentOutputs: spentOutputs,
+	}
+
+	item, err := c.cacher.Add(ctx, c.typ, TransactionPath(itx.GetTxID()), itx)
+	if err != nil {
+		return nil, errors.Wrap(err, "add")
+	}
+
+	addedTx := item.(*Transaction)
+	if itx != addedTx {
+		// Not a new tx
+		addedTx.Lock()
+		if len(addedTx.SpentOutputs) == 0 {
+			addedTx.SpentOutputs = spentOutputs
+			addedTx.isModified = true
+		}
+		addedTx.Unlock()
+	}
+
+	return addedTx, nil
 }
 
 func (c *TransactionCache) AddRaw(ctx context.Context, tx *wire.MsgTx,
@@ -146,9 +172,15 @@ func (c *TransactionCache) AddRaw(ctx context.Context, tx *wire.MsgTx,
 		return nil, errors.Wrap(err, "add")
 	}
 
-	ftx := item.(*Transaction)
-	ftx.AddMerkleProofs(merkleProofs)
-	return ftx, nil
+	addedTx := item.(*Transaction)
+	if itx != addedTx {
+		// Not a new tx
+		addedTx.Lock()
+		addedTx.AddMerkleProofs(merkleProofs)
+		addedTx.Unlock()
+	}
+
+	return addedTx, nil
 }
 
 func (tx *Transaction) AddMerkleProofs(merkleProofs []*merkle_proof.MerkleProof) bool {
@@ -190,30 +222,37 @@ func (tx *Transaction) AddMerkleProof(merkleProof *merkle_proof.MerkleProof) boo
 	return true
 }
 
-func (tx *Transaction) ExpandedTx(ctx context.Context) (*expanded_tx.ExpandedTx, error) {
+func (c *TransactionCache) ExpandedTx(ctx context.Context,
+	transaction *Transaction) (*expanded_tx.ExpandedTx, error) {
+
+	if err := c.populateAncestors(ctx, transaction); err != nil {
+		return nil, errors.Wrap(err, "populate ancestors")
+	}
+
 	return &expanded_tx.ExpandedTx{
-		Tx:           tx.Tx,
-		Ancestors:    tx.Ancestors,
-		SpentOutputs: tx.SpentOutputs,
+		Tx:           transaction.Tx,
+		Ancestors:    transaction.Ancestors,
+		SpentOutputs: transaction.SpentOutputs,
 	}, nil
 }
 
 func (c *TransactionCache) GetExpandedTx(ctx context.Context,
 	txid bitcoin.Hash32) (*expanded_tx.ExpandedTx, error) {
 
-	tx, err := c.GetTxWithAncestors(ctx, txid)
+	transaction, err := c.GetTxWithAncestors(ctx, txid)
 	if err != nil {
 		return nil, errors.Wrap(err, "get tx")
 	}
 
-	if tx == nil {
+	if transaction == nil {
 		return nil, nil
 	}
 
+	defer c.Release(ctx, txid)
 	return &expanded_tx.ExpandedTx{
-		Tx:           tx.Tx,
-		Ancestors:    tx.Ancestors,
-		SpentOutputs: tx.SpentOutputs,
+		Tx:           transaction.Tx,
+		Ancestors:    transaction.Ancestors,
+		SpentOutputs: transaction.SpentOutputs,
 	}, nil
 }
 
@@ -229,21 +268,28 @@ func (c *TransactionCache) GetTxWithAncestors(ctx context.Context,
 		return nil, nil
 	}
 
-	tx := item.(*Transaction)
-	tx.Lock()
-	defer tx.Unlock()
+	transaction := item.(*Transaction)
+	transaction.Lock()
+	if err := c.populateAncestors(ctx, transaction); err != nil {
+		transaction.Unlock()
+		c.Release(ctx, txid)
+		return nil, errors.Wrap(err, "populate ancestors")
+	}
+	transaction.Unlock()
+	return transaction, nil
+}
 
+func (c *TransactionCache) populateAncestors(ctx context.Context, transaction *Transaction) error {
 	// Fetch ancestors
-	for _, txin := range tx.Tx.TxIn {
-		atx := tx.Ancestors.GetTx(txin.PreviousOutPoint.Hash)
+	for _, txin := range transaction.Tx.TxIn {
+		atx := transaction.Ancestors.GetTx(txin.PreviousOutPoint.Hash)
 		if atx != nil {
 			continue // already have this ancestor
 		}
 
 		inputTx, err := c.Get(ctx, txin.PreviousOutPoint.Hash)
 		if err != nil {
-			c.Release(ctx, txid)
-			return nil, errors.Wrapf(err, "get input tx: %s", txin.PreviousOutPoint.Hash)
+			return errors.Wrapf(err, "get input tx: %s", txin.PreviousOutPoint.Hash)
 		}
 		if inputTx == nil {
 			continue
@@ -256,12 +302,12 @@ func (c *TransactionCache) GetTxWithAncestors(ctx context.Context,
 		}
 		inputTx.Unlock()
 
-		tx.Ancestors = append(tx.Ancestors, atx)
+		transaction.Ancestors = append(transaction.Ancestors, atx)
 
 		c.Release(ctx, txin.PreviousOutPoint.Hash)
 	}
 
-	return tx, nil
+	return nil
 }
 
 func (c *TransactionCache) Get(ctx context.Context, txid bitcoin.Hash32) (*Transaction, error) {

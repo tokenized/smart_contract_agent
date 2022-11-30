@@ -11,6 +11,7 @@ import (
 	"github.com/tokenized/logger"
 	"github.com/tokenized/pkg/bitcoin"
 	"github.com/tokenized/pkg/expanded_tx"
+	"github.com/tokenized/pkg/peer_channels"
 	"github.com/tokenized/pkg/storage"
 	"github.com/tokenized/pkg/txbuilder"
 	"github.com/tokenized/smart_contract_agent/internal/platform"
@@ -67,7 +68,8 @@ func Test_Proposal_Valid(t *testing.T) {
 	balances := state.MockBalances(ctx, caches, contract, instrument, 1000)
 
 	agent, err := NewAgent(ctx, contractKey, contractLockingScript, DefaultConfig(),
-		feeLockingScript, caches.Caches, store, broadcaster, nil, nil, scheduler, mockAgentFactory)
+		feeLockingScript, caches.Caches, store, broadcaster, nil, nil, scheduler, mockAgentFactory,
+		peer_channels.NewFactory())
 	if err != nil {
 		t.Fatalf("Failed to create agent : %s", err)
 	}
@@ -302,7 +304,8 @@ func Test_Ballots_Valid(t *testing.T) {
 
 	_, feeLockingScript, _ := state.MockKey()
 	agent, err := NewAgent(ctx, contractKey, contractLockingScript, DefaultConfig(),
-		feeLockingScript, caches.Caches, store, broadcaster, nil, nil, nil, nil)
+		feeLockingScript, caches.Caches, store, broadcaster, nil, nil, nil, nil,
+		peer_channels.NewFactory())
 	if err != nil {
 		t.Fatalf("Failed to create agent : %s", err)
 	}

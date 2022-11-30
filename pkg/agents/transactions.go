@@ -7,6 +7,7 @@ import (
 	"github.com/tokenized/channels/wallet"
 	"github.com/tokenized/logger"
 	"github.com/tokenized/pkg/bitcoin"
+	"github.com/tokenized/pkg/expanded_tx"
 	"github.com/tokenized/smart_contract_agent/internal/platform"
 	"github.com/tokenized/smart_contract_agent/internal/state"
 	"github.com/tokenized/specification/dist/golang/actions"
@@ -52,12 +53,22 @@ func (a *Agent) UpdateTransaction(ctx context.Context, transaction *state.Transa
 	}
 
 	if txState&wallet.TxStateUnsafe != 0 || txState&wallet.TxStateCancelled != 0 {
-		logger.Error(ctx, "Processed transaction is unsafe")
+		transaction.Lock()
+		if !transaction.SetIsProcessing(contractHash) {
+			transaction.Unlock()
+			return nil
+		}
+		txid := transaction.TxID()
+		transaction.Unlock()
+		defer clearIsProcessing(transaction, contractHash)
+
+		logger.WarnWithFields(ctx, []logger.Field{
+			logger.Stringer("txid", txid),
+		}, "Processing transaction is unsafe")
 
 		if err := a.processUnsafeTransaction(ctx, transaction, now); err != nil {
 			return errors.Wrap(err, "process unsafe")
 		}
-
 	}
 
 	return nil
@@ -103,7 +114,7 @@ func (a *Agent) Process(ctx context.Context, transaction *state.Transaction,
 	}, "Processing transaction")
 
 	var feeRate, minFeeRate float32
-	if containsRequest(actionList) {
+	if len(requestActions) > 0 {
 		transaction.Lock()
 		fee, err := transaction.CalculateFee()
 		if err != nil {
@@ -263,6 +274,18 @@ func (a *Agent) ProcessUnsafe(ctx context.Context, transaction *state.Transactio
 
 	for i, action := range actionList {
 		if isRequest(action.Action) {
+			processed := transaction.ContractProcessed(a.ContractHash(), action.OutputIndex)
+			if len(processed) > 0 {
+				logger.InfoWithFields(ctx, []logger.Field{
+					logger.Stringer("txid", txid),
+					logger.Int("output_index", action.OutputIndex),
+					logger.String("action_code", action.Action.Code()),
+					logger.String("action_name", action.Action.TypeName()),
+					logger.Stringer("response_txid", processed[0].ResponseTxID),
+				}, "Unsafe action already processed")
+				return nil
+			}
+
 			return errors.Wrap(a.sendRejection(ctx, transaction, action.OutputIndex,
 				platform.NewRejectError(actions.RejectionsDoubleSpend, ""), now), "reject")
 		}
@@ -346,6 +369,36 @@ func (a *Agent) processTransaction(ctx context.Context, transaction *state.Trans
 	return nil
 }
 
+func relevantRequestOutputs(etx *expanded_tx.ExpandedTx, agentLockingScript bitcoin.Script,
+	isTest bool) ([]int, error) {
+
+	var result []int
+	outputCount := etx.OutputCount()
+	for index := 0; index < outputCount; index++ {
+		output := etx.Output(index)
+
+		action, err := protocol.Deserialize(output.LockingScript, isTest)
+		if err != nil {
+			continue
+		}
+
+		if !isRequest(action) {
+			continue
+		}
+
+		isRelevant, err := actionIsRelevent(etx, action, agentLockingScript)
+		if err != nil {
+			return nil, errors.Wrap(err, "relevant")
+		}
+
+		if isRelevant {
+			result = append(result, index)
+		}
+	}
+
+	return result, nil
+}
+
 func compileActions(transaction *state.Transaction, agentLockingScript bitcoin.Script,
 	isTest bool) ([]Action, error) {
 
@@ -380,7 +433,7 @@ func compileActions(transaction *state.Transaction, agentLockingScript bitcoin.S
 	return result, nil
 }
 
-func actionIsRelevent(transaction *state.Transaction, action actions.Action,
+func actionIsRelevent(transaction expanded_tx.TransactionWithOutputs, action actions.Action,
 	agentLockingScript bitcoin.Script) (bool, error) {
 
 	switch act := action.(type) {

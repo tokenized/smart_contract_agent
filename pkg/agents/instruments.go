@@ -208,6 +208,10 @@ func (a *Agent) processInstrumentDefinition(ctx context.Context, transaction *st
 		return errors.Wrap(err, "broadcast")
 	}
 
+	if err := a.Respond(ctx, txid, creationTransaction); err != nil {
+		return errors.Wrap(err, "respond")
+	}
+
 	if err := a.postTransactionToContractSubscriptions(ctx, creationTransaction); err != nil {
 		return errors.Wrap(err, "post creation")
 	}
@@ -473,6 +477,10 @@ func (a *Agent) processInstrumentModification(ctx context.Context, transaction *
 
 	if err := a.BroadcastTx(ctx, creationTx.MsgTx, nil); err != nil {
 		return errors.Wrap(err, "broadcast")
+	}
+
+	if err := a.Respond(ctx, txid, creationTransaction); err != nil {
+		return errors.Wrap(err, "respond")
 	}
 
 	if err := a.postTransactionToContractSubscriptions(ctx, creationTransaction); err != nil {

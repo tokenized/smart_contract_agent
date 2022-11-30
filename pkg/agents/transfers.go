@@ -327,6 +327,10 @@ func (a *Agent) completeSettlement(ctx context.Context, transferTransaction *sta
 		return errors.Wrap(err, "broadcast")
 	}
 
+	if err := a.Respond(ctx, transferTxID, settlementTransaction); err != nil {
+		return errors.Wrap(err, "respond")
+	}
+
 	if err := a.postTransactionToSubscriptions(ctx, balances.LockingScripts(),
 		settlementTransaction); err != nil {
 		return errors.Wrap(err, "post settlement")
@@ -337,156 +341,28 @@ func (a *Agent) completeSettlement(ctx context.Context, transferTransaction *sta
 
 func (a *Agent) processSettlement(ctx context.Context, transaction *state.Transaction,
 	settlement *actions.Settlement, outputIndex int, now uint64) error {
-	transaction.Lock()
-	defer transaction.Unlock()
-	txid := transaction.TxID()
 
-	agentLockingScript := a.LockingScript()
-
-	outputCount := transaction.OutputCount()
-	var lockingScripts []bitcoin.Script
-	var transferTxID bitcoin.Hash32
-
-	// Update one instrument at a time.
-	for _, instrument := range settlement.Instruments {
-		if int(instrument.ContractIndex) >= transaction.InputCount() {
-			logger.Error(ctx, "Invalid settlement contract index: %d >= %d",
-				instrument.ContractIndex, transaction.InputCount())
-			return nil
-		}
-
-		transferTxID = transaction.Input(int(instrument.ContractIndex)).PreviousOutPoint.Hash
-
-		contractInputOutput, err := transaction.InputOutput(int(instrument.ContractIndex))
-		if err != nil {
-			return errors.Wrap(err, "contract input locking script")
-		}
-
-		if !contractInputOutput.LockingScript.Equal(agentLockingScript) {
-			continue
-		}
-
-		instrumentCtx := ctx
-
-		instrumentID, err := protocol.InstrumentIDForSettlement(instrument)
-		if err == nil {
-			instrumentCtx = logger.ContextWithLogFields(instrumentCtx,
-				logger.String("instrument_id", instrumentID))
-		}
-
-		var instrumentCode state.InstrumentCode
-		copy(instrumentCode[:], instrument.InstrumentCode)
-
-		stateInstrument, err := a.caches.Instruments.Get(instrumentCtx, agentLockingScript,
-			instrumentCode)
-		if err != nil {
-			return errors.Wrap(err, "get instrument")
-		}
-
-		if stateInstrument == nil {
-			logger.Error(ctx, "Instrument not found: %s", instrumentCode)
-			return nil
-		}
-		a.caches.Instruments.Release(instrumentCtx, agentLockingScript, instrumentCode)
-
-		logger.Info(instrumentCtx, "Processing settlement")
-
-		// Build balances based on the instrument's settlement quantities.
-		balances := make(state.Balances, len(instrument.Settlements))
-		for i, settle := range instrument.Settlements {
-			if int(settle.Index) >= outputCount {
-				logger.ErrorWithFields(instrumentCtx, []logger.Field{
-					logger.Int("settlement_index", i),
-					logger.Uint32("output_index", settle.Index),
-					logger.Int("output_count", outputCount),
-				}, "Invalid settlement output index")
-				return nil
-			}
-
-			lockingScript := transaction.Output(int(settle.Index)).LockingScript
-			lockingScripts = append(lockingScripts, lockingScript)
-
-			balances[i] = &state.Balance{
-				LockingScript: lockingScript,
-				Quantity:      settle.Quantity,
-				Timestamp:     settlement.Timestamp,
-				TxID:          &txid,
-			}
-		}
-
-		// Add the balances to the cache.
-		addedBalances, err := a.caches.Balances.AddMulti(instrumentCtx, agentLockingScript,
-			instrumentCode, balances)
-		if err != nil {
-			return errors.Wrap(err, "add balances")
-		}
-
-		// Update any balances that weren't new and therefore weren't updated by the "add".
-		for i, balance := range balances {
-			addedBalance := addedBalances[i]
-			addedBalance.Lock()
-			if balance == addedBalance {
-				logger.WarnWithFields(instrumentCtx, []logger.Field{
-					logger.Timestamp("timestamp", int64(addedBalance.Timestamp)),
-					logger.Timestamp("existing_timestamp", int64(settlement.Timestamp)),
-					logger.Stringer("locking_script", balance.LockingScript),
-					logger.Uint64("quantity", balance.Quantity),
-				}, "New hard balance settlement")
-				addedBalance.Unlock()
-				continue // balance was new and is already up to date from the add.
-			}
-
-			// If the balance doesn't match then it already existed and must be updated.
-			if settlement.Timestamp < addedBalance.Timestamp {
-				logger.WarnWithFields(instrumentCtx, []logger.Field{
-					logger.Timestamp("timestamp", int64(addedBalance.Timestamp)),
-					logger.Timestamp("old_timestamp", int64(settlement.Timestamp)),
-					logger.Stringer("locking_script", balance.LockingScript),
-					logger.Uint64("quantity", addedBalance.Quantity),
-					logger.Uint64("old_quantity", balance.Quantity),
-				}, "Older settlement ignored")
-				addedBalance.Unlock()
-				continue
-			}
-
-			// Update balance
-			if addedBalance.Settle(transferTxID, txid, settlement.Timestamp) {
-				logger.WarnWithFields(instrumentCtx, []logger.Field{
-					logger.Timestamp("timestamp", int64(addedBalance.Timestamp)),
-					logger.Timestamp("existing_timestamp", int64(settlement.Timestamp)),
-					logger.Stringer("locking_script", balance.LockingScript),
-					logger.Uint64("settlement_quantity", balance.Quantity),
-					logger.Uint64("quantity", addedBalance.Quantity),
-				}, "Applied prior balance adjustment settlement")
-				addedBalance.Unlock()
-				continue
-			}
-
-			logger.WarnWithFields(instrumentCtx, []logger.Field{
-				logger.Timestamp("timestamp", int64(addedBalance.Timestamp)),
-				logger.Timestamp("existing_timestamp", int64(settlement.Timestamp)),
-				logger.Stringer("locking_script", balance.LockingScript),
-				logger.Uint64("previous_quantity", addedBalance.Quantity),
-				logger.Uint64("quantity", balance.Quantity),
-			}, "Applying hard balance settlement")
-
-			addedBalance.Quantity = balance.Quantity
-			addedBalance.Timestamp = settlement.Timestamp
-			addedBalance.TxID = &txid
-			addedBalance.MarkModified()
-			addedBalance.Unlock()
-		}
-
-		a.caches.Balances.ReleaseMulti(instrumentCtx, agentLockingScript, instrumentCode,
-			addedBalances)
+	transferTxID, lockingScripts, err := a.applySettlements(ctx, transaction,
+		settlement.Instruments, settlement.Timestamp)
+	if err != nil {
+		return errors.Wrap(err, "apply settlements")
 	}
 
-	if _, err := a.addResponseTxID(ctx, transferTxID, outputIndex, txid); err != nil {
-		return errors.Wrap(err, "add response txid")
+	if transferTxID != nil {
+		if _, err := a.addResponseTxID(ctx, *transferTxID, outputIndex,
+			transaction.GetTxID()); err != nil {
+			return errors.Wrap(err, "add response txid")
+		}
+
+		if err := a.Respond(ctx, *transferTxID, transaction); err != nil {
+			return errors.Wrap(err, "respond")
+		}
 	}
 
-	if err := a.postTransactionToSubscriptions(ctx, lockingScripts, transaction); err != nil {
-		return errors.Wrap(err, "post settlement")
+	if len(lockingScripts) > 0 {
+		if err := a.postTransactionToSubscriptions(ctx, lockingScripts, transaction); err != nil {
+			return errors.Wrap(err, "post settlement")
+		}
 	}
 
 	return nil
@@ -494,29 +370,59 @@ func (a *Agent) processSettlement(ctx context.Context, transaction *state.Transa
 
 func (a *Agent) processRectificationSettlement(ctx context.Context, transaction *state.Transaction,
 	settlement *actions.RectificationSettlement, outputIndex int, now uint64) error {
-	transaction.Lock()
-	defer transaction.Unlock()
-	txid := transaction.TxID()
+
+	transferTxID, lockingScripts, err := a.applySettlements(ctx, transaction,
+		settlement.Instruments, settlement.Timestamp)
+	if err != nil {
+		return errors.Wrap(err, "apply settlements")
+	}
+
+	if transferTxID != nil {
+		if _, err := a.addResponseTxID(ctx, *transferTxID, outputIndex,
+			transaction.GetTxID()); err != nil {
+			return errors.Wrap(err, "add response txid")
+		}
+	}
+
+	if len(lockingScripts) > 0 {
+		if err := a.postTransactionToSubscriptions(ctx, lockingScripts, transaction); err != nil {
+			return errors.Wrap(err, "post settlement")
+		}
+	}
+
+	return nil
+}
+
+func (a *Agent) applySettlements(ctx context.Context, transaction *state.Transaction,
+	settlements []*actions.InstrumentSettlementField,
+	timestamp uint64) (*bitcoin.Hash32, []bitcoin.Script, error) {
 
 	agentLockingScript := a.LockingScript()
 
+	transaction.Lock()
+	defer transaction.Unlock()
+
+	txid := transaction.TxID()
 	outputCount := transaction.OutputCount()
 	var lockingScripts []bitcoin.Script
-	var transferTxID bitcoin.Hash32
+	var transferTxID *bitcoin.Hash32
 
 	// Update one instrument at a time.
-	for _, instrument := range settlement.Instruments {
+	for _, instrument := range settlements {
 		if int(instrument.ContractIndex) >= transaction.InputCount() {
 			logger.Error(ctx, "Invalid settlement contract index: %d >= %d",
 				instrument.ContractIndex, transaction.InputCount())
-			return nil
+			return transferTxID, lockingScripts, nil
 		}
 
-		transferTxID = transaction.Input(int(instrument.ContractIndex)).PreviousOutPoint.Hash
+		if transferTxID == nil {
+			ttxid := transaction.Input(int(instrument.ContractIndex)).PreviousOutPoint.Hash
+			transferTxID = &ttxid
+		}
 
 		contractInputOutput, err := transaction.InputOutput(int(instrument.ContractIndex))
 		if err != nil {
-			return errors.Wrap(err, "contract input locking script")
+			return transferTxID, lockingScripts, errors.Wrap(err, "contract input locking script")
 		}
 
 		if !contractInputOutput.LockingScript.Equal(agentLockingScript) {
@@ -537,12 +443,12 @@ func (a *Agent) processRectificationSettlement(ctx context.Context, transaction 
 		stateInstrument, err := a.caches.Instruments.Get(instrumentCtx, agentLockingScript,
 			instrumentCode)
 		if err != nil {
-			return errors.Wrap(err, "get instrument")
+			return transferTxID, lockingScripts, errors.Wrap(err, "get instrument")
 		}
 
 		if stateInstrument == nil {
 			logger.Error(ctx, "Instrument not found: %s", instrumentCode)
-			return nil
+			return transferTxID, lockingScripts, nil
 		}
 		a.caches.Instruments.Release(instrumentCtx, agentLockingScript, instrumentCode)
 
@@ -557,7 +463,7 @@ func (a *Agent) processRectificationSettlement(ctx context.Context, transaction 
 					logger.Uint32("output_index", settle.Index),
 					logger.Int("output_count", outputCount),
 				}, "Invalid settlement output index")
-				return nil
+				return transferTxID, lockingScripts, nil
 			}
 
 			lockingScript := transaction.Output(int(settle.Index)).LockingScript
@@ -566,7 +472,7 @@ func (a *Agent) processRectificationSettlement(ctx context.Context, transaction 
 			balances[i] = &state.Balance{
 				LockingScript: lockingScript,
 				Quantity:      settle.Quantity,
-				Timestamp:     settlement.Timestamp,
+				Timestamp:     timestamp,
 				TxID:          &txid,
 			}
 		}
@@ -575,7 +481,7 @@ func (a *Agent) processRectificationSettlement(ctx context.Context, transaction 
 		addedBalances, err := a.caches.Balances.AddMulti(instrumentCtx, agentLockingScript,
 			instrumentCode, balances)
 		if err != nil {
-			return errors.Wrap(err, "add balances")
+			return transferTxID, lockingScripts, errors.Wrap(err, "add balances")
 		}
 
 		// Update any balances that weren't new and therefore weren't updated by the "add".
@@ -585,7 +491,7 @@ func (a *Agent) processRectificationSettlement(ctx context.Context, transaction 
 			if balance == addedBalance {
 				logger.WarnWithFields(instrumentCtx, []logger.Field{
 					logger.Timestamp("timestamp", int64(addedBalance.Timestamp)),
-					logger.Timestamp("existing_timestamp", int64(settlement.Timestamp)),
+					logger.Timestamp("existing_timestamp", int64(timestamp)),
 					logger.Stringer("locking_script", balance.LockingScript),
 					logger.Uint64("quantity", balance.Quantity),
 				}, "New hard balance settlement")
@@ -594,10 +500,10 @@ func (a *Agent) processRectificationSettlement(ctx context.Context, transaction 
 			}
 
 			// If the balance doesn't match then it already existed and must be updated.
-			if settlement.Timestamp < addedBalance.Timestamp {
+			if timestamp < addedBalance.Timestamp {
 				logger.WarnWithFields(instrumentCtx, []logger.Field{
 					logger.Timestamp("timestamp", int64(addedBalance.Timestamp)),
-					logger.Timestamp("old_timestamp", int64(settlement.Timestamp)),
+					logger.Timestamp("old_timestamp", int64(timestamp)),
 					logger.Stringer("locking_script", balance.LockingScript),
 					logger.Uint64("quantity", addedBalance.Quantity),
 					logger.Uint64("old_quantity", balance.Quantity),
@@ -607,10 +513,10 @@ func (a *Agent) processRectificationSettlement(ctx context.Context, transaction 
 			}
 
 			// Update balance
-			if addedBalance.Settle(transferTxID, txid, settlement.Timestamp) {
+			if addedBalance.Settle(*transferTxID, txid, timestamp) {
 				logger.WarnWithFields(instrumentCtx, []logger.Field{
 					logger.Timestamp("timestamp", int64(addedBalance.Timestamp)),
-					logger.Timestamp("existing_timestamp", int64(settlement.Timestamp)),
+					logger.Timestamp("existing_timestamp", int64(timestamp)),
 					logger.Stringer("locking_script", balance.LockingScript),
 					logger.Uint64("settlement_quantity", balance.Quantity),
 					logger.Uint64("quantity", addedBalance.Quantity),
@@ -621,14 +527,14 @@ func (a *Agent) processRectificationSettlement(ctx context.Context, transaction 
 
 			logger.WarnWithFields(instrumentCtx, []logger.Field{
 				logger.Timestamp("timestamp", int64(addedBalance.Timestamp)),
-				logger.Timestamp("existing_timestamp", int64(settlement.Timestamp)),
+				logger.Timestamp("existing_timestamp", int64(timestamp)),
 				logger.Stringer("locking_script", balance.LockingScript),
 				logger.Uint64("previous_quantity", addedBalance.Quantity),
 				logger.Uint64("quantity", balance.Quantity),
 			}, "Applying hard balance settlement")
 
 			addedBalance.Quantity = balance.Quantity
-			addedBalance.Timestamp = settlement.Timestamp
+			addedBalance.Timestamp = timestamp
 			addedBalance.TxID = &txid
 			addedBalance.MarkModified()
 			addedBalance.Unlock()
@@ -638,15 +544,7 @@ func (a *Agent) processRectificationSettlement(ctx context.Context, transaction 
 			addedBalances)
 	}
 
-	if _, err := a.addResponseTxID(ctx, transferTxID, outputIndex, txid); err != nil {
-		return errors.Wrap(err, "add response txid")
-	}
-
-	if err := a.postTransactionToSubscriptions(ctx, lockingScripts, transaction); err != nil {
-		return errors.Wrap(err, "post settlement")
-	}
-
-	return nil
+	return transferTxID, lockingScripts, nil
 }
 
 // postTransactionToSubscriptions posts the transaction to any subscriptions for the relevant
@@ -667,9 +565,11 @@ func (a *Agent) postTransactionToSubscriptions(ctx context.Context, lockingScrip
 		return nil
 	}
 
-	expandedTx, err := transaction.ExpandedTx(ctx)
+	transaction.Lock()
+	expandedTx, err := a.caches.Transactions.ExpandedTx(ctx, transaction)
+	transaction.Unlock()
 	if err != nil {
-		return errors.Wrap(err, "get expanded tx")
+		return errors.Wrap(err, "expanded tx")
 	}
 
 	msg := channels_expanded_tx.ExpandedTxMessage(*expandedTx)

@@ -5,6 +5,7 @@ import (
 	"sync"
 
 	"github.com/tokenized/pkg/bitcoin"
+	"github.com/tokenized/pkg/peer_channels"
 	"github.com/tokenized/pkg/storage"
 	"github.com/tokenized/smart_contract_agent/internal/platform"
 	"github.com/tokenized/smart_contract_agent/internal/state"
@@ -71,7 +72,7 @@ func (f *MockAgentFactory) GetAgent(ctx context.Context,
 	}
 
 	agent, err := NewAgent(ctx, *key, lockingScript, f.config, f.feeLockingScript, f.caches,
-		f.store, f.broadcaster, f.fetcher, f.headers, f.scheduler, f)
+		f.store, f.broadcaster, f.fetcher, f.headers, f.scheduler, f, peer_channels.NewFactory())
 	if err != nil {
 		return nil, errors.Wrap(err, "new agent")
 	}
