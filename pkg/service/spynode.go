@@ -6,6 +6,9 @@ import (
 
 	"github.com/tokenized/channels/wallet"
 	"github.com/tokenized/logger"
+	"github.com/tokenized/pkg/bitcoin"
+	"github.com/tokenized/specification/dist/golang/actions"
+	"github.com/tokenized/specification/dist/golang/protocol"
 	spynode "github.com/tokenized/spynode/pkg/client"
 )
 
@@ -20,6 +23,32 @@ func (s *Service) HandleTx(ctx context.Context, spyNodeTx *spynode.Tx) {
 		return
 	}
 	defer s.caches.Transactions.Release(ctx, txid)
+
+	isTest := s.agent.IsTest()
+	transaction.Lock()
+	outputCount := transaction.OutputCount()
+	for i := 0; i < outputCount; i++ {
+		output := transaction.Output(i)
+		action, err := protocol.Deserialize(output.LockingScript, isTest)
+		if err != nil {
+			continue
+		}
+
+		if formation, ok := action.(*actions.ContractFormation); ok {
+			// Get contract agent's locking script
+			inputOutput, err := transaction.InputOutput(0)
+			if err != nil {
+				logger.Error(ctx, "Failed to get first input's output : %s", err)
+				continue
+			}
+
+			if err := s.caches.Services.Update(ctx, inputOutput.LockingScript, formation,
+				txid); err != nil {
+				logger.Error(ctx, "Failed to update services : %s", err)
+			}
+		}
+	}
+	transaction.Unlock()
 
 	if err := s.agent.UpdateTransaction(ctx, transaction,
 		uint64(time.Now().UnixNano())); err != nil {
@@ -113,5 +142,16 @@ func (s *Service) HandleMessage(ctx context.Context, payload spynode.MessagePayl
 			logger.Uint64("next_message", nextMessageID),
 			logger.Uint64("message_count", msg.MessageCount),
 		}, "Spynode client ready")
+
+		lockingScript := s.agent.LockingScript()
+		ra, err := bitcoin.RawAddressFromLockingScript(lockingScript)
+		if err == nil {
+			if err := spynode.SubscribeAddresses(ctx, []bitcoin.RawAddress{ra},
+				s.spyNodeClient); err != nil {
+				logger.Error(ctx, "Failed to subscribe to contract address : %s", err)
+			}
+		} else {
+			logger.Error(ctx, "Failed to convert agent locking script to address : %s", err)
+		}
 	}
 }
