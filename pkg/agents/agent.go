@@ -93,13 +93,13 @@ func NewAgent(ctx context.Context, key bitcoin.Key, lockingScript bitcoin.Script
 	broadcaster Broadcaster, fetcher Fetcher, headers BlockHeaders, scheduler *platform.Scheduler,
 	factory AgentFactory, peerChannelsFactory *peer_channels.Factory) (*Agent, error) {
 
-	contract, err := caches.Contracts.Get(ctx, lockingScript)
-	if err != nil {
-		return nil, errors.Wrap(err, "get contract")
+	newContract := &state.Contract{
+		LockingScript: lockingScript,
 	}
 
-	if contract == nil {
-		return nil, errors.New("Contract not found")
+	contract, err := caches.Contracts.Add(ctx, newContract)
+	if err != nil {
+		return nil, errors.Wrap(err, "get contract")
 	}
 
 	result := &Agent{

@@ -6,6 +6,7 @@ import (
 
 	"github.com/tokenized/logger"
 	"github.com/tokenized/pkg/bitcoin"
+	"github.com/tokenized/pkg/storage"
 	"github.com/tokenized/smart_contract_agent/internal/platform"
 	"github.com/tokenized/smart_contract_agent/internal/state"
 	"github.com/tokenized/smart_contract_agent/pkg/agents"
@@ -16,6 +17,10 @@ import (
 func (s *Service) LoadEvents(ctx context.Context) error {
 	events, err := state.ListEvents(ctx, s.store)
 	if err != nil {
+		if errors.Cause(err) == storage.ErrNotFound {
+			return nil
+		}
+
 		return errors.Wrap(err, "list events")
 	}
 

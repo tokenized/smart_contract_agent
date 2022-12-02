@@ -126,11 +126,7 @@ func MockContract(ctx context.Context,
 	adminKey, adminLockingScript, adminAddress := MockKey()
 	_, _, entityAddress := MockKey()
 
-	var keyHash bitcoin.Hash32
-	rand.Read(keyHash[:])
-
 	contract := &Contract{
-		KeyHash:       keyHash,
 		LockingScript: contractLockingScript,
 		Formation: &actions.ContractFormation{
 			ContractName:           "Test",
@@ -335,11 +331,7 @@ func MockInstrumentWithOracle(ctx context.Context,
 	adminKey, adminLockingScript, adminAddress := MockKey()
 	_, _, entityAddress := MockKey()
 
-	var keyHash bitcoin.Hash32
-	rand.Read(keyHash[:])
-
 	contract := &Contract{
-		KeyHash:       keyHash,
 		LockingScript: contractLockingScript,
 		Formation: &actions.ContractFormation{
 			ContractName:   "Test",
@@ -445,11 +437,7 @@ func MockIdentityOracle(ctx context.Context,
 	oracleKey, _, _ := MockKey()
 	oraclePublicKey := oracleKey.PublicKey()
 
-	var keyHash bitcoin.Hash32
-	rand.Read(keyHash[:])
-
 	contract := &Contract{
-		KeyHash:       keyHash,
 		LockingScript: contractLockingScript,
 		Formation: &actions.ContractFormation{
 			ContractName: "Test",

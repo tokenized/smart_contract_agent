@@ -3,7 +3,6 @@ package agents
 import (
 	"bytes"
 	"context"
-	"crypto/rand"
 	mathRand "math/rand"
 	"testing"
 	"time"
@@ -34,11 +33,7 @@ func Test_Process(t *testing.T) {
 	_, feeLockingScript, _ := state.MockKey()
 	_, _, entityAddress := state.MockKey()
 
-	var keyHash bitcoin.Hash32
-	rand.Read(keyHash[:])
-
 	contract := &state.Contract{
-		KeyHash:       keyHash,
 		LockingScript: contractLockingScript,
 	}
 

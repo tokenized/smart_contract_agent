@@ -114,7 +114,6 @@ func Test_Contracts(t *testing.T) {
 
 		// Instruments []*Instrument `bsor:"7" json:"instruments"`
 	}
-	rand.Read(contract.KeyHash[:])
 	rand.Read(contract.FormationTxID[:])
 	rand.Read(contract.BodyOfAgreementFormationTxID[:])
 

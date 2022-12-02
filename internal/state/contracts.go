@@ -32,8 +32,6 @@ type ContractCache struct {
 }
 
 type Contract struct {
-	// KeyHash is the hash that is added to the root key to derive the contract's key.
-	KeyHash                      bitcoin.Hash32                    `bsor:"1" json:"key_hash"`
 	LockingScript                bitcoin.Script                    `bsor:"2" json:"locking_script"`
 	Formation                    *actions.ContractFormation        `bsor:"3" json:"formation"`
 	FormationTxID                *bitcoin.Hash32                   `bsor:"4" json:"formation_txid"`
@@ -242,8 +240,6 @@ func (c *Contract) CacheCopy() cacher.CacheValue {
 	result := &Contract{
 		InstrumentCount: c.InstrumentCount,
 	}
-
-	copy(result.KeyHash[:], c.KeyHash[:])
 
 	result.LockingScript = make(bitcoin.Script, len(c.LockingScript))
 	copy(result.LockingScript, c.LockingScript)

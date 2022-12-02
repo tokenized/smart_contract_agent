@@ -2,7 +2,6 @@ package agents
 
 import (
 	"context"
-	"crypto/rand"
 	"testing"
 	"time"
 
@@ -34,11 +33,7 @@ func Test_Recovery_AcceptContractOffer(t *testing.T) {
 	_, feeLockingScript, _ := state.MockKey()
 	adminKey, adminLockingScript, _ := state.MockKey()
 
-	var keyHash bitcoin.Hash32
-	rand.Read(keyHash[:])
-
 	contract, err := caches.Caches.Contracts.Add(ctx, &state.Contract{
-		KeyHash:       keyHash,
 		LockingScript: contractLockingScript,
 	})
 	if err != nil {
@@ -223,11 +218,7 @@ func Test_Recovery_ContractOfferAlreadyAccepted(t *testing.T) {
 	_, feeLockingScript, _ := state.MockKey()
 	adminKey, adminLockingScript, adminAddress := state.MockKey()
 
-	var keyHash bitcoin.Hash32
-	rand.Read(keyHash[:])
-
 	contract, err := caches.Caches.Contracts.Add(ctx, &state.Contract{
-		KeyHash:       keyHash,
 		LockingScript: contractLockingScript,
 	})
 	if err != nil {

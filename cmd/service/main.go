@@ -30,9 +30,10 @@ var (
 )
 
 type Config struct {
-	AgentKey   bitcoin.Key     `envconfig:"AGENT_KEY" json:"agent_key" masked:"true"`
-	Agents     agents.Config   `json:"agents"`
-	FeeAddress bitcoin.Address `envconfig:"FEE_ADDRESS" json:"fee_address"`
+	AgentKey            bitcoin.Key                `envconfig:"AGENT_KEY" json:"agent_key" masked:"true"`
+	Agents              agents.Config              `json:"agents"`
+	FeeAddress          bitcoin.Address            `envconfig:"FEE_ADDRESS" json:"fee_address"`
+	IncomingPeerChannel *peer_channels.PeerChannel `envconfig:"INCOMING_PEER_CHANNEL" json:"incoming_peer_channel"`
 
 	Storage storage.Config       `json:"storage"`
 	Cache   cacher.Config        `json:"cache"`
@@ -110,11 +111,7 @@ func main() {
 		platform.NewHeaders(spyNode), scheduler, peerChannelsFactory)
 	spyNode.RegisterHandler(service)
 
-	if err := service.Load(ctx); err != nil {
-		logger.Fatal(ctx, "Failed to load service : %s", err)
-	}
-
-	var spyNodeWait, cacheWait, schedulerWait sync.WaitGroup
+	var spyNodeWait, cacheWait, schedulerWait, peerChannelWait sync.WaitGroup
 
 	schedulerThread, schedulerComplete := threads.NewInterruptableThreadComplete("Scheduler",
 		scheduler.Run, &schedulerWait)
@@ -128,9 +125,23 @@ func main() {
 	spyNodeThread, spyNodeComplete := threads.NewInterruptableThreadComplete("SpyNode", spyNode.Run,
 		&spyNodeWait)
 
-	schedulerThread.Start(ctx)
+	peerChannelThread, peerChannelComplete := threads.NewInterruptableThreadComplete("Peer Channel Listen",
+		func(ctx context.Context, interrupt <-chan interface{}) error {
+			return service.PeerChannelListen(ctx, interrupt, cfg.IncomingPeerChannel)
+		}, &peerChannelWait)
+
 	cacheThread.Start(ctx)
+
+	if err := service.Load(ctx); err != nil {
+		service.Release(ctx)
+		cacheThread.Stop(ctx)
+		cacheWait.Wait()
+		logger.Fatal(ctx, "Failed to load service : %s", err)
+	}
+
+	schedulerThread.Start(ctx)
 	spyNodeThread.Start(ctx)
+	peerChannelThread.Start(ctx)
 
 	// Shutdown
 	//
@@ -155,9 +166,15 @@ func main() {
 	case err := <-spyNodeComplete:
 		logger.Error(ctx, "SpyNode completed : %s", err)
 
+	case err := <-peerChannelComplete:
+		logger.Error(ctx, "Peer Channel Listen completed : %s", err)
+
 	case <-osSignals:
 		logger.Info(ctx, "Start shutdown")
 	}
+
+	peerChannelThread.Stop(ctx)
+	peerChannelWait.Wait()
 
 	schedulerThread.Stop(ctx)
 	schedulerWait.Wait()

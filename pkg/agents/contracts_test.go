@@ -32,11 +32,7 @@ func Test_Contracts_Offer_Invalid(t *testing.T) {
 	_, feeLockingScript, _ := state.MockKey()
 	adminKey, adminLockingScript, _ := state.MockKey()
 
-	var keyHash bitcoin.Hash32
-	rand.Read(keyHash[:])
-
 	_, err := caches.Caches.Contracts.Add(ctx, &state.Contract{
-		KeyHash:       keyHash,
 		LockingScript: contractLockingScript,
 	})
 	if err != nil {
@@ -182,11 +178,7 @@ func Test_Contracts_Offer_Valid(t *testing.T) {
 	adminKey, adminLockingScript, adminAddress := state.MockKey()
 	_, _, masterAddress := state.MockKey()
 
-	var keyHash bitcoin.Hash32
-	rand.Read(keyHash[:])
-
 	contract, err := caches.Caches.Contracts.Add(ctx, &state.Contract{
-		KeyHash:       keyHash,
 		LockingScript: contractLockingScript,
 	})
 	if err != nil {
@@ -373,14 +365,10 @@ func Test_Contracts_Offer_AlreadyExists(t *testing.T) {
 	_, feeLockingScript, _ := state.MockKey()
 	adminKey, adminLockingScript, _ := state.MockKey()
 
-	var keyHash bitcoin.Hash32
-	rand.Read(keyHash[:])
-
 	var formationTxID bitcoin.Hash32
 	rand.Read(formationTxID[:])
 
 	_, err := caches.Caches.Contracts.Add(ctx, &state.Contract{
-		KeyHash:       keyHash,
 		LockingScript: contractLockingScript,
 		Formation: &actions.ContractFormation{
 			ContractName: "Existing Contract Name",
