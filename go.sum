@@ -59,6 +59,7 @@ github.com/gorilla/websocket v1.4.2 h1:+/TMaTYc4QFitKJxsQ7Yye35DkWvkdLcvGKqM+x0U
 github.com/gorilla/websocket v1.4.2/go.mod h1:YR8l580nyteQvAITg2hZ9XVh4b55+EU/adAjf1fMHhE=
 github.com/hashicorp/hcl v1.0.0/go.mod h1:E5yfLk+7swimpb2L/Alb/PJmXilQ/rhwaUYs4T20WEQ=
 github.com/hpcloud/tail v1.0.0/go.mod h1:ab1qPbhIpdTxEkNHXyeSf5vhxWSCs/tWer42PpOxQnU=
+github.com/inconshreveable/mousetrap v1.0.0 h1:Z8tu5sraLXCXIcARxBp/8cbvlwVa7Z1NHg9XEKhtSvM=
 github.com/inconshreveable/mousetrap v1.0.0/go.mod h1:PxqpIevigyE2G7u3NXJIT2ANytuPF1OarO4DADm73n8=
 github.com/jessevdk/go-flags v0.0.0-20141203071132-1679536dcc89/go.mod h1:4FA24M0QyGHXBuZZK/XkWh8h0e1EYbRYJSGM75WSRxI=
 github.com/jmespath/go-jmespath v0.3.0/go.mod h1:9QtRXoHjLGCJ5IBSaohpXITPlowMeeYCZ7fLUTSywik=
@@ -94,8 +95,10 @@ github.com/scottjbarr/redis v0.0.1 h1:cCXEzPXuHhDM0PEFwv7QKBiDF22S+9aivxvfags2kj
 github.com/scottjbarr/redis v0.0.1/go.mod h1:HIzxEkRRpIDMZHOU/iavqyd+uQeQwqQncXoYpqJdGgM=
 github.com/spf13/afero v1.1.2/go.mod h1:j4pytiNVoe2o6bmDsKpLACNPDBIoEAkihy7loJ1B0CQ=
 github.com/spf13/cast v1.3.0/go.mod h1:Qx5cxh0v+4UWYiBimWS+eyWzqEqokIECu5etghLkUJE=
+github.com/spf13/cobra v0.0.5 h1:f0B+LkLX6DtmRH1isoNA9VTtNUK9K8xYd28JNNfOv/s=
 github.com/spf13/cobra v0.0.5/go.mod h1:3K3wKZymM7VvHMDS9+Akkh4K60UwM26emMESw8tLCHU=
 github.com/spf13/jwalterweatherman v1.0.0/go.mod h1:cQK4TGJAtQXfYWX+Ddv3mKDzgVb68N+wFjFa4jdeBTo=
+github.com/spf13/pflag v1.0.3 h1:zPAT6CGy6wXeQ7NtTnaTerfKOsV6V6F8agHXFiazDkg=
 github.com/spf13/pflag v1.0.3/go.mod h1:DYY7MBk1bdzusC3SYhjObp+wFpr4gzcvqqNjLnInEg4=
 github.com/spf13/viper v1.3.2/go.mod h1:ZiWeW+zYFKm7srdB9IoDzzZXaJaI5eL9QjNiN/DMA2s=
 github.com/stretchr/objx v0.1.0/go.mod h1:HFkY916IF+rwdDfMAkV7OtwuqBVzrE8GR6GFx+wExME=
@@ -106,8 +109,8 @@ github.com/stretchr/testify v1.5.1 h1:nOGnQDM7FYENwehXlg/kFVnos3rEvtKTjRvOWSzb6H
 github.com/stretchr/testify v1.5.1/go.mod h1:5W2xD1RspED5o8YsWQXVCued0rvSQ+mT+I5cxcmMvtA=
 github.com/tokenized/cacher v0.0.0-20221116194344-f83dc6fa58e9 h1:NQ0fdMLJeTZzmeXHtEr5jGOemHeBy55OQhACoywifzc=
 github.com/tokenized/cacher v0.0.0-20221116194344-f83dc6fa58e9/go.mod h1:99uLTViO6/ZPjxTXmQeCRlvCF/ZeEQ2fRVa5OnOOHqs=
-github.com/tokenized/channels v0.0.0-20221130201547-3f1570c302d8 h1:Mj5gM/ZrOMKUGLSZmaErN1hxysSr5UNEQL32wVJTpkA=
-github.com/tokenized/channels v0.0.0-20221130201547-3f1570c302d8/go.mod h1:cRWqTLg+SldeKNBKCQHlz8HemArO28m1uayFrBTheL4=
+github.com/tokenized/channels v0.0.0-20221202003855-611055201ffe h1:FzA6rCERz29DPJOCCTZuFNm2j2LRPbiXly6YC3ckk4s=
+github.com/tokenized/channels v0.0.0-20221202003855-611055201ffe/go.mod h1:cRWqTLg+SldeKNBKCQHlz8HemArO28m1uayFrBTheL4=
 github.com/tokenized/config v0.2.1/go.mod h1:+8nT8o80nFsxk7Qt5utgfAkEIFNHFtb26hD56hMlSZE=
 github.com/tokenized/config v0.2.2-0.20220902160347-43a4340c357e h1:YQOhB7sz1qmDzL0qyai4pwjUiqKwgKzrMb+izsVEn/0=
 github.com/tokenized/config v0.2.2-0.20220902160347-43a4340c357e/go.mod h1:DFvDBKoS5+kT3QRJ/6zvhWXNuzuV3gG+ZfWa/ZVpJlc=

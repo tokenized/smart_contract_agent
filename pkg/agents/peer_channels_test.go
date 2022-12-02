@@ -809,14 +809,17 @@ func Test_Responder_Reject(t *testing.T) {
 			channelsExpandedTx.ProtocolID)
 	}
 
-	if response.Tx == nil {
-		t.Fatalf("Response should have tx")
+	if response.Tx != nil {
+		t.Fatalf("Response should not have tx")
+	}
+
+	if response.TxID == nil {
+		t.Fatalf("Response should have a txid")
 	}
 
 	requestTxID := requestEtx.TxID()
-	responseTxID := response.Tx.TxID()
-	if !responseTxID.Equal(&requestTxID) {
-		t.Fatalf("Response should contain request tx : got %s, want %s", responseTxID, requestTxID)
+	if !response.TxID.Equal(&requestTxID) {
+		t.Fatalf("Response should contain request tx : got %s, want %s", response.TxID, requestTxID)
 	}
 
 	agent.Release(ctx)

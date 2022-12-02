@@ -22,6 +22,7 @@ type Request struct {
 type Response struct {
 	Signature *channels.Signature
 	Response  *channels.Response
+	TxID      *bitcoin.Hash32
 	Tx        *expanded_tx.ExpandedTx
 }
 
@@ -88,12 +89,12 @@ func UnwrapRequest(script bitcoin.Script) (*Request, error) {
 	return result, nil
 }
 
-func WrapResponse(etx *expanded_tx.ExpandedTx, response *channels.Response,
+func WrapTxIDResponse(txid bitcoin.Hash32, response *channels.Response,
 	key *bitcoin.Key) (bitcoin.Script, error) {
 
-	cetx := channelsExpandedTx.ExpandedTxMessage(*etx)
+	ctxid := channels.TxID(txid)
 
-	payload, err := cetx.Write()
+	payload, err := ctxid.Write()
 	if err != nil {
 		return nil, errors.Wrap(err, "write")
 	}
@@ -111,6 +112,17 @@ func WrapResponse(etx *expanded_tx.ExpandedTx, response *channels.Response,
 		if err != nil {
 			return nil, errors.Wrap(err, "signature")
 		}
+	}
+
+	return envelopeV1.Wrap(payload).Script()
+}
+
+func WrapExpandedTxResponse(etx *expanded_tx.ExpandedTx) (bitcoin.Script, error) {
+	cetx := channelsExpandedTx.ExpandedTxMessage(*etx)
+
+	payload, err := cetx.Write()
+	if err != nil {
+		return nil, errors.Wrap(err, "write")
 	}
 
 	return envelopeV1.Wrap(payload).Script()
@@ -144,15 +156,22 @@ func UnwrapResponse(script bitcoin.Script) (*Response, error) {
 		return nil, errors.Wrap(channels.ErrUnsupportedProtocol, "more than one data protocol")
 	}
 
-	msg, err := channelsExpandedTx.Parse(payload)
+	txid, payload, err := channels.ParseTxID(payload)
+	if err != nil {
+		return nil, errors.Wrap(err, "etx")
+	}
+	result.TxID = txid
+
+	expandedTx, err := channelsExpandedTx.Parse(payload)
 	if err != nil {
 		return nil, errors.Wrap(err, "etx")
 	}
 
-	if msg != nil {
-		if cetx, ok := msg.(*channelsExpandedTx.ExpandedTxMessage); ok {
+	if expandedTx != nil {
+		if cetx, ok := expandedTx.(*channelsExpandedTx.ExpandedTxMessage); ok {
 			etx := expanded_tx.ExpandedTx(*cetx)
 			result.Tx = &etx
+			return result, nil
 		} else {
 			return nil, channels.ErrUnsupportedProtocol
 		}

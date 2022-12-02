@@ -316,7 +316,7 @@ func (a *Agent) sendPeerChannelResponseTx(ctx context.Context,
 		return errors.Wrapf(err, "peer channel client: %s", baseURL)
 	}
 
-	script, err := client.WrapResponse(etx, nil, nil)
+	script, err := client.WrapExpandedTxResponse(etx)
 	if err != nil {
 		return errors.Wrap(err, "wrap")
 	}
@@ -355,7 +355,7 @@ func (a *Agent) sendPeerChannelReject(ctx context.Context, peerChannel *peer_cha
 	}
 
 	key := a.Key()
-	script, err := client.WrapResponse(etx, response, &key)
+	script, err := client.WrapTxIDResponse(etx.TxID(), response, &key)
 	if err != nil {
 		return errors.Wrap(err, "wrap")
 	}
