@@ -13,5 +13,6 @@ var scCmd = &cobra.Command{
 
 func main() {
 	scCmd.AddCommand(commands.SendRequest)
+	scCmd.AddCommand(commands.ExpandTx)
 	scCmd.Execute()
 }
