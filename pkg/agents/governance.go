@@ -825,13 +825,13 @@ func (a *Agent) processBallotCounted(ctx context.Context, transaction *state.Tra
 	ballotCastTxID := input.PreviousOutPoint.Hash
 	transaction.Unlock()
 
-	if _, err := a.addResponseTxID(ctx, ballotCastTxID, outputIndex, txid); err != nil {
-		return errors.Wrap(err, "add response txid")
-	}
-
 	agentLockingScript := a.LockingScript()
 	if !agentLockingScript.Equal(inputLockingScript) {
 		return nil // Not for this agent's contract
+	}
+
+	if _, err := a.addResponseTxID(ctx, ballotCastTxID, outputIndex, txid); err != nil {
+		return errors.Wrap(err, "add response txid")
 	}
 
 	voteTxIDHash, err := bitcoin.NewHash32(ballotCounted.VoteTxId)
@@ -934,13 +934,13 @@ func (a *Agent) processVoteResult(ctx context.Context, transaction *state.Transa
 	voteTxID := input.PreviousOutPoint.Hash
 	transaction.Unlock()
 
-	if _, err := a.addResponseTxID(ctx, voteTxID, outputIndex, txid); err != nil {
-		return errors.Wrap(err, "add response txid")
-	}
-
 	agentLockingScript := a.LockingScript()
 	if !agentLockingScript.Equal(inputLockingScript) {
 		return nil // Not for this agent's contract
+	}
+
+	if _, err := a.addResponseTxID(ctx, voteTxID, outputIndex, txid); err != nil {
+		return errors.Wrap(err, "add response txid")
 	}
 
 	vote, err := a.caches.Votes.Get(ctx, agentLockingScript, voteTxID)

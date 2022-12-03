@@ -722,17 +722,17 @@ func (a *Agent) processContractFormation(ctx context.Context, transaction *state
 		return errors.Wrapf(err, "input locking script %d", 0)
 	}
 
-	if _, err := a.addResponseTxID(ctx, input.PreviousOutPoint.Hash, outputIndex,
-		txid); err != nil {
-		return errors.Wrap(err, "add response txid")
-	}
-
 	agentLockingScript := a.LockingScript()
 	if !agentLockingScript.Equal(inputOutput.LockingScript) {
 		logger.WarnWithFields(ctx, []logger.Field{
 			logger.Stringer("contract_locking_script", inputOutput.LockingScript),
 		}, "Contract output locking script is wrong")
 		return nil // Not for this agent's contract
+	}
+
+	if _, err := a.addResponseTxID(ctx, input.PreviousOutPoint.Hash, outputIndex,
+		txid); err != nil {
+		return errors.Wrap(err, "add response txid")
 	}
 
 	defer a.caches.Contracts.Save(ctx, a.contract)

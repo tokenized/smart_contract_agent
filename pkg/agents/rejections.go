@@ -20,7 +20,13 @@ func (a *Agent) processRejection(ctx context.Context, transaction *state.Transac
 	rejection *actions.Rejection, outputIndex int, now uint64) error {
 
 	transaction.Lock()
+	txid := transaction.TxID()
 	firstInput := transaction.Input(0)
+	inputOutput, err := transaction.InputOutput(0)
+	if err != nil {
+		transaction.Unlock()
+		return errors.Wrapf(err, "input locking script %d", 0)
+	}
 	rejectedTxID := firstInput.PreviousOutPoint.Hash
 
 	receiverIndex := int(rejection.RejectAddressIndex)
@@ -40,6 +46,12 @@ func (a *Agent) processRejection(ctx context.Context, transaction *state.Transac
 	transaction.Unlock()
 
 	agentLockingScript := a.LockingScript()
+	if agentLockingScript.Equal(inputOutput.LockingScript) {
+		if _, err := a.addResponseTxID(ctx, rejectedTxID, outputIndex, txid); err != nil {
+			return errors.Wrap(err, "add response txid")
+		}
+	}
+
 	if !output.LockingScript.Equal(agentLockingScript) {
 		logger.InfoWithFields(ctx, []logger.Field{
 			logger.Stringer("receiver_locking_script", output.LockingScript),
@@ -261,10 +273,12 @@ func (a *Agent) sendRejection(ctx context.Context, transaction *state.Transactio
 
 	transaction.Lock()
 
+	txid := transaction.TxID()
+
 	if reject != nil && reject.OutputIndex != -1 {
 		// Add input spending output flagged for response.
 		outpoint := wire.OutPoint{
-			Hash:  transaction.TxID(),
+			Hash:  txid,
 			Index: uint32(reject.OutputIndex),
 		}
 		output := transaction.Output(reject.OutputIndex)
@@ -343,12 +357,28 @@ func (a *Agent) sendRejection(ctx context.Context, transaction *state.Transactio
 		rejection.Message = rejectError.Error()
 	}
 
+	var rejectLabel string
+	rejectData := actions.RejectionsData(rejection.RejectionCode)
+	if rejectData != nil {
+		rejectLabel = rejectData.Label
+	} else {
+		rejectLabel = "<unknown>"
+	}
+
+	logger.InfoWithFields(ctx, []logger.Field{
+		logger.Stringer("request_txid", txid),
+		logger.Uint32("reject_code", rejection.RejectionCode),
+		logger.String("reject_label", rejectLabel),
+		logger.String("reject_message", rejection.Message),
+	}, "Responding with rejection")
+
 	rejectionScript, err := protocol.Serialize(rejection, a.IsTest())
 	if err != nil {
 		transaction.Unlock()
 		return errors.Wrap(err, "serialize rejection")
 	}
 
+	rejectionScriptOutputIndex := len(rejectTx.Outputs)
 	if err := rejectTx.AddOutput(rejectionScript, 0, false, false); err != nil {
 		transaction.Unlock()
 		return errors.Wrap(err, "add action")
@@ -395,6 +425,16 @@ func (a *Agent) sendRejection(ctx context.Context, transaction *state.Transactio
 	}
 
 	rejectTxID := *rejectTx.MsgTx.TxHash()
+	rejectTransaction, err := a.caches.Transactions.AddRaw(ctx, rejectTx.MsgTx, nil)
+	if err != nil {
+		return errors.Wrap(err, "add response tx")
+	}
+	defer a.caches.Transactions.Release(ctx, rejectTxID)
+
+	// Set rejection tx as processed.
+	rejectTransaction.Lock()
+	rejectTransaction.SetProcessed(a.ContractHash(), rejectionScriptOutputIndex)
+	rejectTransaction.Unlock()
 
 	transaction.Lock()
 	transaction.AddResponseTxID(a.ContractHash(), outputIndex, rejectTxID)
@@ -406,22 +446,12 @@ func (a *Agent) sendRejection(ctx context.Context, transaction *state.Transactio
 		return errors.Wrap(err, "expanded tx")
 	}
 
-	var rejectLabel string
-	rejectData := actions.RejectionsData(rejection.RejectionCode)
-	if rejectData != nil {
-		rejectLabel = rejectData.Label
-	} else {
-		rejectLabel = "<unknown>"
-	}
-
-	logger.InfoWithFields(ctx, []logger.Field{
-		logger.Stringer("response_txid", rejectTxID),
-		logger.Uint32("reject_code", rejection.RejectionCode),
-		logger.String("reject_label", rejectLabel),
-		logger.String("reject_message", rejection.Message),
-	}, "Responding with rejection")
 	if err := a.BroadcastTx(ctx, etx, nil); err != nil {
 		return errors.Wrap(err, "broadcast")
+	}
+
+	if err := a.Respond(ctx, txid, rejectTransaction); err != nil {
+		return errors.Wrap(err, "respond")
 	}
 
 	return nil

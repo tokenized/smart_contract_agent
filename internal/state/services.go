@@ -74,6 +74,27 @@ func (c *ContractServicesCache) Update(ctx context.Context, contractLockingScrip
 
 	path := ContractServicesPath(contractHash)
 
+	if len(formation.Services) == 0 { // Clear any previous services
+		item, err := c.cacher.Get(ctx, c.typ, path)
+		if err != nil {
+			return errors.Wrap(err, "add")
+		}
+
+		if item == nil {
+			return nil // no previous services
+		}
+
+		contractServices := item.(*ContractServices)
+		contractServices.Lock()
+		if len(contractServices.Services) > 0 {
+			contractServices.Services = nil
+			contractServices.isModified = true
+		}
+		contractServices.Unlock()
+
+		c.cacher.Release(ctx, path)
+	}
+
 	contractServices := &ContractServices{
 		Formation:     formation,
 		FormationTxID: &txid,

@@ -422,6 +422,8 @@ func (a *Agent) processBodyOfAgreementFormation(ctx context.Context, transaction
 
 	// First input must be the agent's locking script
 	transaction.Lock()
+	input := transaction.Input(0)
+	txid := transaction.TxID()
 	inputOutput, err := transaction.InputOutput(0)
 	transaction.Unlock()
 	if err != nil {
@@ -430,10 +432,12 @@ func (a *Agent) processBodyOfAgreementFormation(ctx context.Context, transaction
 
 	agentLockingScript := a.LockingScript()
 	if !agentLockingScript.Equal(inputOutput.LockingScript) {
-		logger.WarnWithFields(ctx, []logger.Field{
-			logger.Stringer("contract_locking_script", inputOutput.LockingScript),
-		}, "Contract output locking script is wrong")
 		return nil // Not for this agent's contract
+	}
+
+	if _, err := a.addResponseTxID(ctx, input.PreviousOutPoint.Hash, outputIndex,
+		txid); err != nil {
+		return errors.Wrap(err, "add response txid")
 	}
 
 	defer a.caches.Contracts.Save(ctx, a.contract)
@@ -458,7 +462,6 @@ func (a *Agent) processBodyOfAgreementFormation(ctx context.Context, transaction
 	}
 
 	a.contract.BodyOfAgreementFormation = formation
-	txid := transaction.GetTxID()
 	a.contract.BodyOfAgreementFormationTxID = &txid
 	a.contract.MarkModified()
 

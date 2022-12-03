@@ -65,7 +65,7 @@ func (a *Agent) processInstrumentDefinition(ctx context.Context, transaction *st
 			platform.NewRejectError(actions.RejectionsUnauthorizedAddress, ""), now), "reject")
 	}
 
-	if a.contract.Formation == nil {
+	if contract.Formation == nil {
 		return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
 			platform.NewRejectError(actions.RejectionsContractDoesNotExist, ""), now), "reject")
 	}
@@ -142,6 +142,11 @@ func (a *Agent) processInstrumentDefinition(ctx context.Context, transaction *st
 		// This should not happen unless the contract's instrument count is wrong and an instrument
 		// for the specified index is added more than once.
 		return errors.New("Instrument already exists")
+	}
+
+	if err := a.updateAdminBalance(ctx, agentLockingScript, contract.Formation.AdminAddress,
+		transaction, creation, txid, 0); err != nil {
+		return errors.Wrap(err, "update admin balance")
 	}
 
 	creationTx := txbuilder.NewTxBuilder(a.FeeRate(), a.DustFeeRate())
@@ -306,10 +311,17 @@ func (a *Agent) processInstrumentModification(ctx context.Context, transaction *
 	instrument.Lock()
 	defer instrument.Unlock()
 
+	if instrument.Creation == nil {
+		return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
+			platform.NewRejectError(actions.RejectionsInstrumentNotFound, ""), now), "reject")
+	}
+
 	if instrument.Creation.InstrumentRevision != modification.InstrumentRevision {
 		return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
 			platform.NewRejectError(actions.RejectionsInstrumentRevision, ""), now), "reject")
 	}
+
+	previousAuthorizedTokenQty := instrument.Creation.AuthorizedTokenQty
 
 	// Check proposal if there was one
 	proposed := false
@@ -415,6 +427,11 @@ func (a *Agent) processInstrumentModification(ctx context.Context, transaction *
 	creation.InstrumentRevision = instrument.Creation.InstrumentRevision + 1 // Bump the revision
 	creation.Timestamp = now
 
+	if err := a.updateAdminBalance(ctx, agentLockingScript, adminAddressBytes, transaction,
+		creation, txid, previousAuthorizedTokenQty); err != nil {
+		return errors.Wrap(err, "update admin balance")
+	}
+
 	creationTx := txbuilder.NewTxBuilder(a.FeeRate(), a.DustFeeRate())
 
 	if err := creationTx.AddInput(wire.OutPoint{Hash: txid, Index: 0}, agentLockingScript,
@@ -515,14 +532,14 @@ func (a *Agent) processInstrumentCreation(ctx context.Context, transaction *stat
 		return errors.Wrapf(err, "input locking script %d", 0)
 	}
 
-	if _, err := a.addResponseTxID(ctx, input.PreviousOutPoint.Hash, outputIndex,
-		txid); err != nil {
-		return errors.Wrap(err, "add response txid")
-	}
-
 	agentLockingScript := a.LockingScript()
 	if !agentLockingScript.Equal(inputOutput.LockingScript) {
 		return nil // Not for this agent's contract
+	}
+
+	if _, err := a.addResponseTxID(ctx, input.PreviousOutPoint.Hash, outputIndex,
+		txid); err != nil {
+		return errors.Wrap(err, "add response txid")
 	}
 
 	instrumentID, _ := protocol.InstrumentIDForRaw(creation.InstrumentType, creation.InstrumentCode)
@@ -543,9 +560,6 @@ func (a *Agent) processInstrumentCreation(ctx context.Context, transaction *stat
 		Creation:       creation,
 		CreationTxID:   &txid,
 	}
-
-	a.contract.Lock()
-	defer a.contract.Unlock()
 
 	// Find existing matching instrument
 	instrument, err := a.caches.Instruments.Add(ctx, agentLockingScript, newInstrument)
@@ -596,27 +610,32 @@ func (a *Agent) processInstrumentCreation(ctx context.Context, transaction *stat
 		instrument.MarkModified()
 	}
 
-	if err := a.updateAdminBalance(ctx, transaction, creation, txid,
-		previousAuthorizedTokenQty); err != nil {
+	contract := a.Contract()
+	contract.Lock()
+	if contract.Formation == nil {
+		contract.Unlock()
+		return errors.New("Missing contract formation")
+	}
+	adminAddressBytes := contract.Formation.AdminAddress
+	contract.Unlock()
+
+	if err := a.updateAdminBalance(ctx, agentLockingScript, adminAddressBytes, transaction,
+		creation, txid, previousAuthorizedTokenQty); err != nil {
 		return errors.Wrap(err, "admin balance")
 	}
 
 	return nil
 }
 
-func (a *Agent) updateAdminBalance(ctx context.Context, transaction *state.Transaction,
-	creation *actions.InstrumentCreation, txid bitcoin.Hash32,
-	previousAuthorizedTokenQty uint64) error {
+func (a *Agent) updateAdminBalance(ctx context.Context, contractLockingScript bitcoin.Script,
+	adminAddress []byte, transaction *state.Transaction, creation *actions.InstrumentCreation,
+	txid bitcoin.Hash32, previousAuthorizedTokenQty uint64) error {
 
 	if previousAuthorizedTokenQty == creation.AuthorizedTokenQty {
 		return nil // no admin balance update
 	}
 
-	if a.contract.Formation == nil {
-		return errors.New("Missing contract formation") // no contract formation
-	}
-
-	ra, err := bitcoin.DecodeRawAddress(a.contract.Formation.AdminAddress)
+	ra, err := bitcoin.DecodeRawAddress(adminAddress)
 	if err != nil {
 		return errors.Wrap(err, "admin address")
 	}
@@ -626,7 +645,6 @@ func (a *Agent) updateAdminBalance(ctx context.Context, transaction *state.Trans
 		return errors.Wrap(err, "admin locking script")
 	}
 
-	contractLockingScript := a.contract.LockingScript
 	var instrumentCode state.InstrumentCode
 	copy(instrumentCode[:], creation.InstrumentCode)
 
@@ -637,8 +655,7 @@ func (a *Agent) updateAdminBalance(ctx context.Context, transaction *state.Trans
 		TxID:          &txid,
 	}
 
-	addedBalance, err := a.caches.Balances.Add(ctx, a.contract.LockingScript, instrumentCode,
-		balance)
+	addedBalance, err := a.caches.Balances.Add(ctx, contractLockingScript, instrumentCode, balance)
 	if err != nil {
 		return errors.Wrap(err, "get balance")
 	}
@@ -673,6 +690,8 @@ func (a *Agent) updateAdminBalance(ctx context.Context, transaction *state.Trans
 		addedBalance.TxID = &txid
 		addedBalance.MarkModified()
 		addedBalance.Unlock()
+	} else {
+		quantity = balance.Quantity
 	}
 
 	logger.ErrorWithFields(ctx, []logger.Field{

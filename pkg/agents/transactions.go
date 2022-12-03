@@ -170,8 +170,12 @@ func (a *Agent) processAction(ctx context.Context, transaction *state.Transactio
 	}, "Processing action")
 
 	if err := action.Validate(); err != nil {
-		return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
-			platform.NewRejectError(actions.RejectionsMsgMalformed, err.Error()), now), "reject")
+		if isRequest(action) {
+			return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
+				platform.NewRejectError(actions.RejectionsMsgMalformed, err.Error()), now), "reject")
+		} else {
+			logger.Error(ctx, "Response action invalid : %s", err)
+		}
 	}
 
 	switch act := action.(type) {

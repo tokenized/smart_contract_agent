@@ -89,7 +89,7 @@ func (c *ResponderCache) Release(ctx context.Context, lockingScript bitcoin.Scri
 }
 
 func RespondersPath(lockingScript bitcoin.Script, txid bitcoin.Hash32) string {
-	return fmt.Sprintf("%s/%s/%s", CalculateContractHash(lockingScript), txid, respondersPath)
+	return fmt.Sprintf("%s/%s/%s", CalculateContractHash(lockingScript), respondersPath, txid)
 }
 
 func (r *Responder) AddPeerChannel(peerChannel *peer_channels.PeerChannel) {
