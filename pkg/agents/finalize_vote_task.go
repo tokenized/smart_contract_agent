@@ -9,6 +9,7 @@ import (
 	"github.com/tokenized/pkg/bitcoin"
 	"github.com/tokenized/pkg/txbuilder"
 	"github.com/tokenized/pkg/wire"
+	"github.com/tokenized/smart_contract_agent/internal/platform"
 	"github.com/tokenized/specification/dist/golang/actions"
 	"github.com/tokenized/specification/dist/golang/protocol"
 
@@ -180,6 +181,11 @@ func (a *Agent) FinalizeVote(ctx context.Context, voteTxID bitcoin.Hash32, now u
 		OptionTally:        tally,
 		Result:             result,
 		Timestamp:          now,
+	}
+
+	if err := voteResult.Validate(); err != nil {
+		return errors.Wrap(a.sendRejection(ctx, proposalTransaction, 1,
+			platform.NewRejectError(actions.RejectionsMsgMalformed, err.Error()), now), "reject")
 	}
 
 	voteResultTx := txbuilder.NewTxBuilder(a.FeeRate(), a.DustFeeRate())

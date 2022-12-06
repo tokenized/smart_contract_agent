@@ -341,6 +341,11 @@ func (a *Agent) processFreezeOrder(ctx context.Context, transaction *state.Trans
 		}
 	}
 
+	if err := freeze.Validate(); err != nil {
+		return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
+			platform.NewRejectError(actions.RejectionsMsgMalformed, err.Error()), now), "reject")
+	}
+
 	freezeScript, err := protocol.Serialize(freeze, a.IsTest())
 	if err != nil {
 		balances.RevertPending(txid)
@@ -635,6 +640,11 @@ func (a *Agent) processThawOrder(ctx context.Context, transaction *state.Transac
 			balances.Lock()
 			defer balances.Unlock()
 		}
+	}
+
+	if err := thaw.Validate(); err != nil {
+		return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
+			platform.NewRejectError(actions.RejectionsMsgMalformed, err.Error()), now), "reject")
 	}
 
 	thawScript, err := protocol.Serialize(thaw, a.IsTest())
@@ -952,6 +962,11 @@ func (a *Agent) processConfiscateOrder(ctx context.Context, transaction *state.T
 	}
 
 	confiscation.DepositQty = depositBalance.SettlePendingQuantity()
+
+	if err := confiscation.Validate(); err != nil {
+		return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
+			platform.NewRejectError(actions.RejectionsMsgMalformed, err.Error()), now), "reject")
+	}
 
 	if err := confiscationTx.AddOutput(depositLockingScript, 1, false, true); err != nil {
 		return errors.Wrap(err, "add deposit output")

@@ -58,13 +58,8 @@ func (a *Agent) UpdateTransaction(ctx context.Context, transaction *state.Transa
 			transaction.Unlock()
 			return nil
 		}
-		txid := transaction.TxID()
 		transaction.Unlock()
 		defer clearIsProcessing(transaction, contractHash)
-
-		logger.WarnWithFields(ctx, []logger.Field{
-			logger.Stringer("txid", txid),
-		}, "Processing transaction is unsafe")
 
 		if err := a.processUnsafeTransaction(ctx, transaction, now); err != nil {
 			return errors.Wrap(err, "process unsafe")
@@ -172,9 +167,15 @@ func (a *Agent) processAction(ctx context.Context, transaction *state.Transactio
 	if err := action.Validate(); err != nil {
 		if isRequest(action) {
 			return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
-				platform.NewRejectError(actions.RejectionsMsgMalformed, err.Error()), now), "reject")
+				platform.NewRejectError(actions.RejectionsMsgMalformed, err.Error()), now),
+				"reject")
 		} else {
-			logger.Error(ctx, "Response action invalid : %s", err)
+			logger.ErrorWithFields(ctx, []logger.Field{
+				logger.Stringer("txid", txid),
+				logger.Int("output_index", outputIndex),
+				logger.String("action_code", action.Code()),
+				logger.String("action_name", action.TypeName()),
+			}, "Response action invalid : %s", err)
 		}
 	}
 
@@ -313,6 +314,12 @@ func clearIsProcessing(transaction *state.Transaction, contract state.ContractHa
 func (a *Agent) processUnsafeTransaction(ctx context.Context, transaction *state.Transaction,
 	now uint64) error {
 
+	txid := transaction.GetTxID()
+
+	logger.WarnWithFields(ctx, []logger.Field{
+		logger.Stringer("txid", txid),
+	}, "Processing transaction is unsafe")
+
 	agentLockingScript := a.LockingScript()
 	isTest := a.IsTest()
 
@@ -322,7 +329,9 @@ func (a *Agent) processUnsafeTransaction(ctx context.Context, transaction *state
 	}
 
 	if len(actionsList) == 0 {
-		logger.Info(ctx, "Transaction not relevant")
+		logger.InfoWithFields(ctx, []logger.Field{
+			logger.Stringer("txid", txid),
+		}, "Transaction not relevant")
 		return nil
 	}
 
@@ -333,6 +342,7 @@ func (a *Agent) processUnsafeTransaction(ctx context.Context, transaction *state
 		}
 
 		logger.ErrorWithFields(ctx, []logger.Field{
+			logger.Stringer("txid", txid),
 			logger.Stringer("agent", agentLockingScript),
 			logger.Strings("actions", codes),
 		}, "Agent failed to handle transaction : %s", err)
@@ -354,7 +364,9 @@ func (a *Agent) processTransaction(ctx context.Context, transaction *state.Trans
 	}
 
 	if len(actionsList) == 0 {
-		logger.Info(ctx, "Transaction not relevant")
+		logger.InfoWithFields(ctx, []logger.Field{
+			logger.Stringer("txid", transaction.GetTxID()),
+		}, "Transaction not relevant")
 		return nil
 	}
 
@@ -365,6 +377,7 @@ func (a *Agent) processTransaction(ctx context.Context, transaction *state.Trans
 		}
 
 		logger.ErrorWithFields(ctx, []logger.Field{
+			logger.Stringer("txid", transaction.GetTxID()),
 			logger.Stringer("agent", agentLockingScript),
 			logger.Strings("actions", codes),
 		}, "Agent failed to handle transaction : %s", err)

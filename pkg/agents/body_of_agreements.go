@@ -82,6 +82,11 @@ func (a *Agent) processBodyOfAgreementOffer(ctx context.Context, transaction *st
 	formation.Timestamp = now
 	formation.Revision = 0
 
+	if err := formation.Validate(); err != nil {
+		return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
+			platform.NewRejectError(actions.RejectionsMsgMalformed, err.Error()), now), "reject")
+	}
+
 	formationTx := txbuilder.NewTxBuilder(a.FeeRate(), a.DustFeeRate())
 
 	if err := formationTx.AddInput(wire.OutPoint{Hash: txid, Index: 0}, agentLockingScript,
@@ -330,6 +335,11 @@ func (a *Agent) processBodyOfAgreementAmendment(ctx context.Context, transaction
 
 	formation.Revision = contract.BodyOfAgreementFormation.Revision + 1 // Bump the revision
 	formation.Timestamp = now
+
+	if err := formation.Validate(); err != nil {
+		return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
+			platform.NewRejectError(actions.RejectionsMsgMalformed, err.Error()), now), "reject")
+	}
 
 	formationTx := txbuilder.NewTxBuilder(a.FeeRate(), a.DustFeeRate())
 

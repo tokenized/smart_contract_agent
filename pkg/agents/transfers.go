@@ -140,6 +140,11 @@ func (a *Agent) processTransfer(ctx context.Context, transaction *state.Transact
 		balances = state.AppendBalances(balances, instrumentBalances)
 	}
 
+	if err := settlement.Validate(); err != nil {
+		return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
+			platform.NewRejectError(actions.RejectionsMsgMalformed, err.Error()), now), "reject")
+	}
+
 	settlementScript, err := protocol.Serialize(settlement, a.IsTest())
 	if err != nil {
 		balances.RevertPending(txid)

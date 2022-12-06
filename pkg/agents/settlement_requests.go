@@ -73,6 +73,7 @@ func (a *Agent) processSettlementRequest(ctx context.Context, transaction *state
 
 	isTest := a.IsTest()
 	var transfer *actions.Transfer
+	var transferOutputIndex int
 	transferTransaction.Lock()
 	outputCount := transferTransaction.OutputCount()
 	for i := 0; i < outputCount; i++ {
@@ -84,6 +85,7 @@ func (a *Agent) processSettlementRequest(ctx context.Context, transaction *state
 
 		tfr, ok := action.(*actions.Transfer)
 		if ok {
+			transferOutputIndex = i
 			transfer = tfr
 			break
 		}
@@ -204,6 +206,11 @@ func (a *Agent) processSettlementRequest(ctx context.Context, transaction *state
 	}
 
 	if isFinalContract {
+		if err := settlement.Validate(); err != nil {
+			return errors.Wrap(a.sendRejection(ctx, transferTransaction, transferOutputIndex,
+				platform.NewRejectError(actions.RejectionsMsgMalformed, err.Error()), now), "reject")
+		}
+
 		// Add settlement
 		settlementScript, err := protocol.Serialize(settlement, a.IsTest())
 		if err != nil {

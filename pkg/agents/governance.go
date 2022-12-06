@@ -365,6 +365,11 @@ func (a *Agent) processProposal(ctx context.Context, transaction *state.Transact
 		Timestamp: now,
 	}
 
+	if err := vote.Validate(); err != nil {
+		return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
+			platform.NewRejectError(actions.RejectionsMsgMalformed, err.Error()), now), "reject")
+	}
+
 	voteTx := txbuilder.NewTxBuilder(a.FeeRate(), a.DustFeeRate())
 
 	if err := voteTx.AddInput(wire.OutPoint{Hash: txid, Index: 0}, agentLockingScript,
@@ -712,6 +717,11 @@ func (a *Agent) processBallotCast(ctx context.Context, transaction *state.Transa
 		Vote:      ballotCast.Vote,
 		Quantity:  quantity,
 		Timestamp: now,
+	}
+
+	if err := ballotCounted.Validate(); err != nil {
+		return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
+			platform.NewRejectError(actions.RejectionsMsgMalformed, err.Error()), now), "reject")
 	}
 
 	ballotCountedTx := txbuilder.NewTxBuilder(a.FeeRate(), a.DustFeeRate())

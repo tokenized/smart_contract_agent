@@ -175,6 +175,11 @@ func (a *Agent) processContractOffer(ctx context.Context, transaction *state.Tra
 	formation.Timestamp = now
 	formation.ContractRevision = 0
 
+	if err := formation.Validate(); err != nil {
+		return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
+			platform.NewRejectError(actions.RejectionsMsgMalformed, err.Error()), now), "reject")
+	}
+
 	formationTx := txbuilder.NewTxBuilder(a.FeeRate(), a.DustFeeRate())
 
 	if err := formationTx.AddInput(wire.OutPoint{Hash: txid, Index: 0}, agentLockingScript,
@@ -621,6 +626,11 @@ func (a *Agent) processContractAmendment(ctx context.Context, transaction *state
 
 	formation.ContractRevision = contract.Formation.ContractRevision + 1 // Bump the revision
 	formation.Timestamp = now
+
+	if err := formation.Validate(); err != nil {
+		return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
+			platform.NewRejectError(actions.RejectionsMsgMalformed, err.Error()), now), "reject")
+	}
 
 	formationTx := txbuilder.NewTxBuilder(a.FeeRate(), a.DustFeeRate())
 

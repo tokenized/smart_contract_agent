@@ -121,6 +121,11 @@ func (a *Agent) processInstrumentDefinition(ctx context.Context, transaction *st
 	creation.Timestamp = now
 	creation.InstrumentRevision = 0
 
+	if err := creation.Validate(); err != nil {
+		return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
+			platform.NewRejectError(actions.RejectionsMsgMalformed, err.Error()), now), "reject")
+	}
+
 	newInstrument := &state.Instrument{
 		InstrumentType: instrumentType,
 		InstrumentCode: instrumentCode,
@@ -426,6 +431,11 @@ func (a *Agent) processInstrumentModification(ctx context.Context, transaction *
 
 	creation.InstrumentRevision = instrument.Creation.InstrumentRevision + 1 // Bump the revision
 	creation.Timestamp = now
+
+	if err := creation.Validate(); err != nil {
+		return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
+			platform.NewRejectError(actions.RejectionsMsgMalformed, err.Error()), now), "reject")
+	}
 
 	if err := a.updateAdminBalance(ctx, agentLockingScript, adminAddressBytes, transaction,
 		creation, txid, previousAuthorizedTokenQty); err != nil {
