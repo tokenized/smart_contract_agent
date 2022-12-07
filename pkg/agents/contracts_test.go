@@ -28,6 +28,8 @@ func Test_Contracts_Offer_Invalid(t *testing.T) {
 
 	caches := state.StartTestCaches(ctx, t, store, cacher.DefaultConfig(), time.Second)
 
+	balanceLocker := state.NewInlineBalanceLocker()
+
 	contractKey, contractLockingScript, _ := state.MockKey()
 	_, feeLockingScript, _ := state.MockKey()
 	adminKey, adminLockingScript, _ := state.MockKey()
@@ -40,7 +42,7 @@ func Test_Contracts_Offer_Invalid(t *testing.T) {
 	}
 
 	agent, err := NewAgent(ctx, contractKey, contractLockingScript, DefaultConfig(),
-		feeLockingScript, caches.Caches, store, broadcaster, nil, nil, nil, nil,
+		feeLockingScript, caches.Caches, balanceLocker, store, broadcaster, nil, nil, nil, nil,
 		peer_channels.NewFactory())
 	if err != nil {
 		t.Fatalf("Failed to create agent : %s", err)
@@ -173,6 +175,8 @@ func Test_Contracts_Offer_Valid(t *testing.T) {
 
 	caches := state.StartTestCaches(ctx, t, store, cacher.DefaultConfig(), time.Second)
 
+	balanceLocker := state.NewInlineBalanceLocker()
+
 	contractKey, contractLockingScript, _ := state.MockKey()
 	_, feeLockingScript, _ := state.MockKey()
 	adminKey, adminLockingScript, adminAddress := state.MockKey()
@@ -186,7 +190,7 @@ func Test_Contracts_Offer_Valid(t *testing.T) {
 	}
 
 	agent, err := NewAgent(ctx, contractKey, contractLockingScript, DefaultConfig(),
-		feeLockingScript, caches.Caches, store, broadcaster, nil, nil, nil, nil,
+		feeLockingScript, caches.Caches, balanceLocker, store, broadcaster, nil, nil, nil, nil,
 		peer_channels.NewFactory())
 	if err != nil {
 		t.Fatalf("Failed to create agent : %s", err)
@@ -361,6 +365,8 @@ func Test_Contracts_Offer_AlreadyExists(t *testing.T) {
 
 	caches := state.StartTestCaches(ctx, t, store, cacher.DefaultConfig(), time.Second)
 
+	balanceLocker := state.NewInlineBalanceLocker()
+
 	contractKey, contractLockingScript, _ := state.MockKey()
 	_, feeLockingScript, _ := state.MockKey()
 	adminKey, adminLockingScript, _ := state.MockKey()
@@ -380,7 +386,7 @@ func Test_Contracts_Offer_AlreadyExists(t *testing.T) {
 	}
 
 	agent, err := NewAgent(ctx, contractKey, contractLockingScript, DefaultConfig(),
-		feeLockingScript, caches.Caches, store, broadcaster, nil, nil, nil, nil,
+		feeLockingScript, caches.Caches, balanceLocker, store, broadcaster, nil, nil, nil, nil,
 		peer_channels.NewFactory())
 	if err != nil {
 		t.Fatalf("Failed to create agent : %s", err)
@@ -513,12 +519,14 @@ func Test_Contracts_Amendment_Valid(t *testing.T) {
 	caches := state.StartTestCaches(ctx, t, store, cacher.DefaultConfig(), time.Second)
 	contractKey, contractLockingScript, adminKey, adminLockingScript, contract := state.MockContract(ctx, caches)
 
+	balanceLocker := state.NewInlineBalanceLocker()
+
 	var keyHash bitcoin.Hash32
 	rand.Read(keyHash[:])
 	_, feeLockingScript, _ := state.MockKey()
 
 	agent, err := NewAgent(ctx, contractKey, contractLockingScript, DefaultConfig(),
-		feeLockingScript, caches.Caches, store, broadcaster, nil, nil, nil, nil,
+		feeLockingScript, caches.Caches, balanceLocker, store, broadcaster, nil, nil, nil, nil,
 		peer_channels.NewFactory())
 	if err != nil {
 		t.Fatalf("Failed to create agent : %s", err)
@@ -705,13 +713,15 @@ func Test_Contracts_Amendment_AdminChange(t *testing.T) {
 	contractKey, contractLockingScript, adminKey, adminLockingScript, contract := state.MockContract(ctx,
 		caches)
 
+	balanceLocker := state.NewInlineBalanceLocker()
+
 	var keyHash bitcoin.Hash32
 	rand.Read(keyHash[:])
 	_, feeLockingScript, _ := state.MockKey()
 	newAdminKey, newAdminLockingScript, newAdminAddress := state.MockKey()
 
 	agent, err := NewAgent(ctx, contractKey, contractLockingScript, DefaultConfig(),
-		feeLockingScript, caches.Caches, store, broadcaster, nil, nil, nil, nil,
+		feeLockingScript, caches.Caches, balanceLocker, store, broadcaster, nil, nil, nil, nil,
 		peer_channels.NewFactory())
 	if err != nil {
 		t.Fatalf("Failed to create agent : %s", err)
@@ -877,6 +887,8 @@ func Test_Contracts_Amendment_Proposal(t *testing.T) {
 
 	caches := state.StartTestCaches(ctx, t, store, cacher.DefaultConfig(), time.Second)
 
+	balanceLocker := state.NewInlineBalanceLocker()
+
 	votingSystems := []*actions.VotingSystemField{
 		{
 			Name:                    "Basic",
@@ -896,7 +908,7 @@ func Test_Contracts_Amendment_Proposal(t *testing.T) {
 	_, feeLockingScript, _ := state.MockKey()
 
 	agent, err := NewAgent(ctx, contractKey, contractLockingScript, DefaultConfig(),
-		feeLockingScript, caches.Caches, store, broadcaster, nil, nil, nil, nil,
+		feeLockingScript, caches.Caches, balanceLocker, store, broadcaster, nil, nil, nil, nil,
 		peer_channels.NewFactory())
 	if err != nil {
 		t.Fatalf("Failed to create agent : %s", err)

@@ -21,14 +21,17 @@ import (
 )
 
 type TestCaches struct {
-	Timeout       time.Duration
-	Cache         *cacher.Cache
-	Caches        *Caches
-	Interrupt     chan interface{}
-	Complete      chan error
-	Shutdown      chan error
-	StartShutdown chan interface{}
-	Wait          sync.WaitGroup
+	Timeout         time.Duration
+	Cache           *cacher.Cache
+	Caches          *Caches
+	BalanceLocker   BalanceLocker
+	CacheInterrupt  chan interface{}
+	LockerInterrupt chan interface{}
+	CacheComplete   chan error
+	LockerComplete  chan error
+	Shutdown        chan error
+	StartShutdown   chan interface{}
+	Wait            sync.WaitGroup
 
 	failed     error
 	failedLock sync.Mutex
@@ -39,12 +42,14 @@ func StartTestCaches(ctx context.Context, t *testing.T, store storage.StreamStor
 	config cacher.Config, timeout time.Duration) *TestCaches {
 
 	result := &TestCaches{
-		Timeout:       timeout,
-		Cache:         cacher.NewCache(store, config),
-		Interrupt:     make(chan interface{}),
-		Complete:      make(chan error, 1),
-		Shutdown:      make(chan error, 1),
-		StartShutdown: make(chan interface{}),
+		Timeout:         timeout,
+		Cache:           cacher.NewCache(store, config),
+		CacheInterrupt:  make(chan interface{}),
+		LockerInterrupt: make(chan interface{}),
+		CacheComplete:   make(chan error, 1),
+		LockerComplete:  make(chan error, 1),
+		Shutdown:        make(chan error, 1),
+		StartShutdown:   make(chan interface{}),
 	}
 
 	var err error
@@ -53,22 +58,46 @@ func StartTestCaches(ctx context.Context, t *testing.T, store storage.StreamStor
 		panic(fmt.Sprintf("Failed to create caches : %s", err))
 	}
 
+	balanceLocker := NewThreadedBalanceLocker(1000)
+
+	result.BalanceLocker = balanceLocker
+
 	go func() {
 		defer func() {
 			if err := recover(); err != nil {
 				t.Errorf("Cache panic : %s", err)
-				result.Complete <- fmt.Errorf("panic: %s", err)
+				result.CacheComplete <- fmt.Errorf("panic: %s", err)
 			}
 
 			result.Wait.Done()
+			t.Logf("Cache finished")
 		}()
 
 		result.Wait.Add(1)
-		err := result.Cache.Run(ctx, result.Interrupt, result.Shutdown)
+		err := result.Cache.Run(ctx, result.CacheInterrupt, result.Shutdown)
 		if err != nil {
 			t.Errorf("Cache returned an error : %s", err)
 		}
-		result.Complete <- err
+		result.CacheComplete <- err
+	}()
+
+	go func() {
+		defer func() {
+			if err := recover(); err != nil {
+				t.Errorf("BalanceLocker panic : %s", err)
+				result.LockerComplete <- fmt.Errorf("panic: %s", err)
+			}
+
+			result.Wait.Done()
+			t.Logf("BalanceLocker finished")
+		}()
+
+		result.Wait.Add(1)
+		err := balanceLocker.Run(ctx, result.LockerInterrupt)
+		if err != nil {
+			t.Errorf("BalanceLocker returned an error : %s", err)
+		}
+		result.LockerComplete <- err
 	}()
 
 	go func() {
@@ -82,7 +111,7 @@ func StartTestCaches(ctx context.Context, t *testing.T, store storage.StreamStor
 				result.failedLock.Unlock()
 			}
 
-		case err, ok := <-result.Complete:
+		case err, ok := <-result.CacheComplete:
 			if ok && err != nil {
 				t.Errorf("Cache failed : %s", err)
 			} else {
@@ -99,10 +128,21 @@ func StartTestCaches(ctx context.Context, t *testing.T, store storage.StreamStor
 }
 
 func (c *TestCaches) StopTestCaches() {
-	close(c.StartShutdown)
-	close(c.Interrupt)
+	close(c.LockerInterrupt)
 	select {
-	case err := <-c.Complete:
+	case err := <-c.LockerComplete:
+		if err != nil {
+			panic(fmt.Sprintf("Locker failed : %s", err))
+		}
+
+	case <-time.After(c.Timeout):
+		panic("BalanceLocker shutdown timed out")
+	}
+
+	close(c.StartShutdown)
+	close(c.CacheInterrupt)
+	select {
+	case err := <-c.CacheComplete:
 		if err != nil {
 			panic(fmt.Sprintf("Cache failed : %s", err))
 		}

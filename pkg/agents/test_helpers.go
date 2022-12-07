@@ -19,6 +19,7 @@ type MockAgentFactory struct {
 	config           Config
 	feeLockingScript bitcoin.Script
 	caches           *state.Caches
+	balanceLocker    state.BalanceLocker
 	store            storage.CopyList
 	broadcaster      Broadcaster
 	fetcher          Fetcher
@@ -29,16 +30,17 @@ type MockAgentFactory struct {
 }
 
 func NewMockAgentFactory(config Config, feeLockingScript bitcoin.Script, caches *state.Caches,
-	store storage.CopyList, broadcaster Broadcaster, fetcher Fetcher, headers BlockHeaders,
-	scheduler *platform.Scheduler) *MockAgentFactory {
+	balanceLocker state.BalanceLocker, store storage.CopyList, broadcaster Broadcaster,
+	fetcher Fetcher, headers BlockHeaders, scheduler *platform.Scheduler) *MockAgentFactory {
 
 	return &MockAgentFactory{
-		config:      config,
-		caches:      caches,
-		store:       store,
-		fetcher:     fetcher,
-		broadcaster: broadcaster,
-		scheduler:   scheduler,
+		config:        config,
+		caches:        caches,
+		balanceLocker: balanceLocker,
+		store:         store,
+		fetcher:       fetcher,
+		broadcaster:   broadcaster,
+		scheduler:     scheduler,
 	}
 }
 
@@ -72,7 +74,8 @@ func (f *MockAgentFactory) GetAgent(ctx context.Context,
 	}
 
 	agent, err := NewAgent(ctx, *key, lockingScript, f.config, f.feeLockingScript, f.caches,
-		f.store, f.broadcaster, f.fetcher, f.headers, f.scheduler, f, peer_channels.NewFactory())
+		f.balanceLocker, f.store, f.broadcaster, f.fetcher, f.headers, f.scheduler, f,
+		peer_channels.NewFactory())
 	if err != nil {
 		return nil, errors.Wrap(err, "new agent")
 	}

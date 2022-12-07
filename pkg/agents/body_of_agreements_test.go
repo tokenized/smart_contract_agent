@@ -26,6 +26,8 @@ func Test_BodyOfAgreement_Offer_Valid(t *testing.T) {
 
 	caches := state.StartTestCaches(ctx, t, store, cacher.DefaultConfig(), time.Second)
 
+	balanceLocker := state.NewInlineBalanceLocker()
+
 	contractKey, contractLockingScript, adminKey, adminLockingScript, contract := state.MockContract(ctx,
 		caches)
 	_, feeLockingScript, _ := state.MockKey()
@@ -34,7 +36,7 @@ func Test_BodyOfAgreement_Offer_Valid(t *testing.T) {
 	contract.MarkModified()
 
 	agent, err := NewAgent(ctx, contractKey, contractLockingScript, DefaultConfig(),
-		feeLockingScript, caches.Caches, store, broadcaster, nil, nil, nil, nil,
+		feeLockingScript, caches.Caches, balanceLocker, store, broadcaster, nil, nil, nil, nil,
 		peer_channels.NewFactory())
 	if err != nil {
 		t.Fatalf("Failed to create agent : %s", err)
@@ -179,6 +181,8 @@ func Test_BodyOfAgreement_Offer_UnreferencedTerm(t *testing.T) {
 
 	caches := state.StartTestCaches(ctx, t, store, cacher.DefaultConfig(), time.Second)
 
+	balanceLocker := state.NewInlineBalanceLocker()
+
 	contractKey, contractLockingScript, adminKey, adminLockingScript, contract := state.MockContract(ctx,
 		caches)
 	_, feeLockingScript, _ := state.MockKey()
@@ -187,7 +191,7 @@ func Test_BodyOfAgreement_Offer_UnreferencedTerm(t *testing.T) {
 	contract.MarkModified()
 
 	agent, err := NewAgent(ctx, contractKey, contractLockingScript, DefaultConfig(),
-		feeLockingScript, caches.Caches, store, broadcaster, nil, nil, nil, nil,
+		feeLockingScript, caches.Caches, balanceLocker, store, broadcaster, nil, nil, nil, nil,
 		peer_channels.NewFactory())
 	if err != nil {
 		t.Fatalf("Failed to create agent : %s", err)
@@ -337,6 +341,8 @@ func Test_BodyOfAgreement_Amendment_Basic(t *testing.T) {
 
 	caches := state.StartTestCaches(ctx, t, store, cacher.DefaultConfig(), time.Second)
 
+	balanceLocker := state.NewInlineBalanceLocker()
+
 	contractKey, contractLockingScript, adminKey, adminLockingScript, contract := state.MockContract(ctx, caches)
 	_, feeLockingScript, _ := state.MockKey()
 
@@ -374,7 +380,7 @@ func Test_BodyOfAgreement_Amendment_Basic(t *testing.T) {
 	contract.Unlock()
 
 	agent, err := NewAgent(ctx, contractKey, contractLockingScript, DefaultConfig(),
-		feeLockingScript, caches.Caches, store, broadcaster, nil, nil, nil, nil,
+		feeLockingScript, caches.Caches, balanceLocker, store, broadcaster, nil, nil, nil, nil,
 		peer_channels.NewFactory())
 	if err != nil {
 		t.Fatalf("Failed to create agent : %s", err)
@@ -525,6 +531,8 @@ func Test_BodyOfAgreement_Amendment_Child(t *testing.T) {
 
 	caches := state.StartTestCaches(ctx, t, store, cacher.DefaultConfig(), time.Second)
 
+	balanceLocker := state.NewInlineBalanceLocker()
+
 	contractKey, contractLockingScript, adminKey, adminLockingScript, contract := state.MockContract(ctx, caches)
 	_, feeLockingScript, _ := state.MockKey()
 
@@ -562,7 +570,7 @@ func Test_BodyOfAgreement_Amendment_Child(t *testing.T) {
 	contract.Unlock()
 
 	agent, err := NewAgent(ctx, contractKey, contractLockingScript, DefaultConfig(),
-		feeLockingScript, caches.Caches, store, broadcaster, nil, nil, nil, nil,
+		feeLockingScript, caches.Caches, balanceLocker, store, broadcaster, nil, nil, nil, nil,
 		peer_channels.NewFactory())
 	if err != nil {
 		t.Fatalf("Failed to create agent : %s", err)
@@ -728,6 +736,8 @@ func Test_BodyOfAgreement_Amendment_Proposal(t *testing.T) {
 
 	caches := state.StartTestCaches(ctx, t, store, cacher.DefaultConfig(), time.Second)
 
+	balanceLocker := state.NewInlineBalanceLocker()
+
 	votingSystems := []*actions.VotingSystemField{
 		{
 			Name:                    "Basic",
@@ -777,7 +787,7 @@ func Test_BodyOfAgreement_Amendment_Proposal(t *testing.T) {
 	contract.Unlock()
 
 	agent, err := NewAgent(ctx, contractKey, contractLockingScript, DefaultConfig(),
-		feeLockingScript, caches.Caches, store, broadcaster, nil, nil, nil, nil,
+		feeLockingScript, caches.Caches, balanceLocker, store, broadcaster, nil, nil, nil, nil,
 		peer_channels.NewFactory())
 	if err != nil {
 		t.Fatalf("Failed to create agent : %s", err)

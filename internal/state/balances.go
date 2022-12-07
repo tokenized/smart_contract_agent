@@ -51,6 +51,8 @@ type Balance struct {
 
 type Balances []*Balance
 
+type BalanceSet []Balances
+
 type BalanceAdjustmentCode byte
 
 type BalanceAdjustment struct {
@@ -336,7 +338,7 @@ func (b *Balance) AddPendingDebit(quantity, now uint64) error {
 }
 
 // AddPendingCredit adds a pending modification to increase the balance.
-func (b *Balance) AddPendingCredit(quantity uint64) error {
+func (b *Balance) AddPendingCredit(quantity uint64, now uint64) error {
 	if b.pendingDirection { // credit
 		b.pendingQuantity += quantity
 	} else { // debit
@@ -353,19 +355,29 @@ func (b *Balance) AddPendingCredit(quantity uint64) error {
 
 // RevertPending removes any balance adjustements for the specified transfer transaction and
 // clears any pending modification.
-func (b *Balance) RevertPending(txid bitcoin.Hash32) {
+func (b *Balance) RevertPending() {
+	b.pendingDirection = false
+	b.pendingQuantity = 0
+}
+
+func (b *Balance) RevertPendingAdjustment(txid bitcoin.Hash32) {
+	found := false
 	var newAdjustments []*BalanceAdjustment
 	for _, adj := range b.Adjustments {
 		if txid.Equal(adj.TxID) {
+			found = true
 			continue
 		}
 
 		newAdjustments = append(newAdjustments, adj)
 	}
-	b.Adjustments = newAdjustments
 
-	b.pendingDirection = false
-	b.pendingQuantity = 0
+	if !found {
+		return
+	}
+
+	b.isModified = true
+	b.Adjustments = newAdjustments
 }
 
 func (b *Balance) AddFreeze(txid bitcoin.Hash32, quantity, frozenUntil uint64) uint64 {
@@ -478,9 +490,9 @@ func (b *Balance) FinalizeConfiscation(orderTxID, confiscationTxID bitcoin.Hash3
 	return found
 }
 
-// FinalizePending clears the current pending modification and converts it into a balance
+// SettlePending clears the current pending modification and converts it into a balance
 // adjustment.
-func (b *Balance) FinalizePending(txid bitcoin.Hash32, isMultiContract bool) {
+func (b *Balance) SettlePending(txid bitcoin.Hash32, isMultiContract bool) {
 	var code BalanceAdjustmentCode
 	if isMultiContract {
 		if b.pendingDirection { // credit
@@ -748,9 +760,6 @@ func AppendBalances(left, right Balances) Balances {
 
 // AppendZeroBalance adds a new zero balance to the set if there isn't already a balance with the
 // specified locking script.
-// TODO We might want to sort these to prevent deadlocks between transfers where one transfer could
-// lock a balance and be dependent on another balance locked by another transfer, but the other
-// transfer is dependent on this balance. --ce
 func AppendZeroBalance(balances Balances, lockingScript bitcoin.Script) Balances {
 	for _, balance := range balances {
 		if balance.LockingScript.Equal(lockingScript) {
@@ -782,23 +791,33 @@ func (bs *Balances) Find(lockingScript bitcoin.Script) *Balance {
 	return nil
 }
 
-func (bs *Balances) RevertPending(txid bitcoin.Hash32) {
+func (bs *Balances) RevertPending() {
 	for _, b := range *bs {
 		if b == nil {
 			continue
 		}
 
-		b.RevertPending(txid)
+		b.RevertPending()
 	}
 }
 
-func (bs *Balances) FinalizePending(txid bitcoin.Hash32, isMultiContract bool) {
+func (bs *Balances) RevertPendingAdjustment(txid bitcoin.Hash32) {
 	for _, b := range *bs {
 		if b == nil {
 			continue
 		}
 
-		b.FinalizePending(txid, isMultiContract)
+		b.RevertPendingAdjustment(txid)
+	}
+}
+
+func (bs *Balances) SettlePending(txid bitcoin.Hash32, isMultiContract bool) {
+	for _, b := range *bs {
+		if b == nil {
+			continue
+		}
+
+		b.SettlePending(txid, isMultiContract)
 	}
 }
 
@@ -819,6 +838,16 @@ func (bs *Balances) Settle(transferTxID, settlementTxID bitcoin.Hash32, now uint
 		}
 
 		b.Settle(transferTxID, settlementTxID, now)
+	}
+}
+
+func (bs *Balances) SettleFreeze(orderTxID, freezeOrderTxID bitcoin.Hash32) {
+	for _, b := range *bs {
+		if b == nil {
+			continue
+		}
+
+		b.SettleFreeze(orderTxID, freezeOrderTxID)
 	}
 }
 
@@ -874,6 +903,83 @@ func (bs *Balances) Unlock() {
 
 		b.Unlock()
 	}
+}
+
+func (bs *BalanceSet) Lock() {
+	for _, b := range *bs {
+		if len(b) == 0 {
+			continue
+		}
+
+		b.Lock()
+	}
+}
+
+func (bs *BalanceSet) Unlock() {
+	for _, b := range *bs {
+		if len(b) == 0 {
+			continue
+		}
+
+		b.Unlock()
+	}
+}
+
+func (bs *BalanceSet) Settle(transferTxID, settlementTxID bitcoin.Hash32, now uint64) {
+	for _, b := range *bs {
+		if len(b) == 0 {
+			continue
+		}
+
+		b.Settle(transferTxID, settlementTxID, now)
+	}
+}
+
+func (bs *BalanceSet) SettlePending(txid bitcoin.Hash32, isMultiContract bool) {
+	for _, b := range *bs {
+		if len(b) == 0 {
+			continue
+		}
+
+		b.SettlePending(txid, isMultiContract)
+	}
+}
+
+func (bs *BalanceSet) CancelPending(txid bitcoin.Hash32) {
+	for _, b := range *bs {
+		if len(b) == 0 {
+			continue
+		}
+
+		b.CancelPending(txid)
+	}
+}
+
+func (bs *BalanceSet) Revert(txid bitcoin.Hash32) {
+	for _, b := range *bs {
+		if len(b) == 0 {
+			continue
+		}
+
+		b.RevertPending()
+		b.RevertPendingAdjustment(txid)
+	}
+}
+
+func (bs *BalanceSet) LockingScripts() []bitcoin.Script {
+	var result []bitcoin.Script
+	for _, b := range *bs {
+		if len(b) == 0 {
+			continue
+		}
+
+		lockingScripts := b.LockingScripts()
+		for _, ls := range lockingScripts {
+			result = appendLockingScript(result, ls)
+		}
+	}
+
+	return result
 }
 
 func appendLockingScript(lockingScripts []bitcoin.Script,

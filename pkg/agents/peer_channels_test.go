@@ -52,13 +52,14 @@ func Test_Responder_Response(t *testing.T) {
 	}
 
 	caches := state.StartTestCaches(ctx, t, store, cacher.DefaultConfig(), time.Second)
+	balanceLocker := state.NewInlineBalanceLocker()
 
 	contractKey, contractLockingScript, adminKey, adminLockingScript, _, instrument := state.MockInstrument(ctx,
 		caches)
 	_, feeLockingScript, _ := state.MockKey()
 
 	agent, err := NewAgent(ctx, contractKey, contractLockingScript, DefaultConfig(),
-		feeLockingScript, caches.Caches, store, broadcaster, nil, nil, nil, nil,
+		feeLockingScript, caches.Caches, balanceLocker, store, broadcaster, nil, nil, nil, nil,
 		peerChannelsFactory)
 	if err != nil {
 		t.Fatalf("Failed to create agent : %s", err)
@@ -239,13 +240,14 @@ func Test_Responder_Request(t *testing.T) {
 	}
 
 	caches := state.StartTestCaches(ctx, t, store, cacher.DefaultConfig(), time.Second)
+	balanceLocker := state.NewInlineBalanceLocker()
 
 	contractKey, contractLockingScript, adminKey, adminLockingScript, _, instrument := state.MockInstrument(ctx,
 		caches)
 	_, feeLockingScript, _ := state.MockKey()
 
 	agent, err := NewAgent(ctx, contractKey, contractLockingScript, DefaultConfig(),
-		feeLockingScript, caches.Caches, store, broadcaster, nil, nil, nil, nil,
+		feeLockingScript, caches.Caches, balanceLocker, store, broadcaster, nil, nil, nil, nil,
 		peerChannelsFactory)
 	if err != nil {
 		t.Fatalf("Failed to create agent : %s", err)
@@ -445,13 +447,14 @@ func Test_Responder_AlreadyProcessed(t *testing.T) {
 	}
 
 	caches := state.StartTestCaches(ctx, t, store, cacher.DefaultConfig(), time.Second)
+	balanceLocker := state.NewInlineBalanceLocker()
 
 	contractKey, contractLockingScript, adminKey, adminLockingScript, _, instrument := state.MockInstrument(ctx,
 		caches)
 	_, feeLockingScript, _ := state.MockKey()
 
 	agent, err := NewAgent(ctx, contractKey, contractLockingScript, DefaultConfig(),
-		feeLockingScript, caches.Caches, store, broadcaster, nil, nil, nil, nil,
+		feeLockingScript, caches.Caches, balanceLocker, store, broadcaster, nil, nil, nil, nil,
 		peerChannelsFactory)
 	if err != nil {
 		t.Fatalf("Failed to create agent : %s", err)
@@ -647,13 +650,14 @@ func Test_Responder_Reject(t *testing.T) {
 	}
 
 	caches := state.StartTestCaches(ctx, t, store, cacher.DefaultConfig(), time.Second)
+	balanceLocker := state.NewInlineBalanceLocker()
 
 	contractKey, contractLockingScript, adminKey, adminLockingScript, _, instrument := state.MockInstrument(ctx,
 		caches)
 	_, feeLockingScript, _ := state.MockKey()
 
 	agent, err := NewAgent(ctx, contractKey, contractLockingScript, DefaultConfig(),
-		feeLockingScript, caches.Caches, store, broadcaster, nil, nil, nil, nil,
+		feeLockingScript, caches.Caches, balanceLocker, store, broadcaster, nil, nil, nil, nil,
 		peerChannelsFactory)
 	if err != nil {
 		t.Fatalf("Failed to create agent : %s", err)

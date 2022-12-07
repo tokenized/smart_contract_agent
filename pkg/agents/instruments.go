@@ -150,9 +150,10 @@ func (a *Agent) processInstrumentDefinition(ctx context.Context, transaction *st
 	}
 
 	if err := a.updateAdminBalance(ctx, agentLockingScript, contract.Formation.AdminAddress,
-		transaction, creation, txid, 0); err != nil {
+		transaction, creation, txid, 0, &now); err != nil {
 		return errors.Wrap(err, "update admin balance")
 	}
+	creation.Timestamp = now // now might have changed while locking balance
 
 	creationTx := txbuilder.NewTxBuilder(a.FeeRate(), a.DustFeeRate())
 
@@ -438,9 +439,10 @@ func (a *Agent) processInstrumentModification(ctx context.Context, transaction *
 	}
 
 	if err := a.updateAdminBalance(ctx, agentLockingScript, adminAddressBytes, transaction,
-		creation, txid, previousAuthorizedTokenQty); err != nil {
+		creation, txid, previousAuthorizedTokenQty, &now); err != nil {
 		return errors.Wrap(err, "update admin balance")
 	}
+	creation.Timestamp = now // now might have changed while locking balance
 
 	creationTx := txbuilder.NewTxBuilder(a.FeeRate(), a.DustFeeRate())
 
@@ -630,16 +632,17 @@ func (a *Agent) processInstrumentCreation(ctx context.Context, transaction *stat
 	contract.Unlock()
 
 	if err := a.updateAdminBalance(ctx, agentLockingScript, adminAddressBytes, transaction,
-		creation, txid, previousAuthorizedTokenQty); err != nil {
+		creation, txid, previousAuthorizedTokenQty, &now); err != nil {
 		return errors.Wrap(err, "admin balance")
 	}
+	creation.Timestamp = now // now might have changed while locking balance
 
 	return nil
 }
 
 func (a *Agent) updateAdminBalance(ctx context.Context, contractLockingScript bitcoin.Script,
 	adminAddress []byte, transaction *state.Transaction, creation *actions.InstrumentCreation,
-	txid bitcoin.Hash32, previousAuthorizedTokenQty uint64) error {
+	txid bitcoin.Hash32, previousAuthorizedTokenQty uint64, now *uint64) error {
 
 	if previousAuthorizedTokenQty == creation.AuthorizedTokenQty {
 		return nil // no admin balance update
@@ -673,7 +676,10 @@ func (a *Agent) updateAdminBalance(ctx context.Context, contractLockingScript bi
 
 	var quantity uint64
 	if addedBalance != balance {
+		// A single balance lock doesn't need to use the balance locker since it isn't
+		// susceptible to the group deadlock.
 		addedBalance.Lock()
+		defer addedBalance.Unlock()
 
 		if previousAuthorizedTokenQty < creation.AuthorizedTokenQty {
 			// Increase
@@ -687,7 +693,6 @@ func (a *Agent) updateAdminBalance(ctx context.Context, contractLockingScript bi
 					logger.Uint64("previous_authorized_quantity", previousAuthorizedTokenQty),
 					logger.Uint64("new_authorized_quantity", creation.AuthorizedTokenQty),
 				}, "Authorized token quantity reduction more than admin balance")
-				addedBalance.Unlock()
 				return nil
 			}
 
@@ -696,10 +701,9 @@ func (a *Agent) updateAdminBalance(ctx context.Context, contractLockingScript bi
 
 		quantity = addedBalance.Quantity
 
-		addedBalance.Timestamp = creation.Timestamp
+		addedBalance.Timestamp = *now
 		addedBalance.TxID = &txid
 		addedBalance.MarkModified()
-		addedBalance.Unlock()
 	} else {
 		quantity = balance.Quantity
 	}

@@ -101,17 +101,19 @@ func main() {
 		logger.Fatal(ctx, "Failed to create caches : %s", err)
 	}
 
+	balanceLocker := state.NewThreadedBalanceLocker(1000)
+
 	lockingScript, err := cfg.AgentKey.LockingScript()
 	if err != nil {
 		logger.Fatal(ctx, "Failed to create agent locking script : %s", err)
 	}
 
 	service := service.NewService(cfg.AgentKey, lockingScript, cfg.Agents, feeLockingScript,
-		spyNode, caches, store, NewSpyNodeBroadcaster(spyNode), spyNode,
+		spyNode, caches, balanceLocker, store, NewSpyNodeBroadcaster(spyNode), spyNode,
 		platform.NewHeaders(spyNode), scheduler, peerChannelsFactory)
 	spyNode.RegisterHandler(service)
 
-	var spyNodeWait, cacheWait, schedulerWait, peerChannelWait sync.WaitGroup
+	var spyNodeWait, cacheWait, lockerWait, schedulerWait, peerChannelWait sync.WaitGroup
 
 	schedulerThread, schedulerComplete := threads.NewInterruptableThreadComplete("Scheduler",
 		scheduler.Run, &schedulerWait)
@@ -121,6 +123,9 @@ func main() {
 		func(ctx context.Context, interrupt <-chan interface{}) error {
 			return cache.Run(ctx, interrupt, cacheShutdown)
 		}, &cacheWait)
+
+	lockerThread, lockerComplete := threads.NewInterruptableThreadComplete("Balance Locker",
+		balanceLocker.Run, &lockerWait)
 
 	spyNodeThread, spyNodeComplete := threads.NewInterruptableThreadComplete("SpyNode", spyNode.Run,
 		&spyNodeWait)
@@ -140,6 +145,7 @@ func main() {
 	}
 
 	schedulerThread.Start(ctx)
+	lockerThread.Start(ctx)
 	spyNodeThread.Start(ctx)
 	peerChannelThread.Start(ctx)
 
@@ -163,6 +169,9 @@ func main() {
 	case err := <-cacheComplete:
 		logger.Error(ctx, "Cache completed : %s", err)
 
+	case err := <-lockerComplete:
+		logger.Error(ctx, "Balance locker completed : %s", err)
+
 	case err := <-spyNodeComplete:
 		logger.Error(ctx, "SpyNode completed : %s", err)
 
@@ -181,6 +190,9 @@ func main() {
 
 	spyNodeThread.Stop(ctx)
 	spyNodeWait.Wait()
+
+	lockerThread.Stop(ctx)
+	lockerWait.Wait()
 
 	if err := service.Save(ctx); err != nil {
 		logger.Error(ctx, "Failed to save service : %s", err)

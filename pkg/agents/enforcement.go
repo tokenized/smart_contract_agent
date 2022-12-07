@@ -316,47 +316,59 @@ func (a *Agent) processFreezeOrder(ctx context.Context, transaction *state.Trans
 				return errors.Wrap(err, "get balances")
 			}
 			defer a.caches.Balances.ReleaseMulti(ctx, agentLockingScript, instrumentCode, balances)
+		}
+	}
 
-			balances.Lock()
-			for i, balance := range balances {
-				if balance == nil {
-					balances.RevertPending(txid)
-					balances.Unlock()
-					return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
-						platform.NewRejectError(actions.RejectionsMsgMalformed,
-							fmt.Sprintf("Balance[%d]: not found", i)), now), "reject")
-				}
+	if len(balances) > 0 {
+		lockerResponseChannel := a.balanceLocker.AddRequest(state.BalanceSet{balances})
+		lockerResponse := <-lockerResponseChannel
+		switch v := lockerResponse.(type) {
+		case uint64:
+			now = v
+		case error:
+			return errors.Wrap(v, "balance locker")
+		}
+		defer balances.Unlock()
 
-				quantity := balance.AddFreeze(txid, quantities[i], order.FreezePeriod)
+		freeze.Timestamp = now
 
-				freeze.Quantities = append(freeze.Quantities, &actions.QuantityIndexField{
-					Index:    uint32(len(freezeTx.Outputs)),
-					Quantity: quantity,
-				})
+		for i, balance := range balances {
+			if balance == nil {
+				balances.RevertPending()
+				return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
+					platform.NewRejectError(actions.RejectionsMsgMalformed,
+						fmt.Sprintf("Balance[%d]: not found", i)), now), "reject")
+			}
 
-				if err := freezeTx.AddOutput(balance.LockingScript, 1, false, true); err != nil {
-					return errors.Wrapf(err, "add target output: %d", i)
-				}
+			quantity := balance.AddFreeze(txid, quantities[i], order.FreezePeriod)
+
+			freeze.Quantities = append(freeze.Quantities, &actions.QuantityIndexField{
+				Index:    uint32(len(freezeTx.Outputs)),
+				Quantity: quantity,
+			})
+
+			if err := freezeTx.AddOutput(balance.LockingScript, 1, false, true); err != nil {
+				balances.RevertPending()
+				return errors.Wrapf(err, "add target output: %d", i)
 			}
 		}
 	}
 
 	if err := freeze.Validate(); err != nil {
+		balances.RevertPending()
 		return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
 			platform.NewRejectError(actions.RejectionsMsgMalformed, err.Error()), now), "reject")
 	}
 
 	freezeScript, err := protocol.Serialize(freeze, a.IsTest())
 	if err != nil {
-		balances.RevertPending(txid)
-		balances.Unlock()
+		balances.RevertPending()
 		return errors.Wrap(err, "serialize freeze")
 	}
 
 	freezeScriptOutputIndex := len(freezeTx.Outputs)
 	if err := freezeTx.AddOutput(freezeScript, 0, false, false); err != nil {
-		balances.RevertPending(txid)
-		balances.Unlock()
+		balances.RevertPending()
 		return errors.Wrap(err, "add freeze output")
 	}
 
@@ -370,13 +382,11 @@ func (a *Agent) processFreezeOrder(ctx context.Context, transaction *state.Trans
 	if contractFee > 0 {
 		if err := freezeTx.AddOutput(a.FeeLockingScript(), contractFee, true,
 			false); err != nil {
-			balances.RevertPending(txid)
-			balances.Unlock()
+			balances.RevertPending()
 			return errors.Wrap(err, "add contract fee")
 		}
 	} else if err := freezeTx.SetChangeLockingScript(a.FeeLockingScript(), ""); err != nil {
-		balances.RevertPending(txid)
-		balances.Unlock()
+		balances.RevertPending()
 		return errors.Wrap(err, "set change")
 	}
 
@@ -384,15 +394,13 @@ func (a *Agent) processFreezeOrder(ctx context.Context, transaction *state.Trans
 	if _, err := freezeTx.Sign([]bitcoin.Key{a.Key()}); err != nil {
 		if errors.Cause(err) == txbuilder.ErrInsufficientValue {
 			logger.Warn(ctx, "Insufficient tx funding : %s", err)
-			balances.RevertPending(txid)
-			balances.Unlock()
+			balances.RevertPending()
 			return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
 				platform.NewRejectError(actions.RejectionsInsufficientTxFeeFunding, err.Error()),
 				now), "reject")
 		}
 
-		balances.RevertPending(txid)
-		balances.Unlock()
+		balances.RevertPending()
 		return errors.Wrap(err, "sign")
 	}
 
@@ -400,13 +408,10 @@ func (a *Agent) processFreezeOrder(ctx context.Context, transaction *state.Trans
 
 	freezeTransaction, err := a.caches.Transactions.AddRaw(ctx, freezeTx.MsgTx, nil)
 	if err != nil {
-		balances.RevertPending(txid)
-		balances.Unlock()
+		balances.RevertPending()
 		return errors.Wrap(err, "add response tx")
 	}
 	defer a.caches.Transactions.Release(ctx, freezeTxID)
-
-	balances.Unlock()
 
 	if isFull {
 		if len(order.InstrumentCode) == 0 {
@@ -417,9 +422,7 @@ func (a *Agent) processFreezeOrder(ctx context.Context, transaction *state.Trans
 			instrument.Freeze(freezeTxID, order.FreezePeriod)
 		}
 	} else {
-		for _, balance := range balances {
-			balance.SettleFreeze(txid, freezeTxID)
-		}
+		balances.SettleFreeze(txid, freezeTxID)
 	}
 
 	// Set freeze tx as processed.
@@ -894,12 +897,34 @@ func (a *Agent) processConfiscateOrder(ctx context.Context, transaction *state.T
 	}
 	defer a.caches.Balances.ReleaseMulti(ctx, agentLockingScript, instrumentCode, balances)
 
-	balances.Lock()
-	defer balances.Unlock()
+	depositBalance, err := a.caches.Balances.Add(ctx, agentLockingScript, instrumentCode,
+		state.ZeroBalance(depositLockingScript))
+	if err != nil {
+		balances.RevertPending()
+		return errors.Wrap(err, "get deposit balance")
+	}
+	defer a.caches.Balances.Release(ctx, agentLockingScript, instrumentCode, depositBalance)
+
+	allBalances := state.BalanceSet{
+		balances,
+		state.Balances{depositBalance},
+	}
+
+	lockerResponseChannel := a.balanceLocker.AddRequest(allBalances)
+	lockerResponse := <-lockerResponseChannel
+	switch v := lockerResponse.(type) {
+	case uint64:
+		now = v
+	case error:
+		return errors.Wrap(v, "balance locker")
+	}
+	defer allBalances.Unlock()
+
+	confiscation.Timestamp = now
 
 	for i, balance := range balances {
 		if balance == nil {
-			balances.RevertPending(txid)
+			balances.RevertPending()
 
 			return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
 				platform.NewRejectError(actions.RejectionsMsgMalformed,
@@ -909,7 +934,7 @@ func (a *Agent) processConfiscateOrder(ctx context.Context, transaction *state.T
 		quantity := quantities[i]
 		finalQuantity, err := balance.AddConfiscation(txid, quantity)
 		if err != nil {
-			balances.RevertPending(txid)
+			balances.RevertPending()
 
 			logger.WarnWithFields(ctx, []logger.Field{
 				logger.String("instrument_id", instrumentID),
@@ -930,27 +955,19 @@ func (a *Agent) processConfiscateOrder(ctx context.Context, transaction *state.T
 	}
 
 	if _, exists := hashes[*depositHash]; exists {
-		balances.RevertPending(txid)
+		balances.RevertPending()
 
 		return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
 			platform.NewRejectError(actions.RejectionsMsgMalformed,
 				fmt.Sprintf("DepositAddress: duplicated")), now), "reject")
 	}
 
-	depositBalance, err := a.caches.Balances.Add(ctx, agentLockingScript, instrumentCode,
-		state.ZeroBalance(depositLockingScript))
-	if err != nil {
-		balances.RevertPending(txid)
-		return errors.Wrap(err, "get deposit balance")
-	}
-	defer a.caches.Balances.Release(ctx, agentLockingScript, instrumentCode, depositBalance)
-
-	if err := depositBalance.AddPendingCredit(depositQuantity); err != nil {
+	if err := depositBalance.AddPendingCredit(depositQuantity, now); err != nil {
 		logger.WarnWithFields(ctx, []logger.Field{
 			logger.Stringer("locking_script", depositLockingScript),
 			logger.Uint64("quantity", depositQuantity),
 		}, "Failed to add deposit : %s", err)
-		balances.RevertPending(txid)
+		balances.RevertPending()
 
 		if rejectError, ok := errors.Cause(err).(platform.RejectError); ok {
 			rejectError.Message = fmt.Sprintf("credit: %s", rejectError.Message)
@@ -964,21 +981,25 @@ func (a *Agent) processConfiscateOrder(ctx context.Context, transaction *state.T
 	confiscation.DepositQty = depositBalance.SettlePendingQuantity()
 
 	if err := confiscation.Validate(); err != nil {
+		balances.RevertPending()
 		return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
 			platform.NewRejectError(actions.RejectionsMsgMalformed, err.Error()), now), "reject")
 	}
 
 	if err := confiscationTx.AddOutput(depositLockingScript, 1, false, true); err != nil {
+		balances.RevertPending()
 		return errors.Wrap(err, "add deposit output")
 	}
 
 	confiscationScript, err := protocol.Serialize(confiscation, a.IsTest())
 	if err != nil {
+		balances.RevertPending()
 		return errors.Wrap(err, "serialize confiscation")
 	}
 
 	confiscationScriptOutputIndex := len(confiscationTx.Outputs)
 	if err := confiscationTx.AddOutput(confiscationScript, 0, false, false); err != nil {
+		balances.RevertPending()
 		return errors.Wrap(err, "add confiscation output")
 	}
 
@@ -987,14 +1008,17 @@ func (a *Agent) processConfiscateOrder(ctx context.Context, transaction *state.T
 	if contractFee > 0 {
 		if err := confiscationTx.AddOutput(a.FeeLockingScript(), contractFee, true,
 			false); err != nil {
+			balances.RevertPending()
 			return errors.Wrap(err, "add contract fee")
 		}
 	} else if err := confiscationTx.SetChangeLockingScript(a.FeeLockingScript(), ""); err != nil {
+		balances.RevertPending()
 		return errors.Wrap(err, "set change")
 	}
 
 	// Sign confiscation tx.
 	if _, err := confiscationTx.Sign([]bitcoin.Key{a.Key()}); err != nil {
+		balances.RevertPending()
 		if errors.Cause(err) == txbuilder.ErrInsufficientValue {
 			logger.Warn(ctx, "Insufficient tx funding : %s", err)
 			return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
@@ -1208,17 +1232,24 @@ func (a *Agent) processFreeze(ctx context.Context, transaction *state.Transactio
 			}
 			defer a.caches.Balances.ReleaseMulti(ctx, agentLockingScript, instrumentCode, balances)
 
-			balances.Lock()
+			lockerResponseChannel := a.balanceLocker.AddRequest(state.BalanceSet{balances})
+			lockerResponse := <-lockerResponseChannel
+			switch v := lockerResponse.(type) {
+			case uint64:
+				now = v
+			case error:
+				return errors.Wrap(v, "balance locker")
+			}
+			defer balances.Unlock()
+
 			for i, balance := range balances {
 				if balance == nil {
-					balances.RevertPending(txid)
-					balances.Unlock()
-					return fmt.Errorf("Missing balance %d", i)
+					logger.Error(ctx, "Missing balance %d", i)
+					continue
 				}
 
 				balance.AddFreeze(txid, quantities[i], freeze.FreezePeriod)
 			}
-			balances.Unlock()
 		}
 	}
 
@@ -1377,9 +1408,17 @@ func (a *Agent) processThaw(ctx context.Context, transaction *state.Transaction,
 			}
 			defer a.caches.Balances.ReleaseMulti(ctx, agentLockingScript, instrumentCode, balances)
 
-			balances.Lock()
+			lockerResponseChannel := a.balanceLocker.AddRequest(state.BalanceSet{balances})
+			lockerResponse := <-lockerResponseChannel
+			switch v := lockerResponse.(type) {
+			case uint64:
+				now = v
+			case error:
+				return errors.Wrap(v, "balance locker")
+			}
+			defer balances.Unlock()
+
 			balances.RemoveFreeze(freezeTxID)
-			balances.Unlock()
 		}
 	}
 
@@ -1456,11 +1495,49 @@ func (a *Agent) processConfiscation(ctx context.Context, transaction *state.Tran
 	if err != nil {
 		return errors.Wrap(err, "add balances")
 	}
+	defer a.caches.Balances.ReleaseMulti(ctx, agentLockingScript, instrumentCode, addedBalances)
+
+	// Deposit
+	depositIndex := highestIndex + 1
+	if depositIndex >= outputCount {
+		return fmt.Errorf("Missing deposit quantity output : %d >= %d", depositIndex, outputCount)
+	}
+
+	transaction.Lock()
+	output := transaction.Output(depositIndex)
+	transaction.Unlock()
+
+	depositBalance := &state.Balance{
+		LockingScript: output.LockingScript,
+		Quantity:      confiscation.DepositQty,
+		Timestamp:     confiscation.Timestamp,
+		TxID:          &txid,
+	}
+
+	addedDepositBalance, err := a.caches.Balances.Add(ctx, agentLockingScript, instrumentCode,
+		depositBalance)
+	if err != nil {
+		return errors.Wrap(err, "add deposit balance")
+	}
+	defer a.caches.Balances.Release(ctx, agentLockingScript, instrumentCode, addedDepositBalance)
+
+	allBalances := state.BalanceSet{
+		addedBalances,
+		state.Balances{addedDepositBalance},
+	}
+
+	lockerResponseChannel := a.balanceLocker.AddRequest(allBalances)
+	lockerResponse := <-lockerResponseChannel
+	switch v := lockerResponse.(type) {
+	case uint64:
+	case error:
+		return errors.Wrap(v, "balance locker")
+	}
+	defer allBalances.Unlock()
 
 	// Update any balances that weren't new and therefore weren't updated by the "add".
 	for i, balance := range balances {
 		addedBalance := addedBalances[i]
-		addedBalance.Lock()
 		if balance == addedBalance {
 			logger.WarnWithFields(ctx, []logger.Field{
 				logger.Timestamp("timestamp", int64(addedBalance.Timestamp)),
@@ -1510,35 +1587,8 @@ func (a *Agent) processConfiscation(ctx context.Context, transaction *state.Tran
 		addedBalance.Timestamp = confiscation.Timestamp
 		addedBalance.TxID = &txid
 		addedBalance.MarkModified()
-		addedBalance.Unlock()
 	}
 
-	a.caches.Balances.ReleaseMulti(ctx, agentLockingScript, instrumentCode, addedBalances)
-
-	// Deposit
-	depositIndex := highestIndex + 1
-	if depositIndex >= outputCount {
-		return fmt.Errorf("Missing deposit quantity output : %d >= %d", depositIndex, outputCount)
-	}
-
-	transaction.Lock()
-	output := transaction.Output(depositIndex)
-	transaction.Unlock()
-
-	depositBalance := &state.Balance{
-		LockingScript: output.LockingScript,
-		Quantity:      confiscation.DepositQty,
-		Timestamp:     confiscation.Timestamp,
-		TxID:          &txid,
-	}
-
-	addedDepositBalance, err := a.caches.Balances.Add(ctx, agentLockingScript, instrumentCode,
-		depositBalance)
-	if err != nil {
-		return errors.Wrap(err, "add deposit balance")
-	}
-
-	addedDepositBalance.Lock()
 	if depositBalance == addedDepositBalance {
 		// Balance was new and is already up to date from the add.
 		logger.WarnWithFields(ctx, []logger.Field{
@@ -1579,9 +1629,6 @@ func (a *Agent) processConfiscation(ctx context.Context, transaction *state.Tran
 		addedDepositBalance.TxID = &txid
 		addedDepositBalance.MarkModified()
 	}
-	addedDepositBalance.Unlock()
-
-	a.caches.Balances.Release(ctx, agentLockingScript, instrumentCode, addedDepositBalance)
 
 	return nil
 }

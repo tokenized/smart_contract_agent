@@ -353,6 +353,8 @@ func HasAnyContractBalance(ctx context.Context, caches *Caches, contract *Contra
 			continue
 		}
 
+		// A single balance lock doesn't need to use the balance locker since it isn't susceptible
+		// to the group deadlock.
 		balance.Lock()
 		quantity := balance.Quantity
 		balance.Unlock()

@@ -88,6 +88,8 @@ func main() {
 		logger.Fatal(ctx, "Failed to create caches : %s", err)
 	}
 
+	balanceLocker := state.NewThreadedBalanceLocker(1000)
+
 	broadcaster := NewNoopBroadcaster()
 
 	factory := NewFactory()
@@ -100,14 +102,14 @@ func main() {
 	}
 
 	agent, err := agents.NewAgent(ctx, cfg.AgentKey, lockingScript, cfg.Agents, feeLockingScript,
-		caches, store, broadcaster, woc, woc, nil, factory, peerChannelsFactory)
+		caches, balanceLocker, store, broadcaster, woc, woc, nil, factory, peerChannelsFactory)
 	if err != nil {
 		logger.Fatal(ctx, "Failed to create agent : %s", err)
 	}
 
 	factory.SetAgent(agent)
 
-	var cacheWait, loadWait sync.WaitGroup
+	var cacheWait, lockerWait, loadWait sync.WaitGroup
 
 	cacheShutdown := make(chan error)
 	cacheThread, cacheComplete := threads.NewInterruptableThreadComplete("Cache",
@@ -115,13 +117,16 @@ func main() {
 			return cache.Run(ctx, interrupt, cacheShutdown)
 		}, &cacheWait)
 
+	lockerThread, lockerComplete := threads.NewInterruptableThreadComplete("Balance Locker",
+		balanceLocker.Run, &lockerWait)
+
 	loadThread, loadComplete := threads.NewInterruptableThreadComplete("Load",
 		func(ctx context.Context, interrupt <-chan interface{}) error {
 			return load(ctx, interrupt, agent, caches.Transactions, woc)
 		}, &loadWait)
 
 	cacheThread.Start(ctx)
-
+	lockerThread.Start(ctx)
 	loadThread.Start(ctx)
 
 	// Shutdown
@@ -141,6 +146,9 @@ func main() {
 	case err := <-cacheComplete:
 		logger.Error(ctx, "Cache completed : %s", err)
 
+	case err := <-lockerComplete:
+		logger.Error(ctx, "Balance locker completed : %s", err)
+
 	case err := <-loadComplete:
 		if err != nil {
 			logger.Error(ctx, "Load completed : %s", err)
@@ -154,6 +162,9 @@ func main() {
 
 	loadThread.Stop(ctx)
 	loadWait.Wait()
+
+	lockerThread.Stop(ctx)
+	lockerWait.Wait()
 
 	agent.Release(ctx)
 

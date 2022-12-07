@@ -33,6 +33,7 @@ type Service struct {
 
 	spyNodeClient spynode.Client
 	caches        *state.Caches
+	balanceLocker state.BalanceLocker
 	store         storage.StreamStorage
 
 	broadcaster         agents.Broadcaster
@@ -48,8 +49,8 @@ type Service struct {
 
 func NewService(key bitcoin.Key, lockingScript bitcoin.Script, config agents.Config,
 	feeLockingScript bitcoin.Script, spyNodeClient spynode.Client, caches *state.Caches,
-	store storage.StreamStorage, broadcaster agents.Broadcaster, fetcher agents.Fetcher,
-	headers agents.BlockHeaders, scheduler *platform.Scheduler,
+	balanceLocker state.BalanceLocker, store storage.StreamStorage, broadcaster agents.Broadcaster,
+	fetcher agents.Fetcher, headers agents.BlockHeaders, scheduler *platform.Scheduler,
 	peerChannelsFactory *peer_channels.Factory) *Service {
 
 	return &Service{
@@ -59,6 +60,7 @@ func NewService(key bitcoin.Key, lockingScript bitcoin.Script, config agents.Con
 		feeLockingScript:     feeLockingScript,
 		spyNodeClient:        spyNodeClient,
 		caches:               caches,
+		balanceLocker:        balanceLocker,
 		store:                store,
 		broadcaster:          broadcaster,
 		fetcher:              fetcher,
@@ -87,7 +89,7 @@ func (s *Service) Load(ctx context.Context) error {
 	}
 
 	agent, err := agents.NewAgent(ctx, s.key, s.lockingScript, s.config, s.feeLockingScript,
-		s.caches, s.store, s.broadcaster, s.fetcher, s.headers, s.scheduler, s,
+		s.caches, s.balanceLocker, s.store, s.broadcaster, s.fetcher, s.headers, s.scheduler, s,
 		s.peerChannelsFactory)
 	if err != nil {
 		return errors.Wrap(err, "new agent")

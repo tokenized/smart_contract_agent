@@ -154,7 +154,7 @@ func (a *Agent) CancelPendingTransfer(ctx context.Context, transferTxID bitcoin.
 	}
 
 	// Collect balances effected by transfer.
-	var balances state.Balances
+	allBalances := make(state.BalanceSet, len(transfer.Instruments))
 	for index, instrumentTransfer := range transfer.Instruments {
 		if instrumentTransfer.InstrumentType == protocol.BSVInstrumentID {
 			continue
@@ -197,21 +197,28 @@ func (a *Agent) CancelPendingTransfer(ctx context.Context, transferTxID bitcoin.
 			lockingScripts = appendLockingScript(lockingScripts, lockingScript)
 		}
 
-		instrumentBalances, err := a.caches.Balances.GetMulti(instrumentCtx, agentLockingScript,
+		balances, err := a.caches.Balances.GetMulti(instrumentCtx, agentLockingScript,
 			instrumentCode, lockingScripts)
 		if err != nil {
 			return errors.Wrap(err, "get balances")
 		}
 		defer a.caches.Balances.ReleaseMulti(instrumentCtx, agentLockingScript, instrumentCode,
-			instrumentBalances)
+			balances)
 
-		balances = state.AppendBalances(balances, instrumentBalances)
+		allBalances[index] = balances
+	}
+
+	lockerResponseChannel := a.balanceLocker.AddRequest(allBalances)
+	lockerResponse := <-lockerResponseChannel
+	switch v := lockerResponse.(type) {
+	case uint64:
+	case error:
+		return errors.Wrap(v, "balance locker")
 	}
 
 	// Cancel pending transfers associated with this transfer txid.
-	balances.Lock()
-	balances.CancelPending(transferTxID)
-	balances.Unlock()
+	allBalances.CancelPending(transferTxID)
+	allBalances.Unlock()
 
 	return nil
 }

@@ -200,6 +200,8 @@ func (a *Agent) processProposal(ctx context.Context, transaction *state.Transact
 						"proposer has no balance"), now), "reject")
 			}
 
+			// A single balance lock doesn't need to use the balance locker since it isn't
+			// susceptible to the group deadlock.
 			balance.Lock()
 			quantity := balance.Quantity
 			balance.Unlock()
@@ -438,9 +440,13 @@ func (a *Agent) processProposal(ctx context.Context, transaction *state.Transact
 		return errors.New("Vote already exists")
 	}
 
-	if err := stateVote.Prepare(ctx, a.caches, contract, votingSystem); err != nil {
+	if err := stateVote.Prepare(ctx, a.caches, a.balanceLocker, contract, votingSystem,
+		&now); err != nil {
 		return errors.Wrap(err, "prepare vote")
 	}
+	// TODO Figure out how to do voting balances for ballots. We want the Current balance at the
+	// exact time the vote was timestamped. --ce
+	// vote.Timestamp = now // now might have changed while locking balance
 
 	voteTransaction, err := a.caches.Transactions.AddRaw(ctx, voteTx.MsgTx, nil)
 	if err != nil {
@@ -597,7 +603,10 @@ func (a *Agent) processVote(ctx context.Context, transaction *state.Transaction,
 		}
 		votingSystem := votingSystems[addedVote.Proposal.VoteSystem]
 
-		if err := addedVote.Prepare(ctx, a.caches, contract, votingSystem); err != nil {
+		// TODO This might not get the right balances. It needs to have the balances from when the
+		// vote was created. --ce
+		if err := addedVote.Prepare(ctx, a.caches, a.balanceLocker, contract, votingSystem,
+			&now); err != nil {
 			return errors.Wrap(err, "prepare vote")
 		}
 	}

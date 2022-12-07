@@ -29,9 +29,10 @@ func Test_Proposal_Valid(t *testing.T) {
 	broadcaster := state.NewMockTxBroadcaster()
 	scheduler := platform.NewScheduler()
 	caches := state.StartTestCaches(ctx, t, store, cacher.DefaultConfig(), time.Second)
+	balanceLocker := state.NewInlineBalanceLocker()
 	_, feeLockingScript, _ := state.MockKey()
-	mockAgentFactory := NewMockAgentFactory(DefaultConfig(), feeLockingScript, caches.Caches, store,
-		broadcaster, nil, nil, scheduler)
+	mockAgentFactory := NewMockAgentFactory(DefaultConfig(), feeLockingScript, caches.Caches,
+		balanceLocker, store, broadcaster, nil, nil, scheduler)
 
 	schedulerInterrupt := make(chan interface{})
 	go func() {
@@ -68,8 +69,8 @@ func Test_Proposal_Valid(t *testing.T) {
 	balances := state.MockBalances(ctx, caches, contract, instrument, 1000)
 
 	agent, err := NewAgent(ctx, contractKey, contractLockingScript, DefaultConfig(),
-		feeLockingScript, caches.Caches, store, broadcaster, nil, nil, scheduler, mockAgentFactory,
-		peer_channels.NewFactory())
+		feeLockingScript, caches.Caches, balanceLocker, store, broadcaster, nil, nil, scheduler,
+		mockAgentFactory, peer_channels.NewFactory())
 	if err != nil {
 		t.Fatalf("Failed to create agent : %s", err)
 	}
@@ -282,6 +283,8 @@ func Test_Ballots_Valid(t *testing.T) {
 
 	caches := state.StartTestCaches(ctx, t, store, cacher.DefaultConfig(), time.Second)
 
+	balanceLocker := state.NewInlineBalanceLocker()
+
 	votingSystems := []*actions.VotingSystemField{
 		{
 			Name:                    "Basic",
@@ -304,16 +307,17 @@ func Test_Ballots_Valid(t *testing.T) {
 
 	_, feeLockingScript, _ := state.MockKey()
 	agent, err := NewAgent(ctx, contractKey, contractLockingScript, DefaultConfig(),
-		feeLockingScript, caches.Caches, store, broadcaster, nil, nil, nil, nil,
+		feeLockingScript, caches.Caches, balanceLocker, store, broadcaster, nil, nil, nil, nil,
 		peer_channels.NewFactory())
 	if err != nil {
 		t.Fatalf("Failed to create agent : %s", err)
 	}
 
+	now := uint64(time.Now().UnixNano())
 	vote := state.MockProposal(ctx, caches, contract, 0)
 	vote.Lock()
 	voteTxID := *vote.VoteTxID
-	vote.Prepare(ctx, caches.Caches, contract, votingSystems[0])
+	vote.Prepare(ctx, caches.Caches, caches.BalanceLocker, contract, votingSystems[0], &now)
 	tokenQuantity := vote.TokenQuantity
 	vote.Unlock()
 

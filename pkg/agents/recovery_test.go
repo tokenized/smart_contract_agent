@@ -27,6 +27,7 @@ func Test_Recovery_AcceptContractOffer(t *testing.T) {
 	cacherConfig := cacher.DefaultConfig()
 
 	caches := state.StartTestCaches(ctx, t, store, cacherConfig, time.Second)
+	balanceLocker := state.NewInlineBalanceLocker()
 
 	contractKey, contractLockingScript, _ := state.MockKey()
 	_, _, masterAddress := state.MockKey()
@@ -41,7 +42,7 @@ func Test_Recovery_AcceptContractOffer(t *testing.T) {
 	}
 
 	agent, err := NewAgent(ctx, contractKey, contractLockingScript, agentConfig, feeLockingScript,
-		caches.Caches, store, broadcaster, nil, nil, nil, nil, peer_channels.NewFactory())
+		caches.Caches, balanceLocker, store, broadcaster, nil, nil, nil, nil, peer_channels.NewFactory())
 	if err != nil {
 		t.Fatalf("Failed to create agent : %s", err)
 	}
@@ -212,6 +213,7 @@ func Test_Recovery_ContractOfferAlreadyAccepted(t *testing.T) {
 	cacherConfig := cacher.DefaultConfig()
 
 	caches := state.StartTestCaches(ctx, t, store, cacherConfig, time.Second)
+	balanceLocker := state.NewInlineBalanceLocker()
 
 	contractKey, contractLockingScript, _ := state.MockKey()
 	_, _, masterAddress := state.MockKey()
@@ -226,7 +228,8 @@ func Test_Recovery_ContractOfferAlreadyAccepted(t *testing.T) {
 	}
 
 	agent, err := NewAgent(ctx, contractKey, contractLockingScript, agentConfig, feeLockingScript,
-		caches.Caches, store, broadcaster, nil, nil, nil, nil, peer_channels.NewFactory())
+		caches.Caches, balanceLocker, store, broadcaster, nil, nil, nil, nil,
+		peer_channels.NewFactory())
 	if err != nil {
 		t.Fatalf("Failed to create agent : %s", err)
 	}

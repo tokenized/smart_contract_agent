@@ -28,6 +28,7 @@ func Test_Process(t *testing.T) {
 	broadcaster := state.NewMockTxBroadcaster()
 
 	caches := state.StartTestCaches(ctx, t, store, cacher.DefaultConfig(), time.Second)
+	balanceLocker := state.NewInlineBalanceLocker()
 
 	contractKey, contractLockingScript, contractAddress := state.MockKey()
 	_, feeLockingScript, _ := state.MockKey()
@@ -44,7 +45,7 @@ func Test_Process(t *testing.T) {
 	}
 
 	agent, err := NewAgent(ctx, contractKey, contractLockingScript, DefaultConfig(),
-		feeLockingScript, caches.Caches, store, broadcaster, nil, nil, nil, nil,
+		feeLockingScript, caches.Caches, balanceLocker, store, broadcaster, nil, nil, nil, nil,
 		peer_channels.NewFactory())
 	if err != nil {
 		t.Fatalf("Failed to create agent : %s", err)
@@ -343,12 +344,14 @@ func Test_Process(t *testing.T) {
 		t.Fatalf("Missing admin balance")
 	}
 
+	adminBalance.Lock()
 	t.Logf("Admin balance : %d", adminBalance.Quantity)
 
 	if adminBalance.Quantity != authorizedQuantity {
 		t.Errorf("Wrong admin balance quantity : got %d, want %d", adminBalance.Quantity,
 			authorizedQuantity)
 	}
+	adminBalance.Unlock()
 	caches.Caches.Balances.Release(ctx, contractLockingScript, instrumentCode, adminBalance)
 
 	if err := caches.IsFailed(); err != nil {
@@ -356,6 +359,7 @@ func Test_Process(t *testing.T) {
 	}
 
 	// Transfer to a lot of locking scripts.
+	t.Logf("Transfering balances")
 	var lockingScripts []bitcoin.Script
 	var quantities []uint64
 	var txids []bitcoin.Hash32
@@ -482,6 +486,7 @@ func Test_Process(t *testing.T) {
 			t.Fatalf("Failed to add settlement tx : %s", err)
 		}
 
+		t.Logf("Sending transfer request : %s", settlementTxID)
 		now := uint64(time.Now().UnixNano())
 		if err := agent.Process(ctx, settlementTx, []Action{{
 			OutputIndex: settlementScriptOutputIndex,
@@ -489,10 +494,12 @@ func Test_Process(t *testing.T) {
 		}}, now); err != nil {
 			t.Fatalf("Failed to process settlement : %s", err)
 		}
+		t.Logf("Processed transfer request : %s", settlementTxID)
 		caches.Caches.Transactions.Release(ctx, settlementTxID)
 	}
 
 	// Check caches.Balances
+	t.Logf("Checking balances")
 	for i := 0; i < recipientCount; i++ {
 		if err := caches.IsFailed(); err != nil {
 			t.Fatalf("Cache failed : %s", err)

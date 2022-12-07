@@ -53,8 +53,9 @@ type Agent struct {
 	lockingScript    bitcoin.Script
 	feeLockingScript bitcoin.Script
 
-	store  storage.CopyList
-	caches *state.Caches
+	store         storage.CopyList
+	caches        *state.Caches
+	balanceLocker state.BalanceLocker
 
 	broadcaster Broadcaster
 	fetcher     Fetcher
@@ -89,9 +90,10 @@ type AgentFactory interface {
 }
 
 func NewAgent(ctx context.Context, key bitcoin.Key, lockingScript bitcoin.Script, config Config,
-	feeLockingScript bitcoin.Script, caches *state.Caches, store storage.CopyList,
-	broadcaster Broadcaster, fetcher Fetcher, headers BlockHeaders, scheduler *platform.Scheduler,
-	factory AgentFactory, peerChannelsFactory *peer_channels.Factory) (*Agent, error) {
+	feeLockingScript bitcoin.Script, caches *state.Caches, balanceLocker state.BalanceLocker,
+	store storage.CopyList, broadcaster Broadcaster, fetcher Fetcher, headers BlockHeaders,
+	scheduler *platform.Scheduler, factory AgentFactory,
+	peerChannelsFactory *peer_channels.Factory) (*Agent, error) {
 
 	newContract := &state.Contract{
 		LockingScript: lockingScript,
@@ -109,6 +111,7 @@ func NewAgent(ctx context.Context, key bitcoin.Key, lockingScript bitcoin.Script
 		lockingScript:         lockingScript,
 		feeLockingScript:      feeLockingScript,
 		caches:                caches,
+		balanceLocker:         balanceLocker,
 		store:                 store,
 		broadcaster:           broadcaster,
 		fetcher:               fetcher,
