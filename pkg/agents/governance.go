@@ -59,6 +59,7 @@ func (a *Agent) processProposal(ctx context.Context, transaction *state.Transact
 
 	// TODO Verify the second output has enough funding for the Result action. --ce
 
+	authorizingUnlockingScript := transaction.Input(0).UnlockingScript
 	inputOutput, err := transaction.InputOutput(0)
 	if err != nil {
 		transaction.Unlock()
@@ -67,6 +68,15 @@ func (a *Agent) processProposal(ctx context.Context, transaction *state.Transact
 	firstInputLockingScript := inputOutput.LockingScript
 
 	transaction.Unlock()
+
+	if isSigHashAll, err := authorizingUnlockingScript.IsSigHashAll(); err != nil {
+		return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
+			platform.NewRejectError(actions.RejectionsSignatureNotSigHashAll, err.Error()), now),
+			"reject")
+	} else if !isSigHashAll {
+		return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
+			platform.NewRejectError(actions.RejectionsSignatureNotSigHashAll, ""), now), "reject")
+	}
 
 	contract := a.Contract()
 	contract.Lock()
@@ -632,6 +642,7 @@ func (a *Agent) processBallotCast(ctx context.Context, transaction *state.Transa
 		return nil // Not for this agent's contract
 	}
 
+	authorizingUnlockingScript := transaction.Input(0).UnlockingScript
 	inputOutput, err := transaction.InputOutput(0)
 	if err != nil {
 		transaction.Unlock()
@@ -699,10 +710,19 @@ func (a *Agent) processBallotCast(ctx context.Context, transaction *state.Transa
 
 	if ballot == nil {
 		return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
-			platform.NewRejectError(actions.RejectionsMsgMalformed, "Ballot not found"), now),
-			"reject")
+			platform.NewRejectError(actions.RejectionsUnauthorizedAddress, "Ballot not found"),
+			now), "reject")
 	}
 	defer a.caches.Ballots.Release(ctx, agentLockingScript, voteTxID, ballot)
+
+	if isSigHashAll, err := authorizingUnlockingScript.IsSigHashAll(); err != nil {
+		return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
+			platform.NewRejectError(actions.RejectionsSignatureNotSigHashAll, err.Error()), now),
+			"reject")
+	} else if !isSigHashAll {
+		return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
+			platform.NewRejectError(actions.RejectionsSignatureNotSigHashAll, ""), now), "reject")
+	}
 
 	ballot.Lock()
 	if ballot.TxID != nil {

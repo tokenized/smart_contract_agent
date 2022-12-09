@@ -921,12 +921,21 @@ func (a *Agent) initiateInstrumentTransferBalances(ctx context.Context,
 
 		senderQuantity += sender.Quantity
 
+		authorizingUnlockingScript := transferTransaction.Input(int(sender.Index)).UnlockingScript
 		inputOutput, err := transferTransaction.InputOutput(int(sender.Index))
 		if err != nil {
 			logger.Warn(ctx, "Invalid sender index : %s", err)
 			return nil, nil, nil, platform.NewRejectErrorWithOutputIndex(actions.RejectionsMsgMalformed,
 				fmt.Sprintf("invalid sender index: %d", sender.Index),
 				int(instrumentTransfer.ContractIndex))
+		}
+
+		if isSigHashAll, err := authorizingUnlockingScript.IsSigHashAll(); err != nil {
+			return nil, nil, nil, platform.NewRejectError(actions.RejectionsSignatureNotSigHashAll,
+				err.Error())
+		} else if !isSigHashAll {
+			return nil, nil, nil, platform.NewRejectError(actions.RejectionsSignatureNotSigHashAll,
+				"")
 		}
 
 		if !adminLockingScript.Equal(inputOutput.LockingScript) {

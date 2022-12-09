@@ -37,6 +37,7 @@ func (a *Agent) processInstrumentDefinition(ctx context.Context, transaction *st
 		return nil // Not for this agent's contract
 	}
 
+	authorizingUnlockingScript := transaction.Input(0).UnlockingScript
 	inputOutput, err := transaction.InputOutput(0)
 	if err != nil {
 		transaction.Unlock()
@@ -63,6 +64,15 @@ func (a *Agent) processInstrumentDefinition(ctx context.Context, transaction *st
 	if !bytes.Equal(contract.Formation.AdminAddress, authorizingAddress.Bytes()) {
 		return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
 			platform.NewRejectError(actions.RejectionsUnauthorizedAddress, ""), now), "reject")
+	}
+
+	if isSigHashAll, err := authorizingUnlockingScript.IsSigHashAll(); err != nil {
+		return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
+			platform.NewRejectError(actions.RejectionsSignatureNotSigHashAll, err.Error()), now),
+			"reject")
+	} else if !isSigHashAll {
+		return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
+			platform.NewRejectError(actions.RejectionsSignatureNotSigHashAll, ""), now), "reject")
 	}
 
 	if contract.Formation == nil {
@@ -266,6 +276,7 @@ func (a *Agent) processInstrumentModification(ctx context.Context, transaction *
 		return nil // Not for this agent's contract
 	}
 
+	authorizingUnlockingScript := transaction.Input(0).UnlockingScript
 	inputOutput, err := transaction.InputOutput(0)
 	if err != nil {
 		transaction.Unlock()
@@ -297,6 +308,15 @@ func (a *Agent) processInstrumentModification(ctx context.Context, transaction *
 	if !bytes.Equal(adminAddressBytes, authorizingAddress.Bytes()) {
 		return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
 			platform.NewRejectError(actions.RejectionsUnauthorizedAddress, ""), now), "reject")
+	}
+
+	if isSigHashAll, err := authorizingUnlockingScript.IsSigHashAll(); err != nil {
+		return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
+			platform.NewRejectError(actions.RejectionsSignatureNotSigHashAll, err.Error()), now),
+			"reject")
+	} else if !isSigHashAll {
+		return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
+			platform.NewRejectError(actions.RejectionsSignatureNotSigHashAll, ""), now), "reject")
 	}
 
 	// Get instrument

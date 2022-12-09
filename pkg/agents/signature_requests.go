@@ -143,6 +143,7 @@ func (a *Agent) processSignatureRequest(ctx context.Context, transaction *state.
 	}
 
 	transaction.Lock()
+	authorizingUnlockingScript := transaction.Input(0).UnlockingScript
 	firstInputOutput, err := transaction.InputOutput(0)
 	transaction.Unlock()
 	if err != nil {
@@ -154,6 +155,15 @@ func (a *Agent) processSignatureRequest(ctx context.Context, transaction *state.
 			platform.NewRejectErrorFull(actions.RejectionsMsgMalformed,
 				"signature request not from next contract", 0, rejectOutputIndex,
 				rejectLockingScript), now), "reject")
+	}
+
+	if isSigHashAll, err := authorizingUnlockingScript.IsSigHashAll(); err != nil {
+		return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
+			platform.NewRejectError(actions.RejectionsSignatureNotSigHashAll, err.Error()), now),
+			"reject")
+	} else if !isSigHashAll {
+		return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
+			platform.NewRejectError(actions.RejectionsSignatureNotSigHashAll, ""), now), "reject")
 	}
 
 	if err := a.CheckContractIsAvailable(now); err != nil {

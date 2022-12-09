@@ -61,6 +61,7 @@ func (a *Agent) processContractOffer(ctx context.Context, transaction *state.Tra
 	transaction.Lock()
 	txid := transaction.TxID()
 
+	authorizingUnlockingScript := transaction.Input(0).UnlockingScript
 	inputOutput, err := transaction.InputOutput(0)
 	if err != nil {
 		transaction.Unlock()
@@ -98,6 +99,15 @@ func (a *Agent) processContractOffer(ctx context.Context, transaction *state.Tra
 	}
 
 	transaction.Unlock()
+
+	if isSigHashAll, err := authorizingUnlockingScript.IsSigHashAll(); err != nil {
+		return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
+			platform.NewRejectError(actions.RejectionsSignatureNotSigHashAll, err.Error()), now),
+			"reject")
+	} else if !isSigHashAll {
+		return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
+			platform.NewRejectError(actions.RejectionsSignatureNotSigHashAll, ""), now), "reject")
+	}
 
 	// Verify entity contract
 	if len(offer.EntityContract) > 0 {
@@ -291,6 +301,7 @@ func (a *Agent) processContractAmendment(ctx context.Context, transaction *state
 		return nil // Not for this agent's contract
 	}
 
+	authorizingUnlockingScript := transaction.Input(0).UnlockingScript
 	inputOutput, err := transaction.InputOutput(0)
 	if err != nil {
 		transaction.Unlock()
@@ -318,6 +329,15 @@ func (a *Agent) processContractAmendment(ctx context.Context, transaction *state
 		!bytes.Equal(contract.Formation.OperatorAddress, authorizingAddress.Bytes()) {
 		return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
 			platform.NewRejectError(actions.RejectionsUnauthorizedAddress, ""), now), "reject")
+	}
+
+	if isSigHashAll, err := authorizingUnlockingScript.IsSigHashAll(); err != nil {
+		return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
+			platform.NewRejectError(actions.RejectionsSignatureNotSigHashAll, err.Error()), now),
+			"reject")
+	} else if !isSigHashAll {
+		return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
+			platform.NewRejectError(actions.RejectionsSignatureNotSigHashAll, ""), now), "reject")
 	}
 
 	if contract.Formation.ContractRevision != amendment.ContractRevision {
@@ -410,12 +430,14 @@ func (a *Agent) processContractAmendment(ctx context.Context, transaction *state
 						"missing"), now), "reject")
 			}
 
+			firstUnlockingScript := transaction.Input(0).UnlockingScript
 			firstInputOutput, err := transaction.InputOutput(0)
 			if err != nil {
 				transaction.Unlock()
 				return errors.Wrap(err, "first input output")
 			}
 
+			secondUnlockingScript := transaction.Input(0).UnlockingScript
 			secondInputOutput, err := transaction.InputOutput(1)
 			if err != nil {
 				transaction.Unlock()
@@ -430,8 +452,29 @@ func (a *Agent) processContractAmendment(ctx context.Context, transaction *state
 					platform.NewRejectError(actions.RejectionsContractBothOperatorsRequired,
 						"wrong"), now), "reject")
 			}
+
+			if isSigHashAll, err := firstUnlockingScript.IsSigHashAll(); err != nil {
+				return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
+					platform.NewRejectError(actions.RejectionsSignatureNotSigHashAll, err.Error()),
+					now), "reject")
+			} else if !isSigHashAll {
+				return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
+					platform.NewRejectError(actions.RejectionsSignatureNotSigHashAll, ""), now),
+					"reject")
+			}
+
+			if isSigHashAll, err := secondUnlockingScript.IsSigHashAll(); err != nil {
+				return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
+					platform.NewRejectError(actions.RejectionsSignatureNotSigHashAll, err.Error()),
+					now), "reject")
+			} else if !isSigHashAll {
+				return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
+					platform.NewRejectError(actions.RejectionsSignatureNotSigHashAll, ""), now),
+					"reject")
+			}
 		} else {
 			// Verify administrator or operator signed.
+			firstUnlockingScript := transaction.Input(0).UnlockingScript
 			firstInputOutput, err := transaction.InputOutput(0)
 			if err != nil {
 				transaction.Unlock()
@@ -442,6 +485,16 @@ func (a *Agent) processContractAmendment(ctx context.Context, transaction *state
 				transaction.Unlock()
 				return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
 					platform.NewRejectError(actions.RejectionsNotAdministration, "wrong"), now),
+					"reject")
+			}
+
+			if isSigHashAll, err := firstUnlockingScript.IsSigHashAll(); err != nil {
+				return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
+					platform.NewRejectError(actions.RejectionsSignatureNotSigHashAll, err.Error()),
+					now), "reject")
+			} else if !isSigHashAll {
+				return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
+					platform.NewRejectError(actions.RejectionsSignatureNotSigHashAll, ""), now),
 					"reject")
 			}
 		}
@@ -816,6 +869,7 @@ func (a *Agent) processContractAddressChange(ctx context.Context, transaction *s
 	contractOutput2 := transaction.Output(1)
 	newContractLockingScript := contractOutput2.LockingScript
 
+	authorizingUnlockingScript := transaction.Input(0).UnlockingScript
 	inputOutput, err := transaction.InputOutput(0)
 	if err != nil {
 		transaction.Unlock()
@@ -850,6 +904,15 @@ func (a *Agent) processContractAddressChange(ctx context.Context, transaction *s
 		!bytes.Equal(contract.Formation.MasterAddress, authorizingAddress.Bytes()) {
 		return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
 			platform.NewRejectError(actions.RejectionsUnauthorizedAddress, ""), now), "reject")
+	}
+
+	if isSigHashAll, err := authorizingUnlockingScript.IsSigHashAll(); err != nil {
+		return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
+			platform.NewRejectError(actions.RejectionsSignatureNotSigHashAll, err.Error()), now),
+			"reject")
+	} else if !isSigHashAll {
+		return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
+			platform.NewRejectError(actions.RejectionsSignatureNotSigHashAll, ""), now), "reject")
 	}
 
 	newAddress, err := bitcoin.DecodeRawAddress(addressChange.NewContractAddress)

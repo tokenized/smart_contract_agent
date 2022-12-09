@@ -58,19 +58,29 @@ func (a *Agent) processBodyOfAgreementOffer(ctx context.Context, transaction *st
 
 	txid := transaction.TxID()
 
+	authorizingUnlockingScript := transaction.Input(0).UnlockingScript
 	firstInputOutput, err := transaction.InputOutput(0)
 	if err != nil {
 		transaction.Unlock()
 		return errors.Wrap(err, "admin input output")
 	}
+	authorizingLockingScript := firstInputOutput.LockingScript
 
-	if !contract.IsAdminOrOperator(firstInputOutput.LockingScript) {
-		transaction.Unlock()
+	transaction.Unlock()
+
+	if !contract.IsAdminOrOperator(authorizingLockingScript) {
 		return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
 			platform.NewRejectError(actions.RejectionsUnauthorizedAddress, ""), now), "reject")
 	}
 
-	transaction.Unlock()
+	if isSigHashAll, err := authorizingUnlockingScript.IsSigHashAll(); err != nil {
+		return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
+			platform.NewRejectError(actions.RejectionsSignatureNotSigHashAll, err.Error()), now),
+			"reject")
+	} else if !isSigHashAll {
+		return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
+			platform.NewRejectError(actions.RejectionsSignatureNotSigHashAll, ""), now), "reject")
+	}
 
 	// Create body of agreement formation response.
 	logger.Info(ctx, "Accepting body of agreement offer")
@@ -191,6 +201,7 @@ func (a *Agent) processBodyOfAgreementAmendment(ctx context.Context, transaction
 		return nil // Not for this agent's contract
 	}
 
+	authorizingUnlockingScript := transaction.Input(0).UnlockingScript
 	inputOutput, err := transaction.InputOutput(0)
 	if err != nil {
 		transaction.Unlock()
@@ -223,6 +234,15 @@ func (a *Agent) processBodyOfAgreementAmendment(ctx context.Context, transaction
 		!bytes.Equal(contract.Formation.OperatorAddress, authorizingAddress.Bytes()) {
 		return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
 			platform.NewRejectError(actions.RejectionsUnauthorizedAddress, ""), now), "reject")
+	}
+
+	if isSigHashAll, err := authorizingUnlockingScript.IsSigHashAll(); err != nil {
+		return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
+			platform.NewRejectError(actions.RejectionsSignatureNotSigHashAll, err.Error()), now),
+			"reject")
+	} else if !isSigHashAll {
+		return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
+			platform.NewRejectError(actions.RejectionsSignatureNotSigHashAll, ""), now), "reject")
 	}
 
 	if contract.BodyOfAgreementFormation.Revision != amendment.Revision {

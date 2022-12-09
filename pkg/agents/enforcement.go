@@ -33,6 +33,7 @@ func (a *Agent) processOrder(ctx context.Context, transaction *state.Transaction
 		return nil // Not for this agent's contract
 	}
 
+	authorizingUnlockingScript := transaction.Input(0).UnlockingScript
 	inputOutput, err := transaction.InputOutput(0)
 	if err != nil {
 		transaction.Unlock()
@@ -56,6 +57,15 @@ func (a *Agent) processOrder(ctx context.Context, transaction *state.Transaction
 		// TODO Check if the address belongs to an authority oracle. --ce
 		return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
 			platform.NewRejectError(actions.RejectionsUnauthorizedAddress, ""), now), "reject")
+	}
+
+	if isSigHashAll, err := authorizingUnlockingScript.IsSigHashAll(); err != nil {
+		return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
+			platform.NewRejectError(actions.RejectionsSignatureNotSigHashAll, err.Error()), now),
+			"reject")
+	} else if !isSigHashAll {
+		return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
+			platform.NewRejectError(actions.RejectionsSignatureNotSigHashAll, ""), now), "reject")
 	}
 
 	if contract.Formation == nil {
