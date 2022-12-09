@@ -7,6 +7,7 @@ import (
 	"github.com/tokenized/pkg/expanded_tx"
 	"github.com/tokenized/pkg/txbuilder"
 	"github.com/tokenized/pkg/wire"
+	"github.com/tokenized/smart_contract_agent/internal/state"
 	"github.com/tokenized/specification/dist/golang/actions"
 
 	"github.com/pkg/errors"
@@ -169,4 +170,28 @@ func buildExpandedTx(tx *wire.MsgTx, ancestors []*wire.MsgTx) (*expanded_tx.Expa
 	}
 
 	return etx, nil
+}
+
+func getRequestFirstInputLockingScript(ctx context.Context, transactions *state.TransactionCache,
+	requestTxID bitcoin.Hash32) (bitcoin.Script, error) {
+
+	requestTransaction, err := transactions.Get(ctx, requestTxID)
+	if err != nil {
+		return nil, errors.Wrap(err, "get request tx")
+	}
+
+	if requestTransaction == nil {
+		return nil, errors.Wrap(err, "request transaction not found")
+	}
+	defer transactions.Release(ctx, requestTxID)
+
+	requestTransaction.Lock()
+	defer requestTransaction.Unlock()
+
+	requestInputOutput, err := requestTransaction.InputOutput(0)
+	if err != nil {
+		return nil, errors.Wrapf(err, "request input locking script %d", 0)
+	}
+
+	return requestInputOutput.LockingScript, nil
 }

@@ -20,13 +20,10 @@ import (
 )
 
 func (a *Agent) processSettlementRequest(ctx context.Context, transaction *state.Transaction,
-	outputIndex int, settlementRequest *messages.SettlementRequest, now uint64) error {
+	outputIndex int, settlementRequest *messages.SettlementRequest,
+	senderLockingScript, senderUnlockingScript bitcoin.Script, now uint64) error {
 
 	agentLockingScript := a.LockingScript()
-	ra, err := bitcoin.RawAddressFromLockingScript(agentLockingScript)
-	if err != nil {
-		return errors.Wrap(err, "agent raw address")
-	}
 
 	settlementTx := txbuilder.NewTxBuilder(a.FeeRate(), a.DustFeeRate())
 
@@ -112,21 +109,13 @@ func (a *Agent) processSettlementRequest(ctx context.Context, transaction *state
 		return errors.Wrap(err, "parse contracts")
 	}
 
-	transaction.Lock()
-	authorizingUnlockingScript := transaction.Input(0).UnlockingScript
-	firstInputOutput, err := transaction.InputOutput(0)
-	transaction.Unlock()
-	if err != nil {
-		return errors.Wrap(err, "get first input output")
-	}
-
-	if !firstInputOutput.LockingScript.Equal(transferContracts.PreviousLockingScript) {
+	if !senderLockingScript.Equal(transferContracts.PreviousLockingScript) {
 		return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
 			platform.NewRejectError(actions.RejectionsMsgMalformed,
 				"settlement request not from previous contract"), now), "reject")
 	}
 
-	if isSigHashAll, err := authorizingUnlockingScript.IsSigHashAll(); err != nil {
+	if isSigHashAll, err := senderUnlockingScript.IsSigHashAll(); err != nil {
 		return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
 			platform.NewRejectError(actions.RejectionsSignatureNotSigHashAll, err.Error()), now),
 			"reject")
@@ -405,10 +394,13 @@ func (a *Agent) processSettlementRequest(ctx context.Context, transaction *state
 		return nil
 	}
 
+	feeLockingScript := a.FeeLockingScript()
+	feeRawAddress, _ := bitcoin.RawAddressFromLockingScript(feeLockingScript)
+
 	// Create settlement request for the next contract agent.
 	settlementRequest.ContractFees = append(settlementRequest.ContractFees,
 		&messages.TargetAddressField{
-			Address:  ra.Bytes(),
+			Address:  feeRawAddress.Bytes(),
 			Quantity: a.ContractFee(),
 		})
 

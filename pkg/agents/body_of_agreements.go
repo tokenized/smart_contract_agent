@@ -470,34 +470,37 @@ func (a *Agent) processBodyOfAgreementFormation(ctx context.Context, transaction
 		return errors.Wrap(err, "add response txid")
 	}
 
-	defer a.caches.Contracts.Save(ctx, a.contract)
-	a.contract.Lock()
-	defer a.contract.Unlock()
+	contract := a.Contract()
+	defer a.caches.Contracts.Save(ctx, contract)
+	contract.Lock()
+	defer contract.Unlock()
 
-	if a.contract.BodyOfAgreementFormation != nil {
-		if formation.Timestamp < a.contract.BodyOfAgreementFormation.Timestamp {
+	if contract.BodyOfAgreementFormation != nil {
+		if formation.Timestamp < contract.BodyOfAgreementFormation.Timestamp {
 			logger.WarnWithFields(ctx, []logger.Field{
 				logger.Timestamp("timestamp", int64(formation.Timestamp)),
 				logger.Timestamp("existing_timestamp",
-					int64(a.contract.BodyOfAgreementFormation.Timestamp)),
+					int64(contract.BodyOfAgreementFormation.Timestamp)),
 			}, "Older body of agreement formation")
 			return nil
-		} else if formation.Timestamp == a.contract.BodyOfAgreementFormation.Timestamp {
+		} else if formation.Timestamp == contract.BodyOfAgreementFormation.Timestamp {
 			logger.WarnWithFields(ctx, []logger.Field{
 				logger.Timestamp("timestamp", int64(formation.Timestamp)),
-				logger.Timestamp("existing_timestamp", int64(a.contract.Formation.Timestamp)),
+				logger.Timestamp("existing_timestamp", int64(contract.Formation.Timestamp)),
 			}, "Already processed body of agreement formation")
 			return nil
 		}
+
+		logger.InfoWithFields(ctx, []logger.Field{
+			logger.Timestamp("timestamp", int64(formation.Timestamp)),
+		}, "Updating body of agreement formation")
+	} else {
+		logger.Info(ctx, "New body of agreement formation")
 	}
 
-	a.contract.BodyOfAgreementFormation = formation
-	a.contract.BodyOfAgreementFormationTxID = &txid
-	a.contract.MarkModified()
-
-	logger.InfoWithFields(ctx, []logger.Field{
-		logger.Timestamp("timestamp", int64(formation.Timestamp)),
-	}, "Updated body of agreement formation")
+	contract.BodyOfAgreementFormation = formation
+	contract.BodyOfAgreementFormationTxID = &txid
+	contract.MarkModified()
 
 	return nil
 }

@@ -426,10 +426,10 @@ func (a *Agent) processFreezeOrder(ctx context.Context, transaction *state.Trans
 	if isFull {
 		if len(order.InstrumentCode) == 0 {
 			// Mark contract as frozen.
-			contract.Freeze(freezeTxID, order.FreezePeriod)
+			contract.Freeze(freezeTxID, order.FreezePeriod, now)
 		} else {
 			// Mark instrument as frozen.
-			instrument.Freeze(freezeTxID, order.FreezePeriod)
+			instrument.Freeze(freezeTxID, order.FreezePeriod, now)
 		}
 	} else {
 		balances.SettleFreeze(txid, freezeTxID)
@@ -707,10 +707,10 @@ func (a *Agent) processThawOrder(ctx context.Context, transaction *state.Transac
 	defer a.caches.Transactions.Release(ctx, thawTxID)
 
 	if len(freeze.InstrumentCode) == 0 {
-		contract.Thaw()
+		contract.Thaw(freeze.Timestamp)
 	} else {
 		if isFull {
-			instrument.Thaw()
+			instrument.Thaw(freeze.Timestamp)
 		} else {
 			balances.RemoveFreeze(freezeTxID)
 		}
@@ -1154,18 +1154,12 @@ func (a *Agent) processFreeze(ctx context.Context, transaction *state.Transactio
 		contract.Lock()
 		defer contract.Unlock()
 
-		if contract.IsFrozen(now) {
-			logger.InfoWithFields(ctx, []logger.Field{
-				logger.Stringer("contract_locking_script", agentLockingScript),
-			}, "Contract already frozen")
-			return nil
-		}
-
 		logger.InfoWithFields(ctx, []logger.Field{
 			logger.Stringer("contract_locking_script", agentLockingScript),
+			logger.Timestamp("timestamp", int64(now)),
 		}, "Contract freeze")
 
-		contract.Freeze(txid, freeze.FreezePeriod)
+		contract.Freeze(txid, freeze.FreezePeriod, freeze.Timestamp)
 	} else {
 		var instrumentCode state.InstrumentCode
 		copy(instrumentCode[:], freeze.InstrumentCode)
@@ -1193,18 +1187,12 @@ func (a *Agent) processFreeze(ctx context.Context, transaction *state.Transactio
 		}
 
 		if isFull {
-			if instrument.IsFrozen(now) {
-				logger.InfoWithFields(ctx, []logger.Field{
-					logger.String("instrument_id", instrumentID),
-				}, "Instrument already frozen")
-				return nil
-			}
-
 			logger.InfoWithFields(ctx, []logger.Field{
 				logger.String("instrument_id", instrumentID),
+				logger.Timestamp("timestamp", int64(now)),
 			}, "Instrument freeze")
 
-			instrument.Freeze(txid, freeze.FreezePeriod)
+			instrument.Freeze(txid, freeze.FreezePeriod, freeze.Timestamp)
 		} else {
 			// Validate target addresses
 			var lockingScripts []bitcoin.Script
@@ -1355,17 +1343,14 @@ func (a *Agent) processThaw(ctx context.Context, transaction *state.Transaction,
 
 		logger.InfoWithFields(ctx, []logger.Field{
 			logger.Stringer("contract_locking_script", agentLockingScript),
+			logger.Timestamp("timestamp", int64(now)),
 		}, "Contract thaw")
 
 		contract := a.Contract()
 		contract.Lock()
 		defer contract.Unlock()
 
-		if !contract.IsFrozen(now) {
-			return errors.New("Contract not frozen")
-		}
-
-		contract.Thaw()
+		contract.Thaw(freeze.Timestamp)
 	} else {
 		var instrumentCode state.InstrumentCode
 		copy(instrumentCode[:], freeze.InstrumentCode)
@@ -1376,6 +1361,7 @@ func (a *Agent) processThaw(ctx context.Context, transaction *state.Transaction,
 
 			logger.InfoWithFields(ctx, []logger.Field{
 				logger.String("instrument_id", instrumentID),
+				logger.Timestamp("timestamp", int64(now)),
 			}, "Instrument thaw")
 
 			instrument, err := a.caches.Instruments.Get(ctx, agentLockingScript, instrumentCode)
@@ -1384,18 +1370,17 @@ func (a *Agent) processThaw(ctx context.Context, transaction *state.Transaction,
 			}
 
 			if instrument == nil {
-				return errors.New("Instrument not found")
+				// We can't process the thaw before the instrument creation so we would need to save
+				// this until we have processed the instrument creation tx. This can only happen in
+				// recovery mode where transactions are not being processed in the original order.
+				return errors.Wrap(ErrNotImplemented, "Instrument not found")
 			}
 			defer a.caches.Instruments.Release(ctx, agentLockingScript, instrumentCode)
 
 			instrument.Lock()
 			defer instrument.Unlock()
 
-			if !instrument.IsFrozen(now) {
-				return errors.New("Instrument not frozen")
-			}
-
-			instrument.Thaw()
+			instrument.Thaw(freeze.Timestamp)
 		} else {
 			var lockingScripts []bitcoin.Script
 			for i, target := range freeze.Quantities {

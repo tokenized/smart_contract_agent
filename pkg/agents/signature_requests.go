@@ -19,7 +19,8 @@ import (
 )
 
 func (a *Agent) processSignatureRequest(ctx context.Context, transaction *state.Transaction,
-	outputIndex int, signatureRequest *messages.SignatureRequest, now uint64) error {
+	outputIndex int, signatureRequest *messages.SignatureRequest,
+	senderLockingScript, senderUnlockingScript bitcoin.Script, now uint64) error {
 
 	agentLockingScript := a.LockingScript()
 
@@ -142,22 +143,14 @@ func (a *Agent) processSignatureRequest(ctx context.Context, transaction *state.
 		rejectActionOutputIndex = outputIndex
 	}
 
-	transaction.Lock()
-	authorizingUnlockingScript := transaction.Input(0).UnlockingScript
-	firstInputOutput, err := transaction.InputOutput(0)
-	transaction.Unlock()
-	if err != nil {
-		return errors.Wrap(err, "get first input output")
-	}
-
-	if !firstInputOutput.LockingScript.Equal(transferContracts.NextLockingScript) {
+	if !senderLockingScript.Equal(transferContracts.NextLockingScript) {
 		return errors.Wrap(a.sendRejection(ctx, rejectTransaction, rejectActionOutputIndex,
 			platform.NewRejectErrorFull(actions.RejectionsMsgMalformed,
 				"signature request not from next contract", 0, rejectOutputIndex,
 				rejectLockingScript), now), "reject")
 	}
 
-	if isSigHashAll, err := authorizingUnlockingScript.IsSigHashAll(); err != nil {
+	if isSigHashAll, err := senderUnlockingScript.IsSigHashAll(); err != nil {
 		return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
 			platform.NewRejectError(actions.RejectionsSignatureNotSigHashAll, err.Error()), now),
 			"reject")

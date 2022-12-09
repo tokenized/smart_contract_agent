@@ -558,6 +558,7 @@ func (a *Agent) processInstrumentCreation(ctx context.Context, transaction *stat
 	transaction.Lock()
 	input := transaction.Input(0)
 	txid := transaction.TxID()
+	requestTxID := transaction.Input(0).PreviousOutPoint.Hash
 	inputOutput, err := transaction.InputOutput(0)
 	transaction.Unlock()
 	if err != nil {
@@ -610,6 +611,12 @@ func (a *Agent) processInstrumentCreation(ctx context.Context, transaction *stat
 		logger.InfoWithFields(ctx, []logger.Field{
 			logger.Timestamp("timestamp", int64(creation.Timestamp)),
 		}, "Initial instrument creation")
+
+		contract := a.Contract()
+		contract.Lock()
+		contract.InstrumentCount++
+		contract.MarkModified()
+		contract.Unlock()
 	} else if instrument.Creation == nil {
 		logger.WarnWithFields(ctx, []logger.Field{
 			logger.Timestamp("timestamp", int64(creation.Timestamp)),
@@ -642,14 +649,29 @@ func (a *Agent) processInstrumentCreation(ctx context.Context, transaction *stat
 		instrument.MarkModified()
 	}
 
+	var adminAddressBytes []byte
 	contract := a.Contract()
 	contract.Lock()
-	if contract.Formation == nil {
-		contract.Unlock()
-		return errors.New("Missing contract formation")
+	if contract.Formation != nil {
+		adminAddressBytes = contract.Formation.AdminAddress
 	}
-	adminAddressBytes := contract.Formation.AdminAddress
 	contract.Unlock()
+
+	if len(adminAddressBytes) == 0 {
+		// Get admin address from request transaction
+		adminLockingScript, err := getRequestFirstInputLockingScript(ctx, a.caches.Transactions,
+			requestTxID)
+		if err != nil {
+			return errors.Wrap(err, "get request tx locking script")
+		}
+
+		ra, err := bitcoin.RawAddressFromLockingScript(adminLockingScript)
+		if err != nil {
+			return errors.Wrap(err, "admin address")
+		}
+
+		adminAddressBytes = ra.Bytes()
+	}
 
 	if err := a.updateAdminBalance(ctx, agentLockingScript, adminAddressBytes, transaction,
 		creation, txid, previousAuthorizedTokenQty, &now); err != nil {

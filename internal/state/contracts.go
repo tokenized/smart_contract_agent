@@ -42,11 +42,12 @@ type Contract struct {
 
 	MovedTxID *bitcoin.Hash32 `bsor:"8" json:"moved_txid"`
 
-	FrozenUntil *uint64         `bsor:"9" json:"frozen_until,omitempty"`
-	FreezeTxID  *bitcoin.Hash32 `bsor:"10" json:"freeze_txid"`
+	FreezeTimestamp *uint64         `bsor:"9" json:"freeze_timestamp"`
+	FrozenUntil     *uint64         `bsor:"10" json:"frozen_until,omitempty"`
+	FreezeTxID      *bitcoin.Hash32 `bsor:"11" json:"freeze_txid"`
 
 	// TODO Populate AdminMemberInstrumentCode value. --ce
-	AdminMemberInstrumentCode InstrumentCode `bsor:"11" json:"admin_member_instrument_code"`
+	AdminMemberInstrumentCode InstrumentCode `bsor:"12" json:"admin_member_instrument_code"`
 
 	isModified bool
 	sync.Mutex `bsor:"-"`
@@ -210,18 +211,26 @@ func (c *Contract) IsExpired(now uint64) bool {
 		c.Formation.ContractExpiration < now
 }
 
-func (c *Contract) Freeze(txid bitcoin.Hash32, until uint64) {
-	c.FreezeTxID = &txid
-	c.FrozenUntil = &until
+func (c *Contract) Freeze(txid bitcoin.Hash32, until, timestamp uint64) {
+	if c.FreezeTimestamp == nil || *c.FreezeTimestamp < timestamp {
+		c.FreezeTxID = &txid
+		c.FrozenUntil = &until
+		c.FreezeTimestamp = &timestamp
+		c.MarkModified()
+	}
 }
 
 func (c *Contract) IsFrozen(now uint64) bool {
 	return c.FrozenUntil != nil && (*c.FrozenUntil == 0 || *c.FrozenUntil >= now)
 }
 
-func (c *Contract) Thaw() {
-	c.FreezeTxID = nil
-	c.FrozenUntil = nil
+func (c *Contract) Thaw(timestamp uint64) {
+	if c.FreezeTimestamp != nil && *c.FreezeTimestamp == timestamp {
+		c.FreezeTxID = nil
+		c.FrozenUntil = nil
+		c.FreezeTimestamp = nil
+		c.MarkModified()
+	}
 }
 
 func (c *Contract) MarkModified() {

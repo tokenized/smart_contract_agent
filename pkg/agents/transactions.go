@@ -90,9 +90,14 @@ func (a *Agent) Process(ctx context.Context, transaction *state.Transaction,
 	if inRecovery, err := a.addRecoveryRequests(ctx, txid, requestActions); err != nil {
 		return errors.Wrap(err, "recovery request")
 	} else if inRecovery {
+		var actionCodes []string
+		for _, a := range requestActions {
+			actionCodes = append(actionCodes, a.Action.Code())
+		}
 		logger.InfoWithFields(ctx, []logger.Field{
 			logger.Stringer("txid", txid),
 			logger.Stringer("contract_locking_script", agentLockingScript),
+			logger.Strings("actions", actionCodes),
 		}, "Saving transaction requests for recovery")
 
 		if len(responseActions) == 0 {
@@ -403,7 +408,7 @@ func relevantRequestOutputs(etx *expanded_tx.ExpandedTx, agentLockingScript bitc
 			continue
 		}
 
-		isRelevant, err := actionIsRelevent(etx, action, agentLockingScript)
+		isRelevant, err := ActionIsRelevent(etx, action, agentLockingScript)
 		if err != nil {
 			return nil, errors.Wrap(err, "relevant")
 		}
@@ -434,7 +439,7 @@ func compileActions(transaction *state.Transaction, agentLockingScript bitcoin.S
 			continue
 		}
 
-		isRelevant, err := actionIsRelevent(transaction, action, agentLockingScript)
+		isRelevant, err := ActionIsRelevent(transaction, action, agentLockingScript)
 		if err != nil {
 			return nil, errors.Wrap(err, "relevant")
 		}
@@ -450,7 +455,9 @@ func compileActions(transaction *state.Transaction, agentLockingScript bitcoin.S
 	return result, nil
 }
 
-func actionIsRelevent(transaction expanded_tx.TransactionWithOutputs, action actions.Action,
+// ActionIsRelevent returns true if the action is a request to the agent locking script, or a
+// response from the agent locking script.
+func ActionIsRelevent(transaction expanded_tx.TransactionWithOutputs, action actions.Action,
 	agentLockingScript bitcoin.Script) (bool, error) {
 
 	switch act := action.(type) {

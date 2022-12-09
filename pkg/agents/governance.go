@@ -599,11 +599,12 @@ func (a *Agent) processVote(ctx context.Context, transaction *state.Transaction,
 	}
 
 	if isNew {
+
 		contract := a.Contract()
 		contract.Lock()
 		if contract.Formation == nil {
 			contract.Unlock()
-			return errors.New("Missing contract formation")
+			return errors.Wrap(ErrNotImplemented, "vote response before contract")
 		}
 		votingSystems := contract.Formation.VotingSystems
 		contract.Unlock()
@@ -886,7 +887,10 @@ func (a *Agent) processBallotCounted(ctx context.Context, transaction *state.Tra
 	}
 
 	if vote == nil {
-		return errors.New("Vote not found")
+		// We can't process the ballot before the vote so we would need to save this ballot until we
+		// have processed the vote tx. This can only happen in recovery mode where transactions are
+		// not being processed in the original order.
+		return errors.Wrap(ErrNotImplemented, "Vote not found")
 	}
 	defer a.caches.Votes.Release(ctx, agentLockingScript, voteTxID)
 
@@ -988,7 +992,10 @@ func (a *Agent) processVoteResult(ctx context.Context, transaction *state.Transa
 	}
 
 	if vote == nil {
-		return errors.New("Vote not found")
+		// We can't process the result before the vote so we would need to save this result until we
+		// have processed the vote tx. This can only happen in recovery mode where transactions are
+		// not being processed in the original order.
+		return errors.Wrap(ErrNotImplemented, "Vote not found")
 	}
 	defer a.caches.Votes.Release(ctx, agentLockingScript, voteTxID)
 

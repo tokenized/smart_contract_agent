@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/tokenized/logger"
+	"github.com/tokenized/smart_contract_agent/internal/platform"
 	"github.com/tokenized/smart_contract_agent/internal/state"
 	"github.com/tokenized/specification/dist/golang/actions"
 	"github.com/tokenized/specification/dist/golang/messages"
@@ -27,6 +28,11 @@ func (a *Agent) processMessage(ctx context.Context, transaction *state.Transacti
 		receiverIndex = int(message.ReceiverIndexes[0])
 	}
 
+	senderIndex := 0
+	if len(message.SenderIndexes) == 1 {
+		senderIndex = int(message.SenderIndexes[0])
+	}
+
 	transaction.Lock()
 
 	outputCount := transaction.OutputCount()
@@ -37,21 +43,52 @@ func (a *Agent) processMessage(ctx context.Context, transaction *state.Transacti
 		}, "Invalid message receivers index")
 
 		transaction.Unlock()
+
+		// No reject action necessary because we can't even confirm if this tx was addressed to this
+		// agent.
 		return nil
 	}
 
 	output := transaction.Output(receiverIndex)
+	receiverLockingScript := output.LockingScript
+
+	inputCount := transaction.InputCount()
+	if inputCount <= senderIndex {
+		logger.InfoWithFields(ctx, []logger.Field{
+			logger.Int("sender_index", senderIndex),
+			logger.Int("input_count", inputCount),
+		}, "Invalid message senders index")
+
+		transaction.Unlock()
+
+		// No reject action necessary because we can't even confirm who to respond to.
+		return nil
+	}
+
+	inputOutput, err := transaction.InputOutput(senderIndex)
+	if err != nil {
+		return errors.Wrapf(err, "input output %d", senderIndex)
+	}
+
+	senderLockingScript := inputOutput.LockingScript
+	senderUnlockingScipt := transaction.Input(senderIndex).UnlockingScript
 
 	transaction.Unlock()
 
 	agentLockingScript := a.LockingScript()
-	if !output.LockingScript.Equal(agentLockingScript) {
+	if !receiverLockingScript.Equal(agentLockingScript) {
 		logger.InfoWithFields(ctx, []logger.Field{
-			logger.Stringer("receiver_locking_script", output.LockingScript),
+			logger.Stringer("receiver_locking_script", receiverLockingScript),
 		}, "Agent is not the message receiver")
 
 		// This might be an important message related to an ongoing multi-contract transfer.
 		return a.processNonRelevantMessage(ctx, transaction, message, now)
+	}
+
+	if len(message.SenderIndexes) > 1 {
+		return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
+			platform.NewRejectError(actions.RejectionsMsgMalformed, "too many sender indexes"),
+			now), "reject")
 	}
 
 	payload, err := messages.Deserialize(message.MessageCode, message.MessagePayload)
@@ -66,12 +103,14 @@ func (a *Agent) processMessage(ctx context.Context, transaction *state.Transacti
 
 	switch p := payload.(type) {
 	case *messages.SettlementRequest:
-		if err := a.processSettlementRequest(ctx, transaction, outputIndex, p, now); err != nil {
+		if err := a.processSettlementRequest(ctx, transaction, outputIndex, p, senderLockingScript,
+			senderUnlockingScipt, now); err != nil {
 			return errors.Wrapf(err, "settlement request")
 		}
 
 	case *messages.SignatureRequest:
-		if err := a.processSignatureRequest(ctx, transaction, outputIndex, p, now); err != nil {
+		if err := a.processSignatureRequest(ctx, transaction, outputIndex, p, senderLockingScript,
+			senderUnlockingScipt, now); err != nil {
 			return errors.Wrapf(err, "settlement request")
 		}
 	}

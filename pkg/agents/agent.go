@@ -22,6 +22,8 @@ import (
 
 var (
 	ErrNotRelevant = errors.New("Not Relevant")
+
+	ErrNotImplemented = errors.New("Not Implemented")
 )
 
 type Config struct {
