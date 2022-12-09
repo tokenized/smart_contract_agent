@@ -310,8 +310,24 @@ func (b *Balance) FrozenQuantity(now uint64) uint64 {
 	return result
 }
 
+func (b *Balance) PendingTransferTxID() *bitcoin.Hash32 {
+	for _, adj := range b.Adjustments {
+		switch adj.Code {
+		case DebitCode, MultiContractDebitCode, CreditCode, MultiContractCreditCode:
+			return adj.TxID
+		}
+	}
+
+	return nil
+}
+
 // AddPendingDebit adds a pending modification to reduce the balance.
 func (b *Balance) AddPendingDebit(quantity, now uint64) error {
+	if pendingTranferTxID := b.PendingTransferTxID(); pendingTranferTxID != nil {
+		return platform.NewRejectError(actions.RejectionsHoldingsLocked,
+			pendingTranferTxID.String())
+	}
+
 	available := b.Available(now)
 	if available < quantity {
 		if b.FrozenQuantity(now) > 0 {
@@ -339,6 +355,11 @@ func (b *Balance) AddPendingDebit(quantity, now uint64) error {
 
 // AddPendingCredit adds a pending modification to increase the balance.
 func (b *Balance) AddPendingCredit(quantity uint64, now uint64) error {
+	if pendingTranferTxID := b.PendingTransferTxID(); pendingTranferTxID != nil {
+		return platform.NewRejectError(actions.RejectionsHoldingsLocked,
+			pendingTranferTxID.String())
+	}
+
 	if b.pendingDirection { // credit
 		b.pendingQuantity += quantity
 	} else { // debit
