@@ -156,11 +156,10 @@ func Test_Proposal_Valid(t *testing.T) {
 		t.Fatalf("Failed to add transaction : %s", err)
 	}
 
-	now := uint64(time.Now().UnixNano())
 	if err := agent.Process(ctx, transaction, []Action{{
 		OutputIndex: proposalScriptOutputIndex,
 		Action:      proposal,
-	}}, now); err != nil {
+	}}); err != nil {
 		t.Fatalf("Failed to process transaction : %s", err)
 	}
 
@@ -396,11 +395,10 @@ func Test_Ballots_Valid(t *testing.T) {
 			t.Fatalf("Failed to add transaction : %s", err)
 		}
 
-		now := uint64(time.Now().UnixNano())
 		if err := agent.Process(ctx, transaction, []Action{{
 			OutputIndex: ballotCastScriptOutputIndex,
 			Action:      ballotCast,
-		}}, now); err != nil {
+		}}); err != nil {
 			t.Fatalf("Failed to process transaction : %s", err)
 		}
 
@@ -449,7 +447,7 @@ func Test_Ballots_Valid(t *testing.T) {
 		}
 	}
 
-	if err := agent.FinalizeVote(ctx, voteTxID, uint64(time.Now().UnixNano())); err != nil {
+	if err := agent.FinalizeVote(ctx, voteTxID); err != nil {
 		t.Fatalf("Failed to finalize vote : %s", err)
 	}
 

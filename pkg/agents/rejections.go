@@ -17,7 +17,7 @@ import (
 )
 
 func (a *Agent) processRejection(ctx context.Context, transaction *state.Transaction,
-	rejection *actions.Rejection, outputIndex int, now uint64) error {
+	rejection *actions.Rejection, outputIndex int) error {
 
 	transaction.Lock()
 	txid := transaction.TxID()
@@ -123,7 +123,7 @@ func (a *Agent) processRejection(ctx context.Context, transaction *state.Transac
 	}, "Found related transfer transaction")
 
 	transferContracts, err := parseTransferContracts(transferTransaction, transfer,
-		agentLockingScript, now)
+		agentLockingScript)
 	if err != nil {
 		if errors.Cause(err) == ErrNotRelevant {
 			logger.Warn(ctx, "Transfer not relevant to this contract agent")
@@ -136,7 +136,7 @@ func (a *Agent) processRejection(ctx context.Context, transaction *state.Transac
 			}
 			if transferContracts != nil && transferContracts.IsFirstContract() {
 				return errors.Wrap(a.sendRejection(ctx, transferTransaction, transferOutputIndex,
-					rejectError, now), "reject")
+					rejectError), "reject")
 			}
 
 			return nil // Only first contract can reject at this point
@@ -149,7 +149,7 @@ func (a *Agent) processRejection(ctx context.Context, transaction *state.Transac
 		// This is the first contract so create a reject for the transfer itself.
 		return errors.Wrap(a.sendRejection(ctx, transferTransaction, transferOutputIndex,
 			platform.NewRejectErrorWithOutputIndex(int(rejection.RejectionCode), rejection.Message,
-				transferContracts.FirstContractOutputIndex), now), "reject")
+				transferContracts.FirstContractOutputIndex)), "reject")
 	}
 
 	// This is not the first contract so create a reject to the previous contract agent.
@@ -159,7 +159,7 @@ func (a *Agent) processRejection(ctx context.Context, transaction *state.Transac
 
 	return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
 		platform.NewRejectErrorFull(int(rejection.RejectionCode),
-			rejection.Message, 0, -1, transferContracts.PreviousLockingScript), now), "reject")
+			rejection.Message, 0, -1, transferContracts.PreviousLockingScript)), "reject")
 }
 
 func firstInputTxID(transaction *state.Transaction) bitcoin.Hash32 {
@@ -259,7 +259,7 @@ func (a *Agent) traceToTransfer(ctx context.Context,
 // sendRejection creates a reject message transaction that spends the specified output and contains
 // the specified reject code.
 func (a *Agent) sendRejection(ctx context.Context, transaction *state.Transaction, outputIndex int,
-	rejectError error, now uint64) error {
+	rejectError error) error {
 
 	var reject *platform.RejectError
 	if re, ok := rejectError.(platform.RejectError); ok {
@@ -346,7 +346,7 @@ func (a *Agent) sendRejection(ctx context.Context, transaction *state.Transactio
 
 	// Add rejection action
 	rejection := &actions.Rejection{
-		Timestamp: now,
+		Timestamp: a.Now(),
 	}
 
 	if reject != nil {

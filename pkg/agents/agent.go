@@ -199,6 +199,10 @@ func (a *Agent) Key() bitcoin.Key {
 	return a.key
 }
 
+func (a *Agent) Now() uint64 {
+	return uint64(time.Now().UnixNano())
+}
+
 func (a *Agent) BroadcastTx(ctx context.Context, etx *expanded_tx.ExpandedTx,
 	indexes []uint32) error {
 

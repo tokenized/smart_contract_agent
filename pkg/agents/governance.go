@@ -19,7 +19,7 @@ import (
 )
 
 func (a *Agent) processProposal(ctx context.Context, transaction *state.Transaction,
-	proposal *actions.Proposal, outputIndex int, now uint64) error {
+	proposal *actions.Proposal, outputIndex int) error {
 
 	agentLockingScript := a.LockingScript()
 
@@ -36,8 +36,10 @@ func (a *Agent) processProposal(ctx context.Context, transaction *state.Transact
 	}
 	transaction.Unlock()
 
+	now := a.Now()
+
 	if err := a.CheckContractIsAvailable(now); err != nil {
-		return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex, err, now), "reject")
+		return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex, err), "reject")
 	}
 
 	// Second output must be the agent's locking script.
@@ -46,7 +48,7 @@ func (a *Agent) processProposal(ctx context.Context, transaction *state.Transact
 	if transaction.OutputCount() < 2 {
 		return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
 			platform.NewRejectError(actions.RejectionsMsgMalformed,
-				"second contract output missing"), now), "reject")
+				"second contract output missing")), "reject")
 	}
 
 	contractOutput1 := transaction.Output(1)
@@ -54,7 +56,7 @@ func (a *Agent) processProposal(ctx context.Context, transaction *state.Transact
 		transaction.Unlock()
 		return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
 			platform.NewRejectError(actions.RejectionsMsgMalformed,
-				"second output must be to contract"), now), "reject")
+				"second output must be to contract")), "reject")
 	}
 
 	// TODO Verify the second output has enough funding for the Result action. --ce
@@ -71,11 +73,11 @@ func (a *Agent) processProposal(ctx context.Context, transaction *state.Transact
 
 	if isSigHashAll, err := authorizingUnlockingScript.IsSigHashAll(); err != nil {
 		return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
-			platform.NewRejectError(actions.RejectionsSignatureNotSigHashAll, err.Error()), now),
+			platform.NewRejectError(actions.RejectionsSignatureNotSigHashAll, err.Error())),
 			"reject")
 	} else if !isSigHashAll {
 		return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
-			platform.NewRejectError(actions.RejectionsSignatureNotSigHashAll, ""), now), "reject")
+			platform.NewRejectError(actions.RejectionsSignatureNotSigHashAll, "")), "reject")
 	}
 
 	contract := a.Contract()
@@ -104,7 +106,7 @@ func (a *Agent) processProposal(ctx context.Context, transaction *state.Transact
 	case 0, 2: // 0 - Administration Proposal, 2 - Administrative Matter
 		if !adminLockingScript.Equal(firstInputLockingScript) {
 			return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
-				platform.NewRejectError(actions.RejectionsNotAdministration, ""), now), "reject")
+				platform.NewRejectError(actions.RejectionsNotAdministration, "")), "reject")
 		}
 
 	case 1: // Holder Proposal
@@ -118,33 +120,32 @@ func (a *Agent) processProposal(ctx context.Context, transaction *state.Transact
 		if !hasBalance {
 			return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
 				platform.NewRejectError(actions.RejectionsUnauthorizedAddress,
-					"proposer must be instrument holder"), now), "reject")
+					"proposer must be instrument holder")), "reject")
 		}
 
 	default:
 		return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
-			platform.NewRejectError(actions.RejectionsMsgMalformed, "Type: unsupported"), now),
+			platform.NewRejectError(actions.RejectionsMsgMalformed, "Type: unsupported")),
 			"reject")
 	}
 
 	if int(proposal.VoteSystem) >= len(votingSystems) {
 		return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
-			platform.NewRejectError(actions.RejectionsMsgMalformed, "VoteSystem: out of range"),
-			now), "reject")
+			platform.NewRejectError(actions.RejectionsMsgMalformed, "VoteSystem: out of range")),
+			"reject")
 	}
 	votingSystem := votingSystems[proposal.VoteSystem]
 
 	if len(proposal.ProposedAmendments) > 0 && votingSystem.VoteType == "P" {
 		return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
 			platform.NewRejectError(actions.RejectionsMsgMalformed,
-				"Plurality votes not allowed for specific amendments"),
-			now), "reject")
+				"Plurality votes not allowed for specific amendments")), "reject")
 	}
 
 	// Validate messages vote related values
 	if err := validateProposal(proposal, now); err != nil {
 		return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
-			platform.NewRejectError(actions.RejectionsMsgMalformed, err.Error()), now), "reject")
+			platform.NewRejectError(actions.RejectionsMsgMalformed, err.Error())), "reject")
 	}
 
 	contractWideVote := false
@@ -155,7 +156,7 @@ func (a *Agent) processProposal(ctx context.Context, transaction *state.Transact
 		if err != nil {
 			return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
 				platform.NewRejectError(actions.RejectionsMsgMalformed,
-					fmt.Sprintf("InstrumentCode: %s", err)), now), "reject")
+					fmt.Sprintf("InstrumentCode: %s", err))), "reject")
 		}
 		instrumentCode := state.InstrumentCode(*instrumentHash20)
 
@@ -166,7 +167,7 @@ func (a *Agent) processProposal(ctx context.Context, transaction *state.Transact
 
 		if instrument == nil {
 			return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
-				platform.NewRejectError(actions.RejectionsInstrumentNotFound, ""), now), "reject")
+				platform.NewRejectError(actions.RejectionsInstrumentNotFound, "")), "reject")
 		}
 		defer a.caches.Instruments.Release(ctx, agentLockingScript, instrumentCode)
 
@@ -174,8 +175,8 @@ func (a *Agent) processProposal(ctx context.Context, transaction *state.Transact
 		if instrument.Creation == nil {
 			instrument.Unlock()
 			return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
-				platform.NewRejectError(actions.RejectionsInstrumentNotFound, "creation missing"),
-				now), "reject")
+				platform.NewRejectError(actions.RejectionsInstrumentNotFound, "creation missing")),
+				"reject")
 		}
 
 		switch proposal.Type {
@@ -184,14 +185,14 @@ func (a *Agent) processProposal(ctx context.Context, transaction *state.Transact
 				instrument.Unlock()
 				return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
 					platform.NewRejectError(actions.RejectionsInstrumentPermissions,
-						"administration proposals not permitted"), now), "reject")
+						"administration proposals not permitted")), "reject")
 			}
 		case 1: // Holder
 			if !instrument.Creation.HolderProposal {
 				instrument.Unlock()
 				return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
 					platform.NewRejectError(actions.RejectionsInstrumentPermissions,
-						"holder proposals not permitted"), now), "reject")
+						"holder proposals not permitted")), "reject")
 			}
 		}
 		instrument.Unlock()
@@ -207,7 +208,7 @@ func (a *Agent) processProposal(ctx context.Context, transaction *state.Transact
 			if balance == nil {
 				return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
 					platform.NewRejectError(actions.RejectionsUnauthorizedAddress,
-						"proposer has no balance"), now), "reject")
+						"proposer has no balance")), "reject")
 			}
 
 			// A single balance lock doesn't need to use the balance locker since it isn't
@@ -220,7 +221,7 @@ func (a *Agent) processProposal(ctx context.Context, transaction *state.Transact
 			if quantity == 0 {
 				return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
 					platform.NewRejectError(actions.RejectionsUnauthorizedAddress,
-						"proposer has no balance"), now), "reject")
+						"proposer has no balance")), "reject")
 			}
 		}
 
@@ -228,7 +229,7 @@ func (a *Agent) processProposal(ctx context.Context, transaction *state.Transact
 			if proposal.VoteOptions != "AB" || proposal.VoteMax != 1 {
 				return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
 					platform.NewRejectError(actions.RejectionsMsgMalformed,
-						"single AB votes required for amendments"), now), "reject")
+						"single AB votes required for amendments")), "reject")
 			}
 
 			// Validate proposed amendments.
@@ -256,8 +257,8 @@ func (a *Agent) processProposal(ctx context.Context, transaction *state.Transact
 			if err := applyInstrumentAmendments(creation, contractPermissions, len(votingSystems),
 				proposal.ProposedAmendments, true, proposal.Type, proposal.VoteSystem); err != nil {
 				if rejectError, ok := errors.Cause(err).(platform.RejectError); ok {
-					return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex, rejectError,
-						now), "reject")
+					return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex, rejectError),
+						"reject")
 				}
 
 				return errors.Wrap(err, "apply amendments")
@@ -269,7 +270,7 @@ func (a *Agent) processProposal(ctx context.Context, transaction *state.Transact
 			contract.Unlock()
 			return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
 				platform.NewRejectError(actions.RejectionsContractDoesNotExist,
-					"formation missing"), now), "reject")
+					"formation missing")), "reject")
 		}
 
 		switch proposal.Type {
@@ -278,14 +279,14 @@ func (a *Agent) processProposal(ctx context.Context, transaction *state.Transact
 				contract.Unlock()
 				return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
 					platform.NewRejectError(actions.RejectionsContractPermissions,
-						"administration proposals not permitted"), now), "reject")
+						"administration proposals not permitted")), "reject")
 			}
 		case 1: // Holder
 			if !contract.Formation.HolderProposal {
 				contract.Unlock()
 				return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
 					platform.NewRejectError(actions.RejectionsContractPermissions,
-						"holder proposals not permitted"), now), "reject")
+						"holder proposals not permitted")), "reject")
 			}
 		}
 		contract.Unlock()
@@ -294,7 +295,7 @@ func (a *Agent) processProposal(ctx context.Context, transaction *state.Transact
 			if proposal.VoteOptions != "AB" || proposal.VoteMax != 1 {
 				return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
 					platform.NewRejectError(actions.RejectionsMsgMalformed,
-						"single AB votes required for amendments"), now), "reject")
+						"single AB votes required for amendments")), "reject")
 			}
 
 			// Validate proposed amendments.
@@ -322,8 +323,8 @@ func (a *Agent) processProposal(ctx context.Context, transaction *state.Transact
 			if err := applyContractAmendments(formation, proposal.ProposedAmendments, true,
 				proposal.Type, proposal.VoteSystem); err != nil {
 				if rejectError, ok := errors.Cause(err).(platform.RejectError); ok {
-					return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex, rejectError,
-						now), "reject")
+					return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex, rejectError),
+						"reject")
 				}
 
 				return errors.Wrap(err, "apply amendments")
@@ -362,7 +363,7 @@ func (a *Agent) processProposal(ctx context.Context, transaction *state.Transact
 					if bytes.Equal(field.FieldIndexPath, otherField.FieldIndexPath) {
 						// Reject because of conflicting field amendment on active vote.
 						return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
-							platform.NewRejectError(actions.RejectionsProposalConflicts, ""), now),
+							platform.NewRejectError(actions.RejectionsProposalConflicts, "")),
 							"reject")
 					}
 				}
@@ -379,7 +380,7 @@ func (a *Agent) processProposal(ctx context.Context, transaction *state.Transact
 
 	if err := vote.Validate(); err != nil {
 		return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
-			platform.NewRejectError(actions.RejectionsMsgMalformed, err.Error()), now), "reject")
+			platform.NewRejectError(actions.RejectionsMsgMalformed, err.Error())), "reject")
 	}
 
 	voteTx := txbuilder.NewTxBuilder(a.FeeRate(), a.DustFeeRate())
@@ -421,8 +422,8 @@ func (a *Agent) processProposal(ctx context.Context, transaction *state.Transact
 		if errors.Cause(err) == txbuilder.ErrInsufficientValue {
 			logger.Warn(ctx, "Insufficient tx funding : %s", err)
 			return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
-				platform.NewRejectError(actions.RejectionsInsufficientTxFeeFunding, err.Error()),
-				now), "reject")
+				platform.NewRejectError(actions.RejectionsInsufficientTxFeeFunding, err.Error())),
+				"reject")
 		}
 
 		return errors.Wrap(err, "sign")
@@ -455,7 +456,8 @@ func (a *Agent) processProposal(ctx context.Context, transaction *state.Transact
 		return errors.Wrap(err, "prepare vote")
 	}
 	// TODO Figure out how to do voting balances for ballots. We want the Current balance at the
-	// exact time the vote was timestamped. --ce
+	// exact time the vote was timestamped. We can't update it here because the tx is already
+	// signed.--ce
 	// vote.Timestamp = now // now might have changed while locking balance
 
 	voteTransaction, err := a.caches.Transactions.AddRaw(ctx, voteTx.MsgTx, nil)
@@ -498,8 +500,7 @@ func (a *Agent) processProposal(ctx context.Context, transaction *state.Transact
 			logger.Timestamp("task_start", int64(proposal.VoteCutOffTimestamp)),
 		}, "Scheduling finalize vote")
 
-		task := NewFinalizeVoteTask(cutOffTime, a.factory, agentLockingScript, voteTxID,
-			proposal.VoteCutOffTimestamp)
+		task := NewFinalizeVoteTask(cutOffTime, a.factory, agentLockingScript, voteTxID)
 		a.scheduler.Schedule(ctx, task)
 	}
 
@@ -507,7 +508,7 @@ func (a *Agent) processProposal(ctx context.Context, transaction *state.Transact
 }
 
 func (a *Agent) processVote(ctx context.Context, transaction *state.Transaction,
-	vote *actions.Vote, outputIndex int, now uint64) error {
+	vote *actions.Vote, outputIndex int) error {
 
 	// First input must be the agent's locking script
 	transaction.Lock()
@@ -599,7 +600,6 @@ func (a *Agent) processVote(ctx context.Context, transaction *state.Transaction,
 	}
 
 	if isNew {
-
 		contract := a.Contract()
 		contract.Lock()
 		if contract.Formation == nil {
@@ -616,6 +616,7 @@ func (a *Agent) processVote(ctx context.Context, transaction *state.Transaction,
 
 		// TODO This might not get the right balances. It needs to have the balances from when the
 		// vote was created. --ce
+		now := a.Now()
 		if err := addedVote.Prepare(ctx, a.caches, a.balanceLocker, contract, votingSystem,
 			&now); err != nil {
 			return errors.Wrap(err, "prepare vote")
@@ -626,7 +627,7 @@ func (a *Agent) processVote(ctx context.Context, transaction *state.Transaction,
 }
 
 func (a *Agent) processBallotCast(ctx context.Context, transaction *state.Transaction,
-	ballotCast *actions.BallotCast, outputIndex int, now uint64) error {
+	ballotCast *actions.BallotCast, outputIndex int) error {
 
 	agentLockingScript := a.LockingScript()
 
@@ -655,15 +656,17 @@ func (a *Agent) processBallotCast(ctx context.Context, transaction *state.Transa
 
 	ctx = logger.ContextWithLogFields(ctx, logger.Stringer("ballot_locking_script", lockingScript))
 
+	now := a.Now()
+
 	if err := a.CheckContractIsAvailable(now); err != nil {
-		return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex, err, now), "reject")
+		return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex, err), "reject")
 	}
 
 	voteTxIDHash, err := bitcoin.NewHash32(ballotCast.VoteTxId)
 	if err != nil {
 		return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
 			platform.NewRejectError(actions.RejectionsMsgMalformed,
-				fmt.Sprintf("VoteTxId: %s", err)), now), "reject")
+				fmt.Sprintf("VoteTxId: %s", err))), "reject")
 	}
 	voteTxID := *voteTxIDHash
 	ctx = logger.ContextWithLogFields(ctx, logger.Stringer("vote_txid", voteTxID))
@@ -675,7 +678,7 @@ func (a *Agent) processBallotCast(ctx context.Context, transaction *state.Transa
 
 	if vote == nil {
 		return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
-			platform.NewRejectError(actions.RejectionsVoteNotFound, "VoteTxId: not found"), now),
+			platform.NewRejectError(actions.RejectionsVoteNotFound, "VoteTxId: not found")),
 			"reject")
 	}
 	defer a.caches.Votes.Release(ctx, agentLockingScript, voteTxID)
@@ -684,13 +687,13 @@ func (a *Agent) processBallotCast(ctx context.Context, transaction *state.Transa
 	if vote.Result != nil {
 		vote.Unlock()
 		return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
-			platform.NewRejectError(actions.RejectionsVoteClosed, ""), now), "reject")
+			platform.NewRejectError(actions.RejectionsVoteClosed, "")), "reject")
 	}
 
 	if vote.Proposal == nil {
 		vote.Unlock()
 		return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
-			platform.NewRejectError(actions.RejectionsVoteNotFound, "Missing vote proposal"), now),
+			platform.NewRejectError(actions.RejectionsVoteNotFound, "Missing vote proposal")),
 			"reject")
 	}
 
@@ -700,7 +703,7 @@ func (a *Agent) processBallotCast(ctx context.Context, transaction *state.Transa
 		return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
 			platform.NewRejectError(actions.RejectionsMsgMalformed,
 				fmt.Sprintf("Vote: more choices (%d) than VoteMax (%d)", len(ballotCast.Vote),
-					voteMax)), now), "reject")
+					voteMax))), "reject")
 	}
 	vote.Unlock()
 
@@ -711,18 +714,18 @@ func (a *Agent) processBallotCast(ctx context.Context, transaction *state.Transa
 
 	if ballot == nil {
 		return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
-			platform.NewRejectError(actions.RejectionsUnauthorizedAddress, "Ballot not found"),
-			now), "reject")
+			platform.NewRejectError(actions.RejectionsUnauthorizedAddress, "Ballot not found")),
+			"reject")
 	}
 	defer a.caches.Ballots.Release(ctx, agentLockingScript, voteTxID, ballot)
 
 	if isSigHashAll, err := authorizingUnlockingScript.IsSigHashAll(); err != nil {
 		return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
-			platform.NewRejectError(actions.RejectionsSignatureNotSigHashAll, err.Error()), now),
+			platform.NewRejectError(actions.RejectionsSignatureNotSigHashAll, err.Error())),
 			"reject")
 	} else if !isSigHashAll {
 		return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
-			platform.NewRejectError(actions.RejectionsSignatureNotSigHashAll, ""), now), "reject")
+			platform.NewRejectError(actions.RejectionsSignatureNotSigHashAll, "")), "reject")
 	}
 
 	ballot.Lock()
@@ -730,7 +733,7 @@ func (a *Agent) processBallotCast(ctx context.Context, transaction *state.Transa
 		ballot.Unlock()
 		return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
 			platform.NewRejectError(actions.RejectionsBallotAlreadyCounted,
-				"Ballot already counted"), now), "reject")
+				"Ballot already counted")), "reject")
 	}
 
 	ballot.Vote = ballotCast.Vote
@@ -746,12 +749,12 @@ func (a *Agent) processBallotCast(ctx context.Context, transaction *state.Transa
 		VoteTxId:  voteTxID.Bytes(),
 		Vote:      ballotCast.Vote,
 		Quantity:  quantity,
-		Timestamp: now,
+		Timestamp: a.Now(),
 	}
 
 	if err := ballotCounted.Validate(); err != nil {
 		return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
-			platform.NewRejectError(actions.RejectionsMsgMalformed, err.Error()), now), "reject")
+			platform.NewRejectError(actions.RejectionsMsgMalformed, err.Error())), "reject")
 	}
 
 	ballotCountedTx := txbuilder.NewTxBuilder(a.FeeRate(), a.DustFeeRate())
@@ -794,8 +797,8 @@ func (a *Agent) processBallotCast(ctx context.Context, transaction *state.Transa
 		if errors.Cause(err) == txbuilder.ErrInsufficientValue {
 			logger.Warn(ctx, "Insufficient tx funding : %s", err)
 			return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
-				platform.NewRejectError(actions.RejectionsInsufficientTxFeeFunding, err.Error()),
-				now), "reject")
+				platform.NewRejectError(actions.RejectionsInsufficientTxFeeFunding, err.Error())),
+				"reject")
 		}
 
 		return errors.Wrap(err, "sign")
@@ -849,7 +852,7 @@ func (a *Agent) processBallotCast(ctx context.Context, transaction *state.Transa
 }
 
 func (a *Agent) processBallotCounted(ctx context.Context, transaction *state.Transaction,
-	ballotCounted *actions.BallotCounted, outputIndex int, now uint64) error {
+	ballotCounted *actions.BallotCounted, outputIndex int) error {
 
 	// First input must be the agent's locking script
 	transaction.Lock()
@@ -961,7 +964,7 @@ func (a *Agent) processBallotCounted(ctx context.Context, transaction *state.Tra
 }
 
 func (a *Agent) processVoteResult(ctx context.Context, transaction *state.Transaction,
-	result *actions.Result, outputIndex int, now uint64) error {
+	result *actions.Result, outputIndex int) error {
 
 	// First input must be the agent's locking script
 	transaction.Lock()

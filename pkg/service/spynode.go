@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"time"
 
 	"github.com/tokenized/channels/wallet"
 	"github.com/tokenized/logger"
@@ -50,8 +49,7 @@ func (s *Service) HandleTx(ctx context.Context, spyNodeTx *spynode.Tx) {
 	}
 	transaction.Unlock()
 
-	if err := s.agent.UpdateTransaction(ctx, transaction,
-		uint64(time.Now().UnixNano())); err != nil {
+	if err := s.agent.UpdateTransaction(ctx, transaction); err != nil {
 		logger.Error(ctx, "Failed to update tx : %s", err)
 		return
 	}
@@ -105,8 +103,7 @@ func (s *Service) HandleTxUpdate(ctx context.Context, txUpdate *spynode.TxUpdate
 
 	transaction.Unlock()
 
-	if err := s.agent.UpdateTransaction(ctx, transaction,
-		uint64(time.Now().UnixNano())); err != nil {
+	if err := s.agent.UpdateTransaction(ctx, transaction); err != nil {
 		logger.ErrorWithFields(ctx, []logger.Field{
 			logger.Stringer("txid", txUpdate.TxID),
 		}, "Failed to update tx : %s", err)

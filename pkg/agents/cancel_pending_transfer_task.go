@@ -32,21 +32,18 @@ type CancelPendingTransferTask struct {
 	factory               AgentFactory
 	contractLockingScript bitcoin.Script
 	transferTxID          bitcoin.Hash32
-	timestamp             uint64
 
 	lock sync.Mutex
 }
 
 func NewCancelPendingTransferTask(start time.Time, factory AgentFactory,
-	contractLockingScript bitcoin.Script, transferTxID bitcoin.Hash32,
-	timestamp uint64) *CancelPendingTransferTask {
+	contractLockingScript bitcoin.Script, transferTxID bitcoin.Hash32) *CancelPendingTransferTask {
 
 	return &CancelPendingTransferTask{
 		start:                 start,
 		factory:               factory,
 		contractLockingScript: contractLockingScript,
 		transferTxID:          transferTxID,
-		timestamp:             timestamp,
 	}
 }
 
@@ -78,13 +75,12 @@ func (t *CancelPendingTransferTask) Run(ctx context.Context, interrupt <-chan in
 	factory := t.factory
 	contractLockingScript := t.contractLockingScript
 	transferTxID := t.transferTxID
-	timestamp := t.timestamp
 
-	return CancelPendingTransfer(ctx, factory, contractLockingScript, transferTxID, timestamp)
+	return CancelPendingTransfer(ctx, factory, contractLockingScript, transferTxID)
 }
 
 func CancelPendingTransfer(ctx context.Context, factory AgentFactory,
-	contractLockingScript bitcoin.Script, transferTxID bitcoin.Hash32, now uint64) error {
+	contractLockingScript bitcoin.Script, transferTxID bitcoin.Hash32) error {
 
 	ctx = logger.ContextWithLogFields(ctx, logger.Stringer("trace", uuid.New()))
 
@@ -103,12 +99,10 @@ func CancelPendingTransfer(ctx context.Context, factory AgentFactory,
 	}
 	defer agent.Release(ctx)
 
-	return agent.CancelPendingTransfer(ctx, transferTxID, now)
+	return agent.CancelPendingTransfer(ctx, transferTxID)
 }
 
-func (a *Agent) CancelPendingTransfer(ctx context.Context, transferTxID bitcoin.Hash32,
-	now uint64) error {
-
+func (a *Agent) CancelPendingTransfer(ctx context.Context, transferTxID bitcoin.Hash32) error {
 	agentLockingScript := a.LockingScript()
 	ctx = logger.ContextWithLogFields(ctx, logger.Stringer("transfer_txid", transferTxID),
 		logger.Stringer("contract_locking_script", agentLockingScript))
@@ -148,7 +142,7 @@ func (a *Agent) CancelPendingTransfer(ctx context.Context, transferTxID bitcoin.
 	}
 
 	transferContracts, err := parseTransferContracts(transferTransaction, transfer,
-		agentLockingScript, now)
+		agentLockingScript)
 	if err != nil {
 		return errors.Wrap(err, "parse contracts")
 	}

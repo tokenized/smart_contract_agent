@@ -25,21 +25,18 @@ type FinalizeVoteTask struct {
 	factory               AgentFactory
 	contractLockingScript bitcoin.Script
 	voteTxID              bitcoin.Hash32
-	timestamp             uint64
 
 	lock sync.Mutex
 }
 
 func NewFinalizeVoteTask(start time.Time, factory AgentFactory,
-	contractLockingScript bitcoin.Script, voteTxID bitcoin.Hash32,
-	timestamp uint64) *FinalizeVoteTask {
+	contractLockingScript bitcoin.Script, voteTxID bitcoin.Hash32) *FinalizeVoteTask {
 
 	return &FinalizeVoteTask{
 		start:                 start,
 		factory:               factory,
 		contractLockingScript: contractLockingScript,
 		voteTxID:              voteTxID,
-		timestamp:             timestamp,
 	}
 }
 
@@ -71,13 +68,12 @@ func (t *FinalizeVoteTask) Run(ctx context.Context, interrupt <-chan interface{}
 	factory := t.factory
 	contractLockingScript := t.contractLockingScript
 	voteTxID := t.voteTxID
-	timestamp := t.timestamp
 
-	return FinalizeVote(ctx, factory, contractLockingScript, voteTxID, timestamp)
+	return FinalizeVote(ctx, factory, contractLockingScript, voteTxID)
 }
 
 func FinalizeVote(ctx context.Context, factory AgentFactory, contractLockingScript bitcoin.Script,
-	voteTxID bitcoin.Hash32, now uint64) error {
+	voteTxID bitcoin.Hash32) error {
 
 	ctx = logger.ContextWithLogFields(ctx, logger.Stringer("trace", uuid.New()))
 
@@ -96,10 +92,10 @@ func FinalizeVote(ctx context.Context, factory AgentFactory, contractLockingScri
 	}
 	defer agent.Release(ctx)
 
-	return agent.FinalizeVote(ctx, voteTxID, now)
+	return agent.FinalizeVote(ctx, voteTxID)
 }
 
-func (a *Agent) FinalizeVote(ctx context.Context, voteTxID bitcoin.Hash32, now uint64) error {
+func (a *Agent) FinalizeVote(ctx context.Context, voteTxID bitcoin.Hash32) error {
 	agentLockingScript := a.LockingScript()
 	ctx = logger.ContextWithLogFields(ctx, logger.Stringer("vote_txid", voteTxID),
 		logger.Stringer("contract_locking_script", agentLockingScript))
@@ -180,12 +176,12 @@ func (a *Agent) FinalizeVote(ctx context.Context, voteTxID bitcoin.Hash32, now u
 		VoteTxId:           voteTxID.Bytes(),
 		OptionTally:        tally,
 		Result:             result,
-		Timestamp:          now,
+		Timestamp:          a.Now(),
 	}
 
 	if err := voteResult.Validate(); err != nil {
 		return errors.Wrap(a.sendRejection(ctx, proposalTransaction, 1,
-			platform.NewRejectError(actions.RejectionsMsgMalformed, err.Error()), now), "reject")
+			platform.NewRejectError(actions.RejectionsMsgMalformed, err.Error())), "reject")
 	}
 
 	voteResultTx := txbuilder.NewTxBuilder(a.FeeRate(), a.DustFeeRate())

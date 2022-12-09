@@ -143,11 +143,10 @@ func Test_Transfers_Basic(t *testing.T) {
 			t.Fatalf("Failed to add transaction : %s", err)
 		}
 
-		now := uint64(time.Now().UnixNano())
 		if err := agent.Process(ctx, transaction, []Action{{
 			OutputIndex: transferScriptOutputIndex,
 			Action:      transfer,
-		}}, now); err != nil {
+		}}); err != nil {
 			t.Fatalf("Failed to process transaction : %s", err)
 		}
 
@@ -304,11 +303,10 @@ func Test_Transfers_Basic(t *testing.T) {
 			t.Fatalf("Failed to add transaction : %s", err)
 		}
 
-		now := uint64(time.Now().UnixNano())
 		if err := agent.Process(ctx, transaction, []Action{{
 			OutputIndex: transferScriptOutputIndex,
 			Action:      transfer,
-		}}, now); err != nil {
+		}}); err != nil {
 			t.Fatalf("Failed to process transaction : %s", err)
 		}
 
@@ -510,11 +508,10 @@ func Test_Transfers_InsufficientQuantity(t *testing.T) {
 		t.Fatalf("Failed to add transaction : %s", err)
 	}
 
-	now := uint64(time.Now().UnixNano())
 	if err := agent.Process(ctx, transaction, []Action{{
 		OutputIndex: transferScriptOutputIndex,
 		Action:      transfer,
-	}}, now); err != nil {
+	}}); err != nil {
 		t.Fatalf("Failed to process transaction : %s", err)
 	}
 
@@ -686,11 +683,10 @@ func Test_Transfers_IdentityOracle_MissingSignature(t *testing.T) {
 		t.Fatalf("Failed to add transaction : %s", err)
 	}
 
-	now := uint64(time.Now().UnixNano())
 	if err := agent.Process(ctx, transaction, []Action{{
 		OutputIndex: transferScriptOutputIndex,
 		Action:      transfer,
-	}}, now); err != nil {
+	}}); err != nil {
 		t.Fatalf("Failed to process transaction : %s", err)
 	}
 
@@ -891,11 +887,10 @@ func Test_Transfers_IdentityOracle_Valid(t *testing.T) {
 		t.Fatalf("Failed to add transaction : %s", err)
 	}
 
-	now := uint64(time.Now().UnixNano())
 	if err := agent.Process(ctx, transaction, []Action{{
 		OutputIndex: transferScriptOutputIndex,
 		Action:      transfer,
-	}}, now); err != nil {
+	}}); err != nil {
 		t.Fatalf("Failed to process transaction : %s", err)
 	}
 
@@ -1087,11 +1082,10 @@ func Test_Transfers_IdentityOracle_BadSignature(t *testing.T) {
 		t.Fatalf("Failed to add transaction : %s", err)
 	}
 
-	now := uint64(time.Now().UnixNano())
 	if err := agent.Process(ctx, transaction, []Action{{
 		OutputIndex: transferScriptOutputIndex,
 		Action:      transfer,
-	}}, now); err != nil {
+	}}); err != nil {
 		t.Fatalf("Failed to process transaction : %s", err)
 	}
 
@@ -1316,11 +1310,10 @@ func Test_Transfers_Multi_Basic(t *testing.T) {
 			t.Fatalf("Failed to add transaction : %s", err)
 		}
 
-		now := uint64(time.Now().UnixNano())
 		if err := agent1.Process(ctx, transaction, []Action{{
 			OutputIndex: transferScriptOutputIndex,
 			Action:      transfer,
-		}}, now); err != nil {
+		}}); err != nil {
 			t.Fatalf("Failed to process transfer transaction : %s", err)
 		}
 
@@ -1364,7 +1357,7 @@ func Test_Transfers_Multi_Basic(t *testing.T) {
 		if err := agent2.Process(ctx, transaction, []Action{{
 			OutputIndex: transferScriptOutputIndex,
 			Action:      transfer,
-		}}, now); err != nil {
+		}}); err != nil {
 			t.Fatalf("Failed to process transfer transaction : %s", err)
 		}
 
@@ -1398,8 +1391,7 @@ func Test_Transfers_Multi_Basic(t *testing.T) {
 		if err := agent1.Process(ctx, messageTransaction, []Action{{
 			OutputIndex: messageScriptOutputIndex,
 			Action:      message,
-		}},
-			now); err != nil {
+		}}); err != nil {
 			t.Fatalf("Failed to process message transaction : %s", err)
 		}
 
@@ -1412,8 +1404,7 @@ func Test_Transfers_Multi_Basic(t *testing.T) {
 		if err := agent2.Process(ctx, messageTransaction, []Action{{
 			OutputIndex: messageScriptOutputIndex,
 			Action:      message,
-		}},
-			now); err != nil {
+		}}); err != nil {
 			t.Fatalf("Failed to process message transaction : %s", err)
 		}
 
@@ -1506,8 +1497,7 @@ func Test_Transfers_Multi_Basic(t *testing.T) {
 		if err := agent2.Process(ctx, message2Transaction, []Action{{
 			OutputIndex: message2ScriptOutputIndex,
 			Action:      message2,
-		}},
-			now); err != nil {
+		}}); err != nil {
 			t.Fatalf("Failed to process message 2 transaction : %s", err)
 		}
 
@@ -1520,8 +1510,7 @@ func Test_Transfers_Multi_Basic(t *testing.T) {
 		if err := agent1.Process(ctx, message2Transaction, []Action{{
 			OutputIndex: message2ScriptOutputIndex,
 			Action:      message2,
-		}},
-			now); err != nil {
+		}}); err != nil {
 			t.Fatalf("Failed to process message 2 transaction : %s", err)
 		}
 
@@ -1772,11 +1761,10 @@ func Test_Transfers_Multi_Expire(t *testing.T) {
 			t.Fatalf("Failed to add transaction : %s", err)
 		}
 
-		now := uint64(time.Now().UnixNano())
 		if err := agent1.Process(ctx, transaction, []Action{{
 			OutputIndex: transferScriptOutputIndex,
 			Action:      transfer,
-		}}, now); err != nil {
+		}}); err != nil {
 			t.Fatalf("Failed to process transfer transaction : %s", err)
 		}
 
@@ -1822,7 +1810,7 @@ func Test_Transfers_Multi_Expire(t *testing.T) {
 		if err := agent2.Process(ctx, transaction, []Action{{
 			OutputIndex: transferScriptOutputIndex,
 			Action:      transfer,
-		}}, now); err != nil {
+		}}); err != nil {
 			t.Fatalf("Failed to process transfer transaction : %s", err)
 		}
 
@@ -1856,8 +1844,7 @@ func Test_Transfers_Multi_Expire(t *testing.T) {
 		if err := agent1.Process(ctx, messageTransaction, []Action{{
 			OutputIndex: messageScriptOutputIndex,
 			Action:      message,
-		}},
-			now); err != nil {
+		}}); err != nil {
 			t.Fatalf("Failed to process message transaction : %s", err)
 		}
 
@@ -1870,8 +1857,7 @@ func Test_Transfers_Multi_Expire(t *testing.T) {
 		if err := agent2.Process(ctx, messageTransaction, []Action{{
 			OutputIndex: messageScriptOutputIndex,
 			Action:      message,
-		}},
-			now); err != nil {
+		}}); err != nil {
 			t.Fatalf("Failed to process message transaction : %s", err)
 		}
 
@@ -1964,8 +1950,7 @@ func Test_Transfers_Multi_Expire(t *testing.T) {
 		if err := agent2.Process(ctx, message2Transaction, []Action{{
 			OutputIndex: message2ScriptOutputIndex,
 			Action:      message2,
-		}},
-			now); err != nil {
+		}}); err != nil {
 			t.Fatalf("Failed to process message 2 transaction : %s", err)
 		}
 
@@ -1978,8 +1963,7 @@ func Test_Transfers_Multi_Expire(t *testing.T) {
 		if err := agent1.Process(ctx, message2Transaction, []Action{{
 			OutputIndex: message2ScriptOutputIndex,
 			Action:      message2,
-		}},
-			now); err != nil {
+		}}); err != nil {
 			t.Fatalf("Failed to process message 2 transaction : %s", err)
 		}
 
@@ -2209,11 +2193,10 @@ func Test_Transfers_Multi_Reject_First(t *testing.T) {
 			t.Fatalf("Failed to add transaction : %s", err)
 		}
 
-		now := uint64(time.Now().UnixNano())
 		if err := agent1.Process(ctx, transaction, []Action{{
 			OutputIndex: transferScriptOutputIndex,
 			Action:      transfer,
-		}}, now); err != nil {
+		}}); err != nil {
 			t.Fatalf("Failed to process transfer transaction : %s", err)
 		}
 
@@ -2253,7 +2236,7 @@ func Test_Transfers_Multi_Reject_First(t *testing.T) {
 		if err := agent2.Process(ctx, transaction, []Action{{
 			OutputIndex: transferScriptOutputIndex,
 			Action:      transfer,
-		}}, now); err != nil {
+		}}); err != nil {
 			t.Fatalf("Failed to process transfer transaction : %s", err)
 		}
 
@@ -2455,11 +2438,10 @@ func Test_Transfers_Multi_Reject_Second(t *testing.T) {
 			t.Fatalf("Failed to add transaction : %s", err)
 		}
 
-		now := uint64(time.Now().UnixNano())
 		if err := agent1.Process(ctx, transaction, []Action{{
 			OutputIndex: transferScriptOutputIndex,
 			Action:      transfer,
-		}}, now); err != nil {
+		}}); err != nil {
 			t.Fatalf("Failed to process transfer transaction : %s", err)
 		}
 
@@ -2503,7 +2485,7 @@ func Test_Transfers_Multi_Reject_Second(t *testing.T) {
 		if err := agent2.Process(ctx, transaction, []Action{{
 			OutputIndex: transferScriptOutputIndex,
 			Action:      transfer,
-		}}, now); err != nil {
+		}}); err != nil {
 			t.Fatalf("Failed to process transfer transaction : %s", err)
 		}
 
@@ -2537,8 +2519,7 @@ func Test_Transfers_Multi_Reject_Second(t *testing.T) {
 		if err := agent1.Process(ctx, messageTransaction, []Action{{
 			OutputIndex: messageScriptOutputIndex,
 			Action:      message,
-		}},
-			now); err != nil {
+		}}); err != nil {
 			t.Fatalf("Failed to process message transaction : %s", err)
 		}
 
@@ -2551,8 +2532,7 @@ func Test_Transfers_Multi_Reject_Second(t *testing.T) {
 		if err := agent2.Process(ctx, messageTransaction, []Action{{
 			OutputIndex: messageScriptOutputIndex,
 			Action:      message,
-		}},
-			now); err != nil {
+		}}); err != nil {
 			t.Fatalf("Failed to process message transaction : %s", err)
 		}
 
@@ -2613,8 +2593,7 @@ func Test_Transfers_Multi_Reject_Second(t *testing.T) {
 		if err := agent1.Process(ctx, rejectionTransaction, []Action{{
 			OutputIndex: rejectionScriptOutputIndex,
 			Action:      rejection,
-		}},
-			now); err != nil {
+		}}); err != nil {
 			t.Fatalf("Failed to process rejection transaction : %s", err)
 		}
 

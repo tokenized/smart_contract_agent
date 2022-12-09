@@ -87,7 +87,7 @@ func (a *Agent) removeRecoveryRequest(ctx context.Context, txid bitcoin.Hash32,
 	return result, nil
 }
 
-func (a *Agent) ProcessRecoveryRequests(ctx context.Context, now uint64) error {
+func (a *Agent) ProcessRecoveryRequests(ctx context.Context) error {
 	ctx = logger.ContextWithLogFields(ctx, logger.Stringer("recovery", uuid.New()))
 
 	agentLockingScript := a.LockingScript()
@@ -121,7 +121,7 @@ func (a *Agent) ProcessRecoveryRequests(ctx context.Context, now uint64) error {
 	}, "Processing recovery requests")
 
 	for _, request := range copyTxs.Transactions {
-		if err := a.processRecoveryRequest(ctx, request, now); err != nil {
+		if err := a.processRecoveryRequest(ctx, request); err != nil {
 			return errors.Wrapf(err, "process recovery request: %s", request.TxID)
 		}
 
@@ -133,8 +133,8 @@ func (a *Agent) ProcessRecoveryRequests(ctx context.Context, now uint64) error {
 	return nil
 }
 
-func (a *Agent) processRecoveryRequest(ctx context.Context, request *state.RecoveryTransaction,
-	now uint64) error {
+func (a *Agent) processRecoveryRequest(ctx context.Context,
+	request *state.RecoveryTransaction) error {
 
 	transaction, err := a.caches.Transactions.Get(ctx, request.TxID)
 	if err != nil {
@@ -169,7 +169,7 @@ func (a *Agent) processRecoveryRequest(ctx context.Context, request *state.Recov
 		}
 	}
 
-	if err := a.Process(ctx, transaction, recoveryActions, now); err != nil {
+	if err := a.Process(ctx, transaction, recoveryActions); err != nil {
 		return errors.Wrap(err, "process")
 	}
 

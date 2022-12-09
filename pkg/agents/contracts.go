@@ -20,7 +20,7 @@ import (
 )
 
 func (a *Agent) processContractOffer(ctx context.Context, transaction *state.Transaction,
-	offer *actions.ContractOffer, outputIndex int, now uint64) error {
+	offer *actions.ContractOffer, outputIndex int) error {
 
 	agentLockingScript := a.LockingScript()
 
@@ -41,21 +41,23 @@ func (a *Agent) processContractOffer(ctx context.Context, transaction *state.Tra
 	contract.Lock()
 	defer contract.Unlock()
 
+	now := a.Now()
+
 	if contract.Formation != nil {
 		return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
-			platform.NewRejectError(actions.RejectionsContractExists, ""), now), "reject")
+			platform.NewRejectError(actions.RejectionsContractExists, "")), "reject")
 	}
 
 	if offer.BodyOfAgreementType == actions.ContractBodyOfAgreementTypeHash &&
 		len(offer.BodyOfAgreement) != 32 {
 		return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
 			platform.NewRejectError(actions.RejectionsMsgMalformed,
-				"BodyOfAgreement: hash wrong size"), now), "reject")
+				"BodyOfAgreement: hash wrong size")), "reject")
 	}
 
 	if offer.ContractExpiration != 0 && offer.ContractExpiration < now {
 		return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
-			platform.NewRejectError(actions.RejectionsContractExpired, ""), now), "reject")
+			platform.NewRejectError(actions.RejectionsContractExpired, "")), "reject")
 	}
 
 	transaction.Lock()
@@ -80,8 +82,8 @@ func (a *Agent) processContractOffer(ctx context.Context, transaction *state.Tra
 		if transaction.InputCount() < 2 {
 			transaction.Unlock()
 			return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
-				platform.NewRejectError(actions.RejectionsMsgMalformed, "missing operator input"),
-				now), "reject")
+				platform.NewRejectError(actions.RejectionsMsgMalformed, "missing operator input")),
+				"reject")
 		}
 
 		inputOutput, err := transaction.InputOutput(1)
@@ -102,11 +104,11 @@ func (a *Agent) processContractOffer(ctx context.Context, transaction *state.Tra
 
 	if isSigHashAll, err := authorizingUnlockingScript.IsSigHashAll(); err != nil {
 		return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
-			platform.NewRejectError(actions.RejectionsSignatureNotSigHashAll, err.Error()), now),
+			platform.NewRejectError(actions.RejectionsSignatureNotSigHashAll, err.Error())),
 			"reject")
 	} else if !isSigHashAll {
 		return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
-			platform.NewRejectError(actions.RejectionsSignatureNotSigHashAll, ""), now), "reject")
+			platform.NewRejectError(actions.RejectionsSignatureNotSigHashAll, "")), "reject")
 	}
 
 	// Verify entity contract
@@ -114,7 +116,7 @@ func (a *Agent) processContractOffer(ctx context.Context, transaction *state.Tra
 		if _, err := bitcoin.DecodeRawAddress(offer.EntityContract); err != nil {
 			return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
 				platform.NewRejectError(actions.RejectionsMsgMalformed,
-					fmt.Sprintf("EntityContract: %s", err.Error())), now), "reject")
+					fmt.Sprintf("EntityContract: %s", err.Error()))), "reject")
 		}
 	}
 
@@ -123,7 +125,7 @@ func (a *Agent) processContractOffer(ctx context.Context, transaction *state.Tra
 		if _, err := bitcoin.DecodeRawAddress(offer.OperatorEntityContract); err != nil {
 			return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
 				platform.NewRejectError(actions.RejectionsMsgMalformed,
-					fmt.Sprintf("OperatorEntityContract: %s", err.Error())), now), "reject")
+					fmt.Sprintf("OperatorEntityContract: %s", err.Error()))), "reject")
 		}
 	}
 
@@ -131,7 +133,7 @@ func (a *Agent) processContractOffer(ctx context.Context, transaction *state.Tra
 		if _, err := bitcoin.DecodeRawAddress(offer.MasterAddress); err != nil {
 			return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
 				platform.NewRejectError(actions.RejectionsMsgMalformed,
-					fmt.Sprintf("MasterAddress: %s", err.Error())), now), "reject")
+					fmt.Sprintf("MasterAddress: %s", err.Error()))), "reject")
 		}
 	}
 
@@ -139,7 +141,7 @@ func (a *Agent) processContractOffer(ctx context.Context, transaction *state.Tra
 		len(offer.VotingSystems)); err != nil {
 		return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
 			platform.NewRejectError(actions.RejectionsMsgMalformed,
-				fmt.Sprintf("ContractPermissions: %s", err.Error())), now), "reject")
+				fmt.Sprintf("ContractPermissions: %s", err.Error()))), "reject")
 	}
 
 	// Validate voting systems are all valid.
@@ -147,7 +149,7 @@ func (a *Agent) processContractOffer(ctx context.Context, transaction *state.Tra
 		if err := validateVotingSystem(votingSystem); err != nil {
 			return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
 				platform.NewRejectError(actions.RejectionsMsgMalformed,
-					fmt.Sprintf("VotingSystems[%d]: %s", i, err.Error())), now), "reject")
+					fmt.Sprintf("VotingSystems[%d]: %s", i, err.Error()))), "reject")
 		}
 	}
 
@@ -156,7 +158,7 @@ func (a *Agent) processContractOffer(ctx context.Context, transaction *state.Tra
 		if _, err := bitcoin.DecodeRawAddress(oracle.EntityContract); err != nil {
 			return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
 				platform.NewRejectError(actions.RejectionsMsgMalformed,
-					fmt.Sprintf("Oracles[%d].EntityContract: %s", i, err.Error())), now), "reject")
+					fmt.Sprintf("Oracles[%d].EntityContract: %s", i, err.Error()))), "reject")
 		}
 	}
 
@@ -169,7 +171,7 @@ func (a *Agent) processContractOffer(ctx context.Context, transaction *state.Tra
 	if err := a.verifyAdminIdentityCertificates(ctx, adminLockingScript, formation,
 		now); err != nil {
 		if rejectError, ok := errors.Cause(err).(platform.RejectError); ok {
-			return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex, rejectError, now),
+			return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex, rejectError),
 				"reject")
 		}
 
@@ -187,7 +189,7 @@ func (a *Agent) processContractOffer(ctx context.Context, transaction *state.Tra
 
 	if err := formation.Validate(); err != nil {
 		return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
-			platform.NewRejectError(actions.RejectionsMsgMalformed, err.Error()), now), "reject")
+			platform.NewRejectError(actions.RejectionsMsgMalformed, err.Error())), "reject")
 	}
 
 	formationTx := txbuilder.NewTxBuilder(a.FeeRate(), a.DustFeeRate())
@@ -227,8 +229,8 @@ func (a *Agent) processContractOffer(ctx context.Context, transaction *state.Tra
 		if errors.Cause(err) == txbuilder.ErrInsufficientValue {
 			logger.Warn(ctx, "Insufficient tx funding : %s", err)
 			return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
-				platform.NewRejectError(actions.RejectionsInsufficientTxFeeFunding, err.Error()),
-				now), "reject")
+				platform.NewRejectError(actions.RejectionsInsufficientTxFeeFunding, err.Error())),
+				"reject")
 		}
 
 		return errors.Wrap(err, "sign")
@@ -277,12 +279,12 @@ func (a *Agent) processContractOffer(ctx context.Context, transaction *state.Tra
 }
 
 func (a *Agent) processContractAmendment(ctx context.Context, transaction *state.Transaction,
-	amendment *actions.ContractAmendment, outputIndex int, now uint64) error {
+	amendment *actions.ContractAmendment, outputIndex int) error {
 
 	if !amendment.ChangeAdministrationAddress && !amendment.ChangeOperatorAddress &&
 		len(amendment.Amendments) == 0 {
 		return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
-			platform.NewRejectError(actions.RejectionsMsgMalformed, "missing amendments"), now),
+			platform.NewRejectError(actions.RejectionsMsgMalformed, "missing amendments")),
 			"reject")
 	}
 
@@ -316,8 +318,10 @@ func (a *Agent) processContractAmendment(ctx context.Context, transaction *state
 	contract.Lock()
 	defer contract.Unlock()
 
+	now := a.Now()
+
 	if err := contract.CheckIsAvailable(now); err != nil {
-		return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex, err, now), "reject")
+		return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex, err), "reject")
 	}
 
 	authorizingAddress, err := bitcoin.RawAddressFromLockingScript(authorizingLockingScript)
@@ -328,21 +332,21 @@ func (a *Agent) processContractAmendment(ctx context.Context, transaction *state
 	if !bytes.Equal(contract.Formation.AdminAddress, authorizingAddress.Bytes()) &&
 		!bytes.Equal(contract.Formation.OperatorAddress, authorizingAddress.Bytes()) {
 		return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
-			platform.NewRejectError(actions.RejectionsUnauthorizedAddress, ""), now), "reject")
+			platform.NewRejectError(actions.RejectionsUnauthorizedAddress, "")), "reject")
 	}
 
 	if isSigHashAll, err := authorizingUnlockingScript.IsSigHashAll(); err != nil {
 		return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
-			platform.NewRejectError(actions.RejectionsSignatureNotSigHashAll, err.Error()), now),
+			platform.NewRejectError(actions.RejectionsSignatureNotSigHashAll, err.Error())),
 			"reject")
 	} else if !isSigHashAll {
 		return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
-			platform.NewRejectError(actions.RejectionsSignatureNotSigHashAll, ""), now), "reject")
+			platform.NewRejectError(actions.RejectionsSignatureNotSigHashAll, "")), "reject")
 	}
 
 	if contract.Formation.ContractRevision != amendment.ContractRevision {
 		return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
-			platform.NewRejectError(actions.RejectionsContractRevision, ""), now), "reject")
+			platform.NewRejectError(actions.RejectionsContractRevision, "")), "reject")
 	}
 
 	// Check proposal if there was one
@@ -354,7 +358,7 @@ func (a *Agent) processContractAmendment(ctx context.Context, transaction *state
 		a.IsTest())
 	if err != nil {
 		if rejectError, ok := errors.Cause(err).(platform.RejectError); ok {
-			return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex, rejectError, now),
+			return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex, rejectError),
 				"reject")
 		}
 
@@ -369,7 +373,7 @@ func (a *Agent) processContractAmendment(ctx context.Context, transaction *state
 			a.caches.Votes.Release(ctx, agentLockingScript, *vote.VoteTxID)
 			return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
 				platform.NewRejectError(actions.RejectionsMsgMalformed,
-					"RefTxID: Vote Result: Vote Not For Specific Amendments"), now), "reject")
+					"RefTxID: Vote Result: Vote Not For Specific Amendments")), "reject")
 		}
 
 		if len(vote.Result.InstrumentCode) != 0 {
@@ -379,8 +383,8 @@ func (a *Agent) processContractAmendment(ctx context.Context, transaction *state
 				vote.Result.InstrumentCode)
 			return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
 				platform.NewRejectError(actions.RejectionsMsgMalformed,
-					fmt.Sprintf("RefTxID: Vote Result: Vote For Instrument: %s", instrumentID)),
-				now), "reject")
+					fmt.Sprintf("RefTxID: Vote Result: Vote For Instrument: %s", instrumentID))),
+				"reject")
 		}
 
 		// Verify proposal amendments match these amendments.
@@ -390,8 +394,7 @@ func (a *Agent) processContractAmendment(ctx context.Context, transaction *state
 			return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
 				platform.NewRejectError(actions.RejectionsMsgMalformed,
 					fmt.Sprintf("RefTxID: Vote Result: Wrong Vote Amendment Count: Proposal %d, Amendment %d",
-						len(vote.Result.ProposedAmendments), len(amendment.Amendments))), now),
-				"reject")
+						len(vote.Result.ProposedAmendments), len(amendment.Amendments)))), "reject")
 		}
 
 		for i, proposedAmendment := range vote.Result.ProposedAmendments {
@@ -400,8 +403,7 @@ func (a *Agent) processContractAmendment(ctx context.Context, transaction *state
 				a.caches.Votes.Release(ctx, agentLockingScript, *vote.VoteTxID)
 				return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
 					platform.NewRejectError(actions.RejectionsMsgMalformed,
-						fmt.Sprintf("RefTxID: Vote Result: Wrong Vote Amendment %d", i)), now),
-					"reject")
+						fmt.Sprintf("RefTxID: Vote Result: Wrong Vote Amendment %d", i))), "reject")
 			}
 		}
 
@@ -427,7 +429,7 @@ func (a *Agent) processContractAmendment(ctx context.Context, transaction *state
 				transaction.Unlock()
 				return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
 					platform.NewRejectError(actions.RejectionsContractBothOperatorsRequired,
-						"missing"), now), "reject")
+						"missing")), "reject")
 			}
 
 			firstUnlockingScript := transaction.Input(0).UnlockingScript
@@ -450,26 +452,26 @@ func (a *Agent) processContractAmendment(ctx context.Context, transaction *state
 				transaction.Unlock()
 				return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
 					platform.NewRejectError(actions.RejectionsContractBothOperatorsRequired,
-						"wrong"), now), "reject")
+						"wrong")), "reject")
 			}
 
 			if isSigHashAll, err := firstUnlockingScript.IsSigHashAll(); err != nil {
 				return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
-					platform.NewRejectError(actions.RejectionsSignatureNotSigHashAll, err.Error()),
-					now), "reject")
+					platform.NewRejectError(actions.RejectionsSignatureNotSigHashAll, err.Error())),
+					"reject")
 			} else if !isSigHashAll {
 				return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
-					platform.NewRejectError(actions.RejectionsSignatureNotSigHashAll, ""), now),
+					platform.NewRejectError(actions.RejectionsSignatureNotSigHashAll, "")),
 					"reject")
 			}
 
 			if isSigHashAll, err := secondUnlockingScript.IsSigHashAll(); err != nil {
 				return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
-					platform.NewRejectError(actions.RejectionsSignatureNotSigHashAll, err.Error()),
-					now), "reject")
+					platform.NewRejectError(actions.RejectionsSignatureNotSigHashAll, err.Error())),
+					"reject")
 			} else if !isSigHashAll {
 				return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
-					platform.NewRejectError(actions.RejectionsSignatureNotSigHashAll, ""), now),
+					platform.NewRejectError(actions.RejectionsSignatureNotSigHashAll, "")),
 					"reject")
 			}
 		} else {
@@ -484,17 +486,17 @@ func (a *Agent) processContractAmendment(ctx context.Context, transaction *state
 			if !contract.IsAdminOrOperator(firstInputOutput.LockingScript) {
 				transaction.Unlock()
 				return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
-					platform.NewRejectError(actions.RejectionsNotAdministration, "wrong"), now),
+					platform.NewRejectError(actions.RejectionsNotAdministration, "wrong")),
 					"reject")
 			}
 
 			if isSigHashAll, err := firstUnlockingScript.IsSigHashAll(); err != nil {
 				return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
-					platform.NewRejectError(actions.RejectionsSignatureNotSigHashAll, err.Error()),
-					now), "reject")
+					platform.NewRejectError(actions.RejectionsSignatureNotSigHashAll, err.Error())),
+					"reject")
 			} else if !isSigHashAll {
 				return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
-					platform.NewRejectError(actions.RejectionsSignatureNotSigHashAll, ""), now),
+					platform.NewRejectError(actions.RejectionsSignatureNotSigHashAll, "")),
 					"reject")
 			}
 		}
@@ -541,7 +543,7 @@ func (a *Agent) processContractAmendment(ctx context.Context, transaction *state
 		if inputIndex >= inputCount {
 			transaction.Unlock()
 			return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
-				platform.NewRejectError(actions.RejectionsMsgMalformed, "missing new admin"), now),
+				platform.NewRejectError(actions.RejectionsMsgMalformed, "missing new admin")),
 				"reject")
 		}
 
@@ -555,8 +557,8 @@ func (a *Agent) processContractAmendment(ctx context.Context, transaction *state
 		if err != nil {
 			transaction.Unlock()
 			return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
-				platform.NewRejectError(actions.RejectionsMsgMalformed, "unsupported new admin"),
-				now), "reject")
+				platform.NewRejectError(actions.RejectionsMsgMalformed, "unsupported new admin")),
+				"reject")
 		}
 
 		logger.InfoWithFields(ctx, []logger.Field{
@@ -590,8 +592,8 @@ func (a *Agent) processContractAmendment(ctx context.Context, transaction *state
 		if inputIndex >= inputCount {
 			transaction.Unlock()
 			return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
-				platform.NewRejectError(actions.RejectionsMsgMalformed, "missing new operator"),
-				now), "reject")
+				platform.NewRejectError(actions.RejectionsMsgMalformed, "missing new operator")),
+				"reject")
 		}
 
 		inputOutput, err := transaction.InputOutput(inputIndex)
@@ -604,8 +606,8 @@ func (a *Agent) processContractAmendment(ctx context.Context, transaction *state
 		if err != nil {
 			transaction.Unlock()
 			return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
-				platform.NewRejectError(actions.RejectionsMsgMalformed, "unsupported new operator"),
-				now), "reject")
+				platform.NewRejectError(actions.RejectionsMsgMalformed,
+					"unsupported new operator")), "reject")
 		}
 
 		logger.InfoWithFields(ctx, []logger.Field{
@@ -621,7 +623,7 @@ func (a *Agent) processContractAmendment(ctx context.Context, transaction *state
 	if err := applyContractAmendments(formation, amendment.Amendments, proposed, proposalType,
 		votingSystem); err != nil {
 		if rejectError, ok := errors.Cause(err).(platform.RejectError); ok {
-			return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex, rejectError, now),
+			return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex, rejectError),
 				"reject")
 		}
 
@@ -633,7 +635,7 @@ func (a *Agent) processContractAmendment(ctx context.Context, transaction *state
 	if formation.RestrictedQtyInstruments > 0 &&
 		formation.RestrictedQtyInstruments < contract.InstrumentCount {
 		return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
-			platform.NewRejectError(actions.RejectionsContractInstrumentQtyReduction, ""), now),
+			platform.NewRejectError(actions.RejectionsContractInstrumentQtyReduction, "")),
 			"reject")
 	}
 
@@ -642,7 +644,7 @@ func (a *Agent) processContractAmendment(ctx context.Context, transaction *state
 		if _, err := bitcoin.DecodeRawAddress(formation.EntityContract); err != nil {
 			return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
 				platform.NewRejectError(actions.RejectionsMsgMalformed,
-					fmt.Sprintf("EntityContract: %s", err)), now), "reject")
+					fmt.Sprintf("EntityContract: %s", err))), "reject")
 		}
 	}
 
@@ -651,7 +653,7 @@ func (a *Agent) processContractAmendment(ctx context.Context, transaction *state
 		if _, err := bitcoin.DecodeRawAddress(formation.OperatorEntityContract); err != nil {
 			return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
 				platform.NewRejectError(actions.RejectionsMsgMalformed,
-					fmt.Sprintf("OperatorEntityContract: %s", err)), now), "reject")
+					fmt.Sprintf("OperatorEntityContract: %s", err))), "reject")
 		}
 	}
 
@@ -659,7 +661,7 @@ func (a *Agent) processContractAmendment(ctx context.Context, transaction *state
 	if err := a.verifyAdminIdentityCertificates(ctx, adminLockingScript, formation,
 		now); err != nil {
 		if rejectError, ok := errors.Cause(err).(platform.RejectError); ok {
-			return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex, rejectError, now),
+			return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex, rejectError),
 				"reject")
 		}
 
@@ -671,7 +673,7 @@ func (a *Agent) processContractAmendment(ctx context.Context, transaction *state
 		if _, err := bitcoin.DecodeRawAddress(oracle.EntityContract); err != nil {
 			return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
 				platform.NewRejectError(actions.RejectionsMsgMalformed,
-					fmt.Sprintf("Oracles %d: EntityContract: %s", i, err)), now), "reject")
+					fmt.Sprintf("Oracles %d: EntityContract: %s", i, err))), "reject")
 		}
 	}
 
@@ -682,7 +684,7 @@ func (a *Agent) processContractAmendment(ctx context.Context, transaction *state
 
 	if err := formation.Validate(); err != nil {
 		return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
-			platform.NewRejectError(actions.RejectionsMsgMalformed, err.Error()), now), "reject")
+			platform.NewRejectError(actions.RejectionsMsgMalformed, err.Error())), "reject")
 	}
 
 	formationTx := txbuilder.NewTxBuilder(a.FeeRate(), a.DustFeeRate())
@@ -722,8 +724,8 @@ func (a *Agent) processContractAmendment(ctx context.Context, transaction *state
 		if errors.Cause(err) == txbuilder.ErrInsufficientValue {
 			logger.Warn(ctx, "Insufficient tx funding : %s", err)
 			return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
-				platform.NewRejectError(actions.RejectionsInsufficientTxFeeFunding, err.Error()),
-				now), "reject")
+				platform.NewRejectError(actions.RejectionsInsufficientTxFeeFunding, err.Error())),
+				"reject")
 		}
 
 		return errors.Wrap(err, "sign")
@@ -773,7 +775,7 @@ func (a *Agent) processContractAmendment(ctx context.Context, transaction *state
 }
 
 func (a *Agent) processContractFormation(ctx context.Context, transaction *state.Transaction,
-	formation *actions.ContractFormation, outputIndex int, now uint64) error {
+	formation *actions.ContractFormation, outputIndex int) error {
 
 	// First input must be the agent's locking script
 	transaction.Lock()
@@ -841,7 +843,7 @@ func (a *Agent) processContractFormation(ctx context.Context, transaction *state
 }
 
 func (a *Agent) processContractAddressChange(ctx context.Context, transaction *state.Transaction,
-	addressChange *actions.ContractAddressChange, outputIndex int, now uint64) error {
+	addressChange *actions.ContractAddressChange, outputIndex int) error {
 
 	logger.Info(ctx, "Processing contract address change")
 
@@ -864,7 +866,7 @@ func (a *Agent) processContractAddressChange(ctx context.Context, transaction *s
 		transaction.Unlock()
 		return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
 			platform.NewRejectError(actions.RejectionsMsgMalformed,
-				"second output must be new contract locking script"), now), "reject")
+				"second output must be new contract locking script")), "reject")
 	}
 	contractOutput2 := transaction.Output(1)
 	newContractLockingScript := contractOutput2.LockingScript
@@ -886,13 +888,13 @@ func (a *Agent) processContractAddressChange(ctx context.Context, transaction *s
 
 	if contract.Formation == nil {
 		return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
-			platform.NewRejectError(actions.RejectionsContractDoesNotExist, ""), now), "reject")
+			platform.NewRejectError(actions.RejectionsContractDoesNotExist, "")), "reject")
 	}
 
 	if contract.MovedTxID != nil {
 		return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
-			platform.NewRejectError(actions.RejectionsContractMoved, contract.MovedTxID.String()),
-			now), "reject")
+			platform.NewRejectError(actions.RejectionsContractMoved, contract.MovedTxID.String())),
+			"reject")
 	}
 
 	authorizingAddress, err := bitcoin.RawAddressFromLockingScript(authorizingLockingScript)
@@ -903,23 +905,23 @@ func (a *Agent) processContractAddressChange(ctx context.Context, transaction *s
 	if len(contract.Formation.MasterAddress) == 0 ||
 		!bytes.Equal(contract.Formation.MasterAddress, authorizingAddress.Bytes()) {
 		return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
-			platform.NewRejectError(actions.RejectionsUnauthorizedAddress, ""), now), "reject")
+			platform.NewRejectError(actions.RejectionsUnauthorizedAddress, "")), "reject")
 	}
 
 	if isSigHashAll, err := authorizingUnlockingScript.IsSigHashAll(); err != nil {
 		return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
-			platform.NewRejectError(actions.RejectionsSignatureNotSigHashAll, err.Error()), now),
+			platform.NewRejectError(actions.RejectionsSignatureNotSigHashAll, err.Error())),
 			"reject")
 	} else if !isSigHashAll {
 		return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
-			platform.NewRejectError(actions.RejectionsSignatureNotSigHashAll, ""), now), "reject")
+			platform.NewRejectError(actions.RejectionsSignatureNotSigHashAll, "")), "reject")
 	}
 
 	newAddress, err := bitcoin.DecodeRawAddress(addressChange.NewContractAddress)
 	if err != nil {
 		return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
 			platform.NewRejectError(actions.RejectionsMsgMalformed,
-				fmt.Sprintf("NewContractAddress: %s", err)), now), "reject")
+				fmt.Sprintf("NewContractAddress: %s", err))), "reject")
 	}
 
 	newLockingScript, err := newAddress.LockingScript()
@@ -930,7 +932,7 @@ func (a *Agent) processContractAddressChange(ctx context.Context, transaction *s
 	if !newContractLockingScript.Equal(newLockingScript) {
 		return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
 			platform.NewRejectError(actions.RejectionsMsgMalformed,
-				"second output must be new contract locking script"), now), "reject")
+				"second output must be new contract locking script")), "reject")
 	}
 
 	newContract, err := a.caches.Contracts.Get(ctx, newLockingScript)
@@ -947,7 +949,7 @@ func (a *Agent) processContractAddressChange(ctx context.Context, transaction *s
 		if newContract.Formation != nil {
 			return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
 				platform.NewRejectError(actions.RejectionsContractExists,
-					"second output must be new contract locking script"), now), "reject")
+					"second output must be new contract locking script")), "reject")
 		}
 	}
 

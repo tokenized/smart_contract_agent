@@ -82,7 +82,7 @@ func loadVoteCutOffTask(ctx context.Context, scheduler *platform.Scheduler, star
 
 	cutOffTime := time.Unix(0, int64(startTimestamp))
 	task := agents.NewFinalizeVoteTask(cutOffTime, factory, contractLockingScript,
-		voteTxID, startTimestamp)
+		voteTxID)
 
 	scheduler.Schedule(ctx, task)
 	return nil
@@ -94,7 +94,7 @@ func loadCancelPendingTransferTask(ctx context.Context, scheduler *platform.Sche
 
 	expirationTime := time.Unix(0, int64(startTimestamp))
 	task := agents.NewCancelPendingTransferTask(expirationTime, factory, contractLockingScript,
-		transferTxID, startTimestamp)
+		transferTxID)
 
 	scheduler.Schedule(ctx, task)
 	return nil

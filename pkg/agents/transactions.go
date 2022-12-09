@@ -27,9 +27,7 @@ type Action struct {
 	Action      actions.Action
 }
 
-func (a *Agent) UpdateTransaction(ctx context.Context, transaction *state.Transaction,
-	now uint64) error {
-
+func (a *Agent) UpdateTransaction(ctx context.Context, transaction *state.Transaction) error {
 	contractHash := a.ContractHash()
 
 	transaction.Lock()
@@ -45,7 +43,7 @@ func (a *Agent) UpdateTransaction(ctx context.Context, transaction *state.Transa
 		transaction.Unlock()
 		defer clearIsProcessing(transaction, contractHash)
 
-		if err := a.processTransaction(ctx, transaction, now); err != nil {
+		if err := a.processTransaction(ctx, transaction); err != nil {
 			return errors.Wrap(err, "process")
 		}
 
@@ -61,7 +59,7 @@ func (a *Agent) UpdateTransaction(ctx context.Context, transaction *state.Transa
 		transaction.Unlock()
 		defer clearIsProcessing(transaction, contractHash)
 
-		if err := a.processUnsafeTransaction(ctx, transaction, now); err != nil {
+		if err := a.processUnsafeTransaction(ctx, transaction); err != nil {
 			return errors.Wrap(err, "process unsafe")
 		}
 	}
@@ -70,7 +68,7 @@ func (a *Agent) UpdateTransaction(ctx context.Context, transaction *state.Transa
 }
 
 func (a *Agent) Process(ctx context.Context, transaction *state.Transaction,
-	actionList []Action, now uint64) error {
+	actionList []Action) error {
 
 	ctx = logger.ContextWithLogFields(ctx, logger.Stringer("trace", uuid.New()))
 
@@ -133,13 +131,13 @@ func (a *Agent) Process(ctx context.Context, transaction *state.Transaction,
 			if feeRate < minFeeRate {
 				return errors.Wrap(a.sendRejection(ctx, transaction, action.OutputIndex,
 					platform.NewRejectError(actions.RejectionsInsufficientTxFeeFunding,
-						fmt.Sprintf("fee rate %.4f, minimum %.4f", feeRate, minFeeRate)), now),
+						fmt.Sprintf("fee rate %.4f, minimum %.4f", feeRate, minFeeRate))),
 					"reject")
 			}
 		}
 
-		if err := a.processAction(ctx, transaction, txid, action.Action, action.OutputIndex,
-			now); err != nil {
+		if err := a.processAction(ctx, transaction, txid, action.Action,
+			action.OutputIndex); err != nil {
 			return errors.Wrapf(err, "process action %d: %s", i, action.Action.Code())
 		}
 	}
@@ -148,7 +146,7 @@ func (a *Agent) Process(ctx context.Context, transaction *state.Transaction,
 }
 
 func (a *Agent) processAction(ctx context.Context, transaction *state.Transaction,
-	txid bitcoin.Hash32, action actions.Action, outputIndex int, now uint64) error {
+	txid bitcoin.Hash32, action actions.Action, outputIndex int) error {
 
 	processed := transaction.ContractProcessed(a.ContractHash(), outputIndex)
 	if len(processed) > 0 {
@@ -172,7 +170,7 @@ func (a *Agent) processAction(ctx context.Context, transaction *state.Transactio
 	if err := action.Validate(); err != nil {
 		if isRequest(action) {
 			return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
-				platform.NewRejectError(actions.RejectionsMsgMalformed, err.Error()), now),
+				platform.NewRejectError(actions.RejectionsMsgMalformed, err.Error())),
 				"reject")
 		} else {
 			logger.ErrorWithFields(ctx, []logger.Field{
@@ -186,81 +184,81 @@ func (a *Agent) processAction(ctx context.Context, transaction *state.Transactio
 
 	switch act := action.(type) {
 	case *actions.ContractOffer:
-		return a.processContractOffer(ctx, transaction, act, outputIndex, now)
+		return a.processContractOffer(ctx, transaction, act, outputIndex)
 
 	case *actions.ContractAmendment:
-		return a.processContractAmendment(ctx, transaction, act, outputIndex, now)
+		return a.processContractAmendment(ctx, transaction, act, outputIndex)
 
 	case *actions.ContractFormation:
-		return a.processContractFormation(ctx, transaction, act, outputIndex, now)
+		return a.processContractFormation(ctx, transaction, act, outputIndex)
 
 	case *actions.ContractAddressChange:
-		return a.processContractAddressChange(ctx, transaction, act, outputIndex, now)
+		return a.processContractAddressChange(ctx, transaction, act, outputIndex)
 
 	case *actions.BodyOfAgreementOffer:
-		return a.processBodyOfAgreementOffer(ctx, transaction, act, outputIndex, now)
+		return a.processBodyOfAgreementOffer(ctx, transaction, act, outputIndex)
 
 	case *actions.BodyOfAgreementAmendment:
-		return a.processBodyOfAgreementAmendment(ctx, transaction, act, outputIndex, now)
+		return a.processBodyOfAgreementAmendment(ctx, transaction, act, outputIndex)
 
 	case *actions.BodyOfAgreementFormation:
-		return a.processBodyOfAgreementFormation(ctx, transaction, act, outputIndex, now)
+		return a.processBodyOfAgreementFormation(ctx, transaction, act, outputIndex)
 
 	case *actions.InstrumentDefinition:
-		return a.processInstrumentDefinition(ctx, transaction, act, outputIndex, now)
+		return a.processInstrumentDefinition(ctx, transaction, act, outputIndex)
 
 	case *actions.InstrumentModification:
-		return a.processInstrumentModification(ctx, transaction, act, outputIndex, now)
+		return a.processInstrumentModification(ctx, transaction, act, outputIndex)
 
 	case *actions.InstrumentCreation:
-		return a.processInstrumentCreation(ctx, transaction, act, outputIndex, now)
+		return a.processInstrumentCreation(ctx, transaction, act, outputIndex)
 
 	case *actions.Transfer:
-		return a.processTransfer(ctx, transaction, act, outputIndex, now)
+		return a.processTransfer(ctx, transaction, act, outputIndex)
 
 	case *actions.Settlement:
-		return a.processSettlement(ctx, transaction, act, outputIndex, now)
+		return a.processSettlement(ctx, transaction, act, outputIndex)
 
 	case *actions.RectificationSettlement:
 		// TODO Create function that watches for "double spent" requests and sends Rectification
 		// Settlements. --ce
-		return a.processRectificationSettlement(ctx, transaction, act, outputIndex, now)
+		return a.processRectificationSettlement(ctx, transaction, act, outputIndex)
 
 	case *actions.Proposal:
-		return a.processProposal(ctx, transaction, act, outputIndex, now)
+		return a.processProposal(ctx, transaction, act, outputIndex)
 
 	case *actions.Vote:
-		return a.processVote(ctx, transaction, act, outputIndex, now)
+		return a.processVote(ctx, transaction, act, outputIndex)
 
 	case *actions.BallotCast:
-		return a.processBallotCast(ctx, transaction, act, outputIndex, now)
+		return a.processBallotCast(ctx, transaction, act, outputIndex)
 
 	case *actions.BallotCounted:
-		return a.processBallotCounted(ctx, transaction, act, outputIndex, now)
+		return a.processBallotCounted(ctx, transaction, act, outputIndex)
 
 	case *actions.Result:
-		return a.processVoteResult(ctx, transaction, act, outputIndex, now)
+		return a.processVoteResult(ctx, transaction, act, outputIndex)
 
 	case *actions.Order:
-		return a.processOrder(ctx, transaction, act, outputIndex, now)
+		return a.processOrder(ctx, transaction, act, outputIndex)
 
 	case *actions.Freeze:
-		return a.processFreeze(ctx, transaction, act, outputIndex, now)
+		return a.processFreeze(ctx, transaction, act, outputIndex)
 
 	case *actions.Thaw:
-		return a.processThaw(ctx, transaction, act, outputIndex, now)
+		return a.processThaw(ctx, transaction, act, outputIndex)
 
 	case *actions.Confiscation:
-		return a.processConfiscation(ctx, transaction, act, outputIndex, now)
+		return a.processConfiscation(ctx, transaction, act, outputIndex)
 
 	case *actions.DeprecatedReconciliation:
-		return a.processReconciliation(ctx, transaction, act, outputIndex, now)
+		return a.processReconciliation(ctx, transaction, act, outputIndex)
 
 	case *actions.Message:
-		return a.processMessage(ctx, transaction, act, outputIndex, now)
+		return a.processMessage(ctx, transaction, act, outputIndex)
 
 	case *actions.Rejection:
-		return a.processRejection(ctx, transaction, act, outputIndex, now)
+		return a.processRejection(ctx, transaction, act, outputIndex)
 
 	default:
 		return fmt.Errorf("Action not supported: %s", action.Code())
@@ -271,7 +269,7 @@ func (a *Agent) processAction(ctx context.Context, transaction *state.Transactio
 
 // ProcessUnsafe performs actions to resolve unsafe or double spent tx.
 func (a *Agent) ProcessUnsafe(ctx context.Context, transaction *state.Transaction,
-	actionList []Action, now uint64) error {
+	actionList []Action) error {
 
 	ctx = logger.ContextWithLogFields(ctx, logger.Stringer("trace", uuid.New()))
 
@@ -297,12 +295,12 @@ func (a *Agent) ProcessUnsafe(ctx context.Context, transaction *state.Transactio
 			}
 
 			return errors.Wrap(a.sendRejection(ctx, transaction, action.OutputIndex,
-				platform.NewRejectError(actions.RejectionsDoubleSpend, ""), now), "reject")
+				platform.NewRejectError(actions.RejectionsDoubleSpend, "")), "reject")
 		}
 
 		// If it isn't a request then we can process it like normal.
-		if err := a.processAction(ctx, transaction, txid, action.Action, action.OutputIndex,
-			now); err != nil {
+		if err := a.processAction(ctx, transaction, txid, action.Action,
+			action.OutputIndex); err != nil {
 			return errors.Wrapf(err, "process action %d: %s", i, action.Action.Code())
 		}
 	}
@@ -316,8 +314,8 @@ func clearIsProcessing(transaction *state.Transaction, contract state.ContractHa
 	transaction.Unlock()
 }
 
-func (a *Agent) processUnsafeTransaction(ctx context.Context, transaction *state.Transaction,
-	now uint64) error {
+func (a *Agent) processUnsafeTransaction(ctx context.Context,
+	transaction *state.Transaction) error {
 
 	txid := transaction.GetTxID()
 
@@ -340,7 +338,7 @@ func (a *Agent) processUnsafeTransaction(ctx context.Context, transaction *state
 		return nil
 	}
 
-	if err := a.ProcessUnsafe(ctx, transaction, actionsList, now); err != nil {
+	if err := a.ProcessUnsafe(ctx, transaction, actionsList); err != nil {
 		var codes []string
 		for _, action := range actionsList {
 			codes = append(codes, action.Action.Code())
@@ -357,9 +355,7 @@ func (a *Agent) processUnsafeTransaction(ctx context.Context, transaction *state
 
 }
 
-func (a *Agent) processTransaction(ctx context.Context, transaction *state.Transaction,
-	now uint64) error {
-
+func (a *Agent) processTransaction(ctx context.Context, transaction *state.Transaction) error {
 	agentLockingScript := a.LockingScript()
 	isTest := a.IsTest()
 
@@ -375,7 +371,7 @@ func (a *Agent) processTransaction(ctx context.Context, transaction *state.Trans
 		return nil
 	}
 
-	if err := a.Process(ctx, transaction, actionsList, now); err != nil {
+	if err := a.Process(ctx, transaction, actionsList); err != nil {
 		var codes []string
 		for _, action := range actionsList {
 			codes = append(codes, action.Action.Code())

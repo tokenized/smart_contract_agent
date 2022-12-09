@@ -161,11 +161,10 @@ func Test_Responder_Response(t *testing.T) {
 		t.Fatalf("Failed to add transaction : %s", err)
 	}
 
-	now := uint64(time.Now().UnixNano())
 	if err := agent.Process(ctx, transaction, []Action{{
 		OutputIndex: transferScriptOutputIndex,
 		Action:      transfer,
-	}}, now); err != nil {
+	}}); err != nil {
 		t.Fatalf("Failed to process transaction : %s", err)
 	}
 
@@ -373,11 +372,10 @@ func Test_Responder_Request(t *testing.T) {
 		t.Fatalf("Request transaction not found")
 	}
 
-	now := uint64(time.Now().UnixNano())
 	if err := agent.Process(ctx, transaction, []Action{{
 		OutputIndex: transferScriptOutputIndex,
 		Action:      transfer,
-	}}, now); err != nil {
+	}}); err != nil {
 		t.Fatalf("Failed to process transaction : %s", err)
 	}
 
@@ -559,11 +557,10 @@ func Test_Responder_AlreadyProcessed(t *testing.T) {
 		t.Fatalf("Failed to add transaction : %s", err)
 	}
 
-	now := uint64(time.Now().UnixNano())
 	if err := agent.Process(ctx, transaction, []Action{{
 		OutputIndex: transferScriptOutputIndex,
 		Action:      transfer,
-	}}, now); err != nil {
+	}}); err != nil {
 		t.Fatalf("Failed to process transaction : %s", err)
 	}
 

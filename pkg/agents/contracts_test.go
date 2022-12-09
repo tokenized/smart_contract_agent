@@ -115,11 +115,10 @@ func Test_Contracts_Offer_Invalid(t *testing.T) {
 		t.Fatalf("Failed to add transaction : %s", err)
 	}
 
-	now := uint64(time.Now().UnixNano())
 	if err := agent.Process(ctx, transaction, []Action{{
 		OutputIndex: contractOfferScriptOutputIndex,
 		Action:      contractOffer,
-	}}, now); err != nil {
+	}}); err != nil {
 		t.Fatalf("Failed to process transaction : %s", err)
 	}
 
@@ -267,11 +266,10 @@ func Test_Contracts_Offer_Valid(t *testing.T) {
 		t.Fatalf("Failed to add transaction : %s", err)
 	}
 
-	now := uint64(time.Now().UnixNano())
 	if err := agent.Process(ctx, transaction, []Action{{
 		OutputIndex: contractOfferScriptOutputIndex,
 		Action:      contractOffer,
-	}}, now); err != nil {
+	}}); err != nil {
 		t.Fatalf("Failed to process transaction : %s", err)
 	}
 
@@ -458,11 +456,10 @@ func Test_Contracts_Offer_AlreadyExists(t *testing.T) {
 		t.Fatalf("Failed to add transaction : %s", err)
 	}
 
-	now := uint64(time.Now().UnixNano())
 	if err := agent.Process(ctx, transaction, []Action{{
 		OutputIndex: contractOfferScriptOutputIndex,
 		Action:      contractOffer,
-	}}, now); err != nil {
+	}}); err != nil {
 		t.Fatalf("Failed to process transaction : %s", err)
 	}
 
@@ -635,11 +632,10 @@ func Test_Contracts_Amendment_Valid(t *testing.T) {
 		t.Fatalf("Failed to add transaction : %s", err)
 	}
 
-	now := uint64(time.Now().UnixNano())
 	if err := agent.Process(ctx, transaction, []Action{{
 		OutputIndex: contractAmendmentScriptOutputIndex,
 		Action:      contractAmendment,
-	}}, now); err != nil {
+	}}); err != nil {
 		t.Fatalf("Failed to process transaction : %s", err)
 	}
 
@@ -811,11 +807,10 @@ func Test_Contracts_Amendment_AdminChange(t *testing.T) {
 		t.Fatalf("Failed to add transaction : %s", err)
 	}
 
-	now := uint64(time.Now().UnixNano())
 	if err := agent.Process(ctx, transaction, []Action{{
 		OutputIndex: contractAmendmentScriptOutputIndex,
 		Action:      contractAmendment,
-	}}, now); err != nil {
+	}}); err != nil {
 		t.Fatalf("Failed to process transaction : %s", err)
 	}
 
@@ -1019,11 +1014,10 @@ func Test_Contracts_Amendment_Proposal(t *testing.T) {
 		t.Fatalf("Failed to add transaction : %s", err)
 	}
 
-	now := uint64(time.Now().UnixNano())
 	if err := agent.Process(ctx, transaction, []Action{{
 		OutputIndex: contractAmendmentScriptOutputIndex,
 		Action:      contractAmendment,
-	}}, now); err != nil {
+	}}); err != nil {
 		t.Fatalf("Failed to process transaction : %s", err)
 	}
 

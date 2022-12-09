@@ -128,11 +128,10 @@ func Test_Process(t *testing.T) {
 		t.Fatalf("Failed to add contract formation tx : %s", err)
 	}
 
-	now := uint64(time.Now().UnixNano())
 	if err := agent.Process(ctx, contractFormationTransaction, []Action{{
 		OutputIndex: contractFormationScriptOutputIndex,
 		Action:      contractFormation,
-	}}, now); err != nil {
+	}}); err != nil {
 		t.Fatalf("Failed to process contract formation : %s", err)
 	}
 	caches.Caches.Transactions.Release(ctx, contractFormationTxID)
@@ -247,12 +246,10 @@ func Test_Process(t *testing.T) {
 		t.Fatalf("Failed to add instrument creation tx : %s", err)
 	}
 
-	now = uint64(time.Now().UnixNano())
 	if err := agent.Process(ctx, instrumentCreationTx, []Action{{
 		OutputIndex: instrumentCreationScriptOutputIndex,
 		Action:      instrumentCreation,
-	}},
-		now); err != nil {
+	}}); err != nil {
 		t.Fatalf("Failed to process instrument creation : %s", err)
 	}
 	caches.Caches.Transactions.Release(ctx, instrumentCreationTxID)
@@ -487,11 +484,10 @@ func Test_Process(t *testing.T) {
 		}
 
 		t.Logf("Sending transfer request : %s", settlementTxID)
-		now := uint64(time.Now().UnixNano())
 		if err := agent.Process(ctx, settlementTx, []Action{{
 			OutputIndex: settlementScriptOutputIndex,
 			Action:      settlement,
-		}}, now); err != nil {
+		}}); err != nil {
 			t.Fatalf("Failed to process settlement : %s", err)
 		}
 		t.Logf("Processed transfer request : %s", settlementTxID)
@@ -666,11 +662,10 @@ func Test_Process(t *testing.T) {
 			t.Fatalf("Failed to add settlement tx : %s", err)
 		}
 
-		now := uint64(time.Now().UnixNano())
 		if err := agent.Process(ctx, settlementTx, []Action{{
 			OutputIndex: settlementScriptOutputIndex,
 			Action:      settlement,
-		}}, now); err != nil {
+		}}); err != nil {
 			t.Fatalf("Failed to process settlement : %s", err)
 		}
 		caches.Caches.Transactions.Release(ctx, settlementTxID)

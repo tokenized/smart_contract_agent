@@ -136,11 +136,10 @@ func Test_Instruments_Definition(t *testing.T) {
 			t.Fatalf("Failed to add transaction : %s", err)
 		}
 
-		now := uint64(time.Now().UnixNano())
 		if err := agent.Process(ctx, transaction, []Action{{
 			OutputIndex: definitionScriptOutputIndex,
 			Action:      definition,
-		}}, now); err != nil {
+		}}); err != nil {
 			t.Fatalf("Failed to process transaction : %s", err)
 		}
 
@@ -309,11 +308,10 @@ func Test_Instruments_Amendment_Basic(t *testing.T) {
 		t.Fatalf("Failed to add transaction : %s", err)
 	}
 
-	now := uint64(time.Now().UnixNano())
 	if err := agent.Process(ctx, transaction, []Action{{
 		OutputIndex: modificationScriptOutputIndex,
 		Action:      modification,
-	}}, now); err != nil {
+	}}); err != nil {
 		t.Fatalf("Failed to process transaction : %s", err)
 	}
 
@@ -492,11 +490,10 @@ func Test_Instruments_Amendment_Payload(t *testing.T) {
 		t.Fatalf("Failed to add transaction : %s", err)
 	}
 
-	now := uint64(time.Now().UnixNano())
 	if err := agent.Process(ctx, transaction, []Action{{
 		OutputIndex: modificationScriptOutputIndex,
 		Action:      modification,
-	}}, now); err != nil {
+	}}); err != nil {
 		t.Fatalf("Failed to process transaction : %s", err)
 	}
 
@@ -686,11 +683,10 @@ func Test_Instruments_Amendment_Proposal(t *testing.T) {
 		t.Fatalf("Failed to add transaction : %s", err)
 	}
 
-	now := uint64(time.Now().UnixNano())
 	if err := agent.Process(ctx, transaction, []Action{{
 		OutputIndex: modificationScriptOutputIndex,
 		Action:      modification,
-	}}, now); err != nil {
+	}}); err != nil {
 		t.Fatalf("Failed to process transaction : %s", err)
 	}
 

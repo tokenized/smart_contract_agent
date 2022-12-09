@@ -6,7 +6,6 @@ import (
 	"os/signal"
 	"sync"
 	"syscall"
-	"time"
 
 	"github.com/tokenized/cacher"
 	"github.com/tokenized/channels/wallet"
@@ -238,7 +237,7 @@ func loadTx(ctx context.Context, agent *agents.Agent, transactions *state.Transa
 		return errors.Wrapf(err, "get inputs: %s", txid)
 	}
 
-	if err := agent.UpdateTransaction(ctx, transaction, uint64(time.Now().UnixNano())); err != nil {
+	if err := agent.UpdateTransaction(ctx, transaction); err != nil {
 		return errors.Wrapf(err, "update transaction")
 	}
 

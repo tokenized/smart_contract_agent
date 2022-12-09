@@ -118,11 +118,10 @@ func Test_Recovery_AcceptContractOffer(t *testing.T) {
 		t.Fatalf("Failed to add transaction : %s", err)
 	}
 
-	now := uint64(time.Now().UnixNano())
 	if err := agent.Process(ctx, transaction, []Action{{
 		OutputIndex: contractOfferScriptOutputIndex,
 		Action:      contractOffer,
-	}}, now); err != nil {
+	}}); err != nil {
 		t.Fatalf("Failed to process transaction : %s", err)
 	}
 
@@ -149,7 +148,7 @@ func Test_Recovery_AcceptContractOffer(t *testing.T) {
 	caches.Caches.RecoveryTransactions.Release(ctx, contractLockingScript)
 
 	agent.config.RecoveryMode = false
-	if err := agent.ProcessRecoveryRequests(ctx, now); err != nil {
+	if err := agent.ProcessRecoveryRequests(ctx); err != nil {
 		t.Fatalf("Failed to process recovery requests : %s", err)
 	}
 
@@ -305,11 +304,10 @@ func Test_Recovery_ContractOfferAlreadyAccepted(t *testing.T) {
 		t.Fatalf("Failed to add transaction : %s", err)
 	}
 
-	now := uint64(time.Now().UnixNano())
 	if err := agent.Process(ctx, transaction, []Action{{
 		OutputIndex: contractOfferScriptOutputIndex,
 		Action:      contractOffer,
-	}}, now); err != nil {
+	}}); err != nil {
 		t.Fatalf("Failed to process transaction : %s", err)
 	}
 
@@ -396,11 +394,10 @@ func Test_Recovery_ContractOfferAlreadyAccepted(t *testing.T) {
 		t.Fatalf("Failed to add transaction : %s", err)
 	}
 
-	now = uint64(time.Now().UnixNano())
 	if err := agent.Process(ctx, transaction, []Action{{
 		OutputIndex: contractFormationScriptOutputIndex,
 		Action:      contractFormation,
-	}}, now); err != nil {
+	}}); err != nil {
 		t.Fatalf("Failed to process transaction : %s", err)
 	}
 
@@ -422,7 +419,7 @@ func Test_Recovery_ContractOfferAlreadyAccepted(t *testing.T) {
 	caches.Caches.RecoveryTransactions.Release(ctx, contractLockingScript)
 
 	agent.config.RecoveryMode = false
-	if err := agent.ProcessRecoveryRequests(ctx, now); err != nil {
+	if err := agent.ProcessRecoveryRequests(ctx); err != nil {
 		t.Fatalf("Failed to process recovery requests : %s", err)
 	}
 

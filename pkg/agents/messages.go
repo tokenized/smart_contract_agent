@@ -13,7 +13,7 @@ import (
 )
 
 func (a *Agent) processMessage(ctx context.Context, transaction *state.Transaction,
-	message *actions.Message, outputIndex int, now uint64) error {
+	message *actions.Message, outputIndex int) error {
 
 	// Verify appropriate output belongs to this contract.
 	if len(message.ReceiverIndexes) > 1 {
@@ -82,13 +82,13 @@ func (a *Agent) processMessage(ctx context.Context, transaction *state.Transacti
 		}, "Agent is not the message receiver")
 
 		// This might be an important message related to an ongoing multi-contract transfer.
-		return a.processNonRelevantMessage(ctx, transaction, message, now)
+		return a.processNonRelevantMessage(ctx, transaction, message)
 	}
 
 	if len(message.SenderIndexes) > 1 {
 		return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
-			platform.NewRejectError(actions.RejectionsMsgMalformed, "too many sender indexes"),
-			now), "reject")
+			platform.NewRejectError(actions.RejectionsMsgMalformed, "too many sender indexes")),
+			"reject")
 	}
 
 	payload, err := messages.Deserialize(message.MessageCode, message.MessagePayload)
@@ -104,13 +104,13 @@ func (a *Agent) processMessage(ctx context.Context, transaction *state.Transacti
 	switch p := payload.(type) {
 	case *messages.SettlementRequest:
 		if err := a.processSettlementRequest(ctx, transaction, outputIndex, p, senderLockingScript,
-			senderUnlockingScipt, now); err != nil {
+			senderUnlockingScipt); err != nil {
 			return errors.Wrapf(err, "settlement request")
 		}
 
 	case *messages.SignatureRequest:
 		if err := a.processSignatureRequest(ctx, transaction, outputIndex, p, senderLockingScript,
-			senderUnlockingScipt, now); err != nil {
+			senderUnlockingScipt); err != nil {
 			return errors.Wrapf(err, "settlement request")
 		}
 	}
@@ -119,7 +119,7 @@ func (a *Agent) processMessage(ctx context.Context, transaction *state.Transacti
 }
 
 func (a *Agent) processNonRelevantMessage(ctx context.Context, transaction *state.Transaction,
-	message *actions.Message, now uint64) error {
+	message *actions.Message) error {
 
 	transaction.Lock()
 	firstInput := transaction.Input(0)

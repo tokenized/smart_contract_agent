@@ -160,7 +160,7 @@ func Test_Freeze_Balances_Valid(t *testing.T) {
 	if err := agent.Process(ctx, transaction, []Action{{
 		OutputIndex: freezeOrderScriptOutputIndex,
 		Action:      freezeOrder,
-	}}, now); err != nil {
+	}}); err != nil {
 		t.Fatalf("Failed to process transaction : %s", err)
 	}
 
@@ -348,7 +348,7 @@ func Test_Freeze_Balances_Valid(t *testing.T) {
 	if err := agent.Process(ctx, transaction, []Action{{
 		OutputIndex: thawOrderScriptOutputIndex,
 		Action:      thawOrder,
-	}}, now); err != nil {
+	}}); err != nil {
 		t.Fatalf("Failed to process transaction : %s", err)
 	}
 
@@ -528,7 +528,7 @@ func Test_Freeze_Contract_Valid(t *testing.T) {
 	if err := agent.Process(ctx, transaction, []Action{{
 		OutputIndex: freezeOrderScriptOutputIndex,
 		Action:      freezeOrder,
-	}}, now); err != nil {
+	}}); err != nil {
 		t.Fatalf("Failed to process transaction : %s", err)
 	}
 
@@ -677,7 +677,7 @@ func Test_Freeze_Contract_Valid(t *testing.T) {
 	if err := agent.Process(ctx, transaction, []Action{{
 		OutputIndex: thawOrderScriptOutputIndex,
 		Action:      thawOrder,
-	}}, now); err != nil {
+	}}); err != nil {
 		t.Fatalf("Failed to process transaction : %s", err)
 	}
 
@@ -847,7 +847,7 @@ func Test_Freeze_Instrument_Valid(t *testing.T) {
 	if err := agent.Process(ctx, transaction, []Action{{
 		OutputIndex: freezeOrderScriptOutputIndex,
 		Action:      freezeOrder,
-	}}, now); err != nil {
+	}}); err != nil {
 		t.Fatalf("Failed to process transaction : %s", err)
 	}
 
@@ -996,7 +996,7 @@ func Test_Freeze_Instrument_Valid(t *testing.T) {
 	if err := agent.Process(ctx, transaction, []Action{{
 		OutputIndex: thawOrderScriptOutputIndex,
 		Action:      thawOrder,
-	}}, now); err != nil {
+	}}); err != nil {
 		t.Fatalf("Failed to process transaction : %s", err)
 	}
 
