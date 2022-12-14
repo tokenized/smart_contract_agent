@@ -3,12 +3,14 @@ package agents
 import (
 	"context"
 
+	"github.com/tokenized/logger"
 	"github.com/tokenized/pkg/bitcoin"
 	"github.com/tokenized/pkg/expanded_tx"
 	"github.com/tokenized/pkg/txbuilder"
 	"github.com/tokenized/pkg/wire"
 	"github.com/tokenized/smart_contract_agent/internal/state"
 	"github.com/tokenized/specification/dist/golang/actions"
+	"github.com/tokenized/specification/dist/golang/protocol"
 
 	"github.com/pkg/errors"
 )
@@ -75,12 +77,8 @@ func findBitcoinOutput(tx *wire.MsgTx, lockingScript bitcoin.Script, value uint6
 	return false
 }
 
-func (a *Agent) addResponseTxID(ctx context.Context, requestTxID bitcoin.Hash32, outputIndex int,
-	responseTxID bitcoin.Hash32) (bool, error) {
-
-	if _, err := a.removeRecoveryRequest(ctx, requestTxID, outputIndex); err != nil {
-		return false, errors.Wrap(err, "recovery request")
-	}
+func (a *Agent) addResponseTxID(ctx context.Context,
+	requestTxID, responseTxID bitcoin.Hash32) (bool, error) {
 
 	requestTransaction, err := a.caches.Transactions.Get(ctx, requestTxID)
 	if err != nil {
@@ -90,11 +88,47 @@ func (a *Agent) addResponseTxID(ctx context.Context, requestTxID bitcoin.Hash32,
 	if requestTransaction == nil {
 		return false, errors.New("Request transaction not found")
 	}
+	defer a.caches.Transactions.Release(ctx, requestTxID)
 
 	requestTransaction.Lock()
-	result := requestTransaction.AddResponseTxID(a.ContractHash(), outputIndex, responseTxID)
+
+	// Find request action
+	requestOutputIndex := -1
+	isTest := a.IsTest()
+	outputCount := requestTransaction.OutputCount()
+	for i := 0; i < outputCount; i++ {
+		output := requestTransaction.Output(i)
+		action, err := protocol.Deserialize(output.LockingScript, isTest)
+		if err != nil {
+			continue
+		}
+
+		if isRequest(action) {
+			requestOutputIndex = i
+			break
+		}
+	}
+
+	if requestOutputIndex == -1 {
+		requestTransaction.Unlock()
+		return false, errors.New("Request action not found")
+	}
+
+	result := requestTransaction.AddResponseTxID(a.ContractHash(), requestOutputIndex,
+		responseTxID)
 	requestTransaction.Unlock()
-	a.caches.Transactions.Release(ctx, requestTxID)
+
+	if result {
+		logger.InfoWithFields(ctx, []logger.Field{
+			logger.Stringer("request_txid", requestTxID),
+			logger.Int("request_output_index", requestOutputIndex),
+			logger.Stringer("response_txid", responseTxID),
+		}, "Added response txid")
+	}
+
+	if _, err := a.removeRecoveryRequest(ctx, requestTxID, requestOutputIndex); err != nil {
+		return false, errors.Wrap(err, "recovery request")
+	}
 
 	return result, nil
 }

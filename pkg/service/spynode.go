@@ -14,8 +14,6 @@ import (
 func (s *Service) HandleTx(ctx context.Context, spyNodeTx *spynode.Tx) {
 	txid := *spyNodeTx.Tx.TxHash()
 
-	s.UpdateNextSpyNodeMessageID(spyNodeTx.ID)
-
 	transaction, err := s.addTx(ctx, txid, spyNodeTx)
 	if err != nil {
 		logger.Error(ctx, "Failed to add tx : %s", err)
@@ -53,6 +51,8 @@ func (s *Service) HandleTx(ctx context.Context, spyNodeTx *spynode.Tx) {
 		logger.Error(ctx, "Failed to update tx : %s", err)
 		return
 	}
+
+	s.UpdateNextSpyNodeMessageID(spyNodeTx.ID)
 }
 
 func (s *Service) HandleTxUpdate(ctx context.Context, txUpdate *spynode.TxUpdate) {
@@ -109,6 +109,8 @@ func (s *Service) HandleTxUpdate(ctx context.Context, txUpdate *spynode.TxUpdate
 		}, "Failed to update tx : %s", err)
 		return
 	}
+
+	s.UpdateNextSpyNodeMessageID(txUpdate.ID)
 }
 
 func (s *Service) HandleHeaders(ctx context.Context, headers *spynode.Headers) {

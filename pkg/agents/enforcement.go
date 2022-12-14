@@ -7,6 +7,7 @@ import (
 
 	"github.com/tokenized/logger"
 	"github.com/tokenized/pkg/bitcoin"
+	"github.com/tokenized/pkg/expanded_tx"
 	"github.com/tokenized/pkg/txbuilder"
 	"github.com/tokenized/pkg/wire"
 	"github.com/tokenized/smart_contract_agent/internal/platform"
@@ -18,7 +19,7 @@ import (
 )
 
 func (a *Agent) processOrder(ctx context.Context, transaction *state.Transaction,
-	order *actions.Order, outputIndex int) error {
+	order *actions.Order, outputIndex int) (*expanded_tx.ExpandedTx, error) {
 
 	agentLockingScript := a.LockingScript()
 
@@ -30,14 +31,14 @@ func (a *Agent) processOrder(ctx context.Context, transaction *state.Transaction
 		logger.WarnWithFields(ctx, []logger.Field{
 			logger.Stringer("contract_locking_script", contractOutput.LockingScript),
 		}, "Contract output locking script is wrong")
-		return nil // Not for this agent's contract
+		return nil, nil // Not for this agent's contract
 	}
 
 	authorizingUnlockingScript := transaction.Input(0).UnlockingScript
 	inputOutput, err := transaction.InputOutput(0)
 	if err != nil {
 		transaction.Unlock()
-		return errors.Wrap(err, "admin input output")
+		return nil, errors.Wrap(err, "admin input output")
 	}
 	authorizingLockingScript := inputOutput.LockingScript
 
@@ -51,42 +52,35 @@ func (a *Agent) processOrder(ctx context.Context, transaction *state.Transaction
 	authorizingAddress, err := bitcoin.RawAddressFromLockingScript(authorizingLockingScript)
 	if err != nil {
 		contract.Unlock()
-		return errors.Wrap(err, "authorizing address")
+		return nil, errors.Wrap(err, "authorizing address")
 	}
 
 	if !bytes.Equal(contract.Formation.AdminAddress, authorizingAddress.Bytes()) {
 		contract.Unlock()
 		// TODO Check if the address belongs to an authority oracle. --ce
-		return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
-			platform.NewRejectError(actions.RejectionsUnauthorizedAddress, "")), "reject")
+		return nil, platform.NewRejectError(actions.RejectionsUnauthorizedAddress, "")
 	}
 
 	if isSigHashAll, err := authorizingUnlockingScript.IsSigHashAll(); err != nil {
-		return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
-			platform.NewRejectError(actions.RejectionsSignatureNotSigHashAll, err.Error())),
-			"reject")
+		return nil, platform.NewRejectError(actions.RejectionsSignatureNotSigHashAll, err.Error())
 	} else if !isSigHashAll {
-		return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
-			platform.NewRejectError(actions.RejectionsSignatureNotSigHashAll, "")), "reject")
+		return nil, platform.NewRejectError(actions.RejectionsSignatureNotSigHashAll, "")
 	}
 
 	if contract.Formation == nil {
 		contract.Unlock()
-		return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
-			platform.NewRejectError(actions.RejectionsContractDoesNotExist, "")), "reject")
+		return nil, platform.NewRejectError(actions.RejectionsContractDoesNotExist, "")
 	}
 
 	if contract.IsExpired(now) {
 		contract.Unlock()
-		return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
-			platform.NewRejectError(actions.RejectionsContractExpired, "")), "reject")
+		return nil, platform.NewRejectError(actions.RejectionsContractExpired, "")
 	}
 
 	if contract.MovedTxID != nil {
 		movedTxID := contract.MovedTxID.String()
 		contract.Unlock()
-		return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
-			platform.NewRejectError(actions.RejectionsContractMoved, movedTxID)), "reject")
+		return nil, platform.NewRejectError(actions.RejectionsContractMoved, movedTxID)
 	}
 
 	contract.Unlock()
@@ -94,16 +88,12 @@ func (a *Agent) processOrder(ctx context.Context, transaction *state.Transaction
 	// Validate enforcement authority public key and signature
 	if len(order.OrderSignature) > 0 || order.SignatureAlgorithm != 0 {
 		if order.SignatureAlgorithm != 1 {
-			return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
-				platform.NewRejectError(actions.RejectionsMsgMalformed, "SignatureAlgorithm")),
-				"reject")
+			return nil, platform.NewRejectError(actions.RejectionsMsgMalformed, "SignatureAlgorithm")
 		}
 
 		authorityPubKey, err := bitcoin.PublicKeyFromBytes(order.AuthorityPublicKey)
 		if err != nil {
-			return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
-				platform.NewRejectError(actions.RejectionsMsgMalformed, "AuthorityPublicKey")),
-				"reject")
+			return nil, platform.NewRejectError(actions.RejectionsMsgMalformed, "AuthorityPublicKey")
 		}
 
 		// We want any public key allowed as it could be some jurisdiction that is requiring an
@@ -112,25 +102,21 @@ func (a *Agent) processOrder(ctx context.Context, transaction *state.Transaction
 
 		authoritySig, err := bitcoin.SignatureFromBytes(order.OrderSignature)
 		if err != nil {
-			return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
-				platform.NewRejectError(actions.RejectionsMsgMalformed, "OrderSignature")),
-				"reject")
+			return nil, platform.NewRejectError(actions.RejectionsMsgMalformed, "OrderSignature")
 		}
 
 		contractAddress, err := bitcoin.RawAddressFromLockingScript(agentLockingScript)
 		if err != nil {
-			return errors.Wrap(err, "contract address")
+			return nil, errors.Wrap(err, "contract address")
 		}
 
 		sigHash, err := protocol.OrderAuthoritySigHash(ctx, contractAddress, order)
 		if err != nil {
-			return errors.Wrap(err, "Failed to calculate authority sig hash")
+			return nil, errors.Wrap(err, "Failed to calculate authority sig hash")
 		}
 
 		if !authoritySig.Verify(*sigHash, authorityPubKey) {
-			return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
-				platform.NewRejectError(actions.RejectionsInvalidSignature, "OrderSignature")),
-				"reject")
+			return nil, platform.NewRejectError(actions.RejectionsInvalidSignature, "OrderSignature")
 		}
 	}
 
@@ -145,16 +131,14 @@ func (a *Agent) processOrder(ctx context.Context, transaction *state.Transaction
 	case actions.ComplianceActionDeprecatedReconciliation:
 		return a.processReconciliationOrder(ctx, transaction, order, outputIndex)
 	default:
-		return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
-			platform.NewRejectError(actions.RejectionsMsgMalformed, "ComplianceAction")),
-			"reject")
+		return nil, platform.NewRejectError(actions.RejectionsMsgMalformed, "ComplianceAction")
 	}
 
-	return nil
+	return nil, nil
 }
 
 func (a *Agent) processFreezeOrder(ctx context.Context, transaction *state.Transaction,
-	order *actions.Order, outputIndex int) error {
+	order *actions.Order, outputIndex int) (*expanded_tx.ExpandedTx, error) {
 
 	logger.Info(ctx, "Processing freeze order")
 
@@ -167,7 +151,7 @@ func (a *Agent) processFreezeOrder(ctx context.Context, transaction *state.Trans
 
 	contractAddress, err := bitcoin.RawAddressFromLockingScript(agentLockingScript)
 	if err != nil {
-		return errors.Wrap(err, "contract address")
+		return nil, errors.Wrap(err, "contract address")
 	}
 
 	now := a.Now()
@@ -183,14 +167,12 @@ func (a *Agent) processFreezeOrder(ctx context.Context, transaction *state.Trans
 
 	if err := freezeTx.AddInput(wire.OutPoint{Hash: txid, Index: 0}, agentLockingScript,
 		contractOutput.Value); err != nil {
-		return errors.Wrap(err, "add input")
+		return nil, errors.Wrap(err, "add input")
 	}
 
 	isFull := false
 	if len(order.TargetAddresses) == 0 {
-		return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
-			platform.NewRejectError(actions.RejectionsMsgMalformed, "TargetAddresses: empty")),
-			"reject")
+		return nil, platform.NewRejectError(actions.RejectionsMsgMalformed, "TargetAddresses: empty")
 	} else if len(order.TargetAddresses) == 1 && bytes.Equal(order.TargetAddresses[0].Address,
 		contractAddress.Bytes()) {
 
@@ -198,7 +180,7 @@ func (a *Agent) processFreezeOrder(ctx context.Context, transaction *state.Trans
 		isFull = true
 
 		if err := freezeTx.AddOutput(agentLockingScript, 1, false, true); err != nil {
-			return errors.Wrap(err, "add contract output")
+			return nil, errors.Wrap(err, "add contract output")
 		}
 
 		freeze.Quantities = append(freeze.Quantities, &actions.QuantityIndexField{
@@ -214,9 +196,8 @@ func (a *Agent) processFreezeOrder(ctx context.Context, transaction *state.Trans
 	var balances state.Balances
 	if len(order.InstrumentCode) == 0 {
 		if !isFull {
-			return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
-				platform.NewRejectError(actions.RejectionsMsgMalformed,
-					"InstrumentCode: empty in non-full freeze")), "reject")
+			return nil, platform.NewRejectError(actions.RejectionsMsgMalformed,
+				"InstrumentCode: empty in non-full freeze")
 		}
 
 		contract = a.Contract()
@@ -224,8 +205,7 @@ func (a *Agent) processFreezeOrder(ctx context.Context, transaction *state.Trans
 		defer contract.Unlock()
 
 		if contract.IsFrozen(now) {
-			return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
-				platform.NewRejectError(actions.RejectionsContractFrozen, "")), "reject")
+			return nil, platform.NewRejectError(actions.RejectionsContractFrozen, "")
 		}
 
 		logger.InfoWithFields(ctx, []logger.Field{
@@ -238,12 +218,11 @@ func (a *Agent) processFreezeOrder(ctx context.Context, transaction *state.Trans
 
 		instrument, err = a.caches.Instruments.Get(ctx, agentLockingScript, instrumentCode)
 		if err != nil {
-			return errors.Wrap(err, "get instrument")
+			return nil, errors.Wrap(err, "get instrument")
 		}
 
 		if instrument == nil {
-			return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
-				platform.NewRejectError(actions.RejectionsInstrumentNotFound, "")), "reject")
+			return nil, platform.NewRejectError(actions.RejectionsInstrumentNotFound, "")
 		}
 		defer a.caches.Instruments.Release(ctx, agentLockingScript, instrumentCode)
 
@@ -251,20 +230,16 @@ func (a *Agent) processFreezeOrder(ctx context.Context, transaction *state.Trans
 		defer instrument.Unlock()
 
 		if instrument.Creation == nil {
-			return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
-				platform.NewRejectError(actions.RejectionsInstrumentNotFound, "")), "reject")
+			return nil, platform.NewRejectError(actions.RejectionsInstrumentNotFound, "")
 		}
 
 		if !instrument.Creation.EnforcementOrdersPermitted {
-			return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
-				platform.NewRejectError(actions.RejectionsInstrumentNotPermitted, "")),
-				"reject")
+			return nil, platform.NewRejectError(actions.RejectionsInstrumentNotPermitted, "")
 		}
 
 		if isFull {
 			if instrument.IsFrozen(now) {
-				return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
-					platform.NewRejectError(actions.RejectionsInstrumentFrozen, "")), "reject")
+				return nil, platform.NewRejectError(actions.RejectionsInstrumentFrozen, "")
 			}
 
 			logger.InfoWithFields(ctx, []logger.Field{
@@ -277,31 +252,24 @@ func (a *Agent) processFreezeOrder(ctx context.Context, transaction *state.Trans
 			for i, target := range order.TargetAddresses {
 				targetAddress, err := bitcoin.DecodeRawAddress(target.Address)
 				if err != nil {
-					return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
-						platform.NewRejectError(actions.RejectionsMsgMalformed,
-							fmt.Sprintf("TargetAddresses[%d]: Address: %s", i, err))),
-						"reject")
+					return nil, platform.NewRejectError(actions.RejectionsMsgMalformed,
+						fmt.Sprintf("TargetAddresses[%d]: Address: %s", i, err))
 				}
 
 				if target.Quantity == 0 {
-					return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
-						platform.NewRejectError(actions.RejectionsMsgMalformed,
-							fmt.Sprintf("TargetAddresses[%d]: Quantity: zero", i))), "reject")
+					return nil, platform.NewRejectError(actions.RejectionsMsgMalformed,
+						fmt.Sprintf("TargetAddresses[%d]: Quantity: zero", i))
 				}
 
 				hash, err := targetAddress.Hash()
 				if err != nil {
-					return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
-						platform.NewRejectError(actions.RejectionsMsgMalformed,
-							fmt.Sprintf("TargetAddresses[%d]: Address: Hash: %s", i, err))),
-						"reject")
+					return nil, platform.NewRejectError(actions.RejectionsMsgMalformed,
+						fmt.Sprintf("TargetAddresses[%d]: Address: Hash: %s", i, err))
 				}
 
 				if _, exists := used[*hash]; exists {
-					return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
-						platform.NewRejectError(actions.RejectionsMsgMalformed,
-							fmt.Sprintf("TargetAddresses[%d]: Address: duplicated", i))),
-						"reject")
+					return nil, platform.NewRejectError(actions.RejectionsMsgMalformed,
+						fmt.Sprintf("TargetAddresses[%d]: Address: duplicated", i))
 				}
 
 				used[*hash] = true
@@ -309,10 +277,9 @@ func (a *Agent) processFreezeOrder(ctx context.Context, transaction *state.Trans
 				// Notify target address
 				lockingScript, err := targetAddress.LockingScript()
 				if err != nil {
-					return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
-						platform.NewRejectError(actions.RejectionsMsgMalformed,
-							fmt.Sprintf("TargetAddresses[%d]: Address: Locking Script: %s", i,
-								err))), "reject")
+					return nil, platform.NewRejectError(actions.RejectionsMsgMalformed,
+						fmt.Sprintf("TargetAddresses[%d]: Address: Locking Script: %s", i,
+							err))
 				}
 				lockingScripts = append(lockingScripts, lockingScript)
 				quantities = append(quantities, target.Quantity)
@@ -327,7 +294,7 @@ func (a *Agent) processFreezeOrder(ctx context.Context, transaction *state.Trans
 			balances, err = a.caches.Balances.GetMulti(ctx, agentLockingScript, instrumentCode,
 				lockingScripts)
 			if err != nil {
-				return errors.Wrap(err, "get balances")
+				return nil, errors.Wrap(err, "get balances")
 			}
 			defer a.caches.Balances.ReleaseMulti(ctx, agentLockingScript, instrumentCode, balances)
 		}
@@ -340,7 +307,7 @@ func (a *Agent) processFreezeOrder(ctx context.Context, transaction *state.Trans
 		case uint64:
 			now = v
 		case error:
-			return errors.Wrap(v, "balance locker")
+			return nil, errors.Wrap(v, "balance locker")
 		}
 		defer balances.Unlock()
 
@@ -349,9 +316,8 @@ func (a *Agent) processFreezeOrder(ctx context.Context, transaction *state.Trans
 		for i, balance := range balances {
 			if balance == nil {
 				balances.RevertPending()
-				return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
-					platform.NewRejectError(actions.RejectionsMsgMalformed,
-						fmt.Sprintf("Balance[%d]: not found", i))), "reject")
+				return nil, platform.NewRejectError(actions.RejectionsMsgMalformed,
+					fmt.Sprintf("Balance[%d]: not found", i))
 			}
 
 			quantity := balance.AddFreeze(txid, quantities[i], order.FreezePeriod)
@@ -363,27 +329,26 @@ func (a *Agent) processFreezeOrder(ctx context.Context, transaction *state.Trans
 
 			if err := freezeTx.AddOutput(balance.LockingScript, 1, false, true); err != nil {
 				balances.RevertPending()
-				return errors.Wrapf(err, "add target output: %d", i)
+				return nil, errors.Wrapf(err, "add target output: %d", i)
 			}
 		}
 	}
 
 	if err := freeze.Validate(); err != nil {
 		balances.RevertPending()
-		return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
-			platform.NewRejectError(actions.RejectionsMsgMalformed, err.Error())), "reject")
+		return nil, platform.NewRejectError(actions.RejectionsMsgMalformed, err.Error())
 	}
 
 	freezeScript, err := protocol.Serialize(freeze, a.IsTest())
 	if err != nil {
 		balances.RevertPending()
-		return errors.Wrap(err, "serialize freeze")
+		return nil, errors.Wrap(err, "serialize freeze")
 	}
 
 	freezeScriptOutputIndex := len(freezeTx.Outputs)
 	if err := freezeTx.AddOutput(freezeScript, 0, false, false); err != nil {
 		balances.RevertPending()
-		return errors.Wrap(err, "add freeze output")
+		return nil, errors.Wrap(err, "add freeze output")
 	}
 
 	// Add the contract fee.
@@ -397,11 +362,11 @@ func (a *Agent) processFreezeOrder(ctx context.Context, transaction *state.Trans
 		if err := freezeTx.AddOutput(a.FeeLockingScript(), contractFee, true,
 			false); err != nil {
 			balances.RevertPending()
-			return errors.Wrap(err, "add contract fee")
+			return nil, errors.Wrap(err, "add contract fee")
 		}
 	} else if err := freezeTx.SetChangeLockingScript(a.FeeLockingScript(), ""); err != nil {
 		balances.RevertPending()
-		return errors.Wrap(err, "set change")
+		return nil, errors.Wrap(err, "set change")
 	}
 
 	// Sign freeze tx.
@@ -409,13 +374,11 @@ func (a *Agent) processFreezeOrder(ctx context.Context, transaction *state.Trans
 		if errors.Cause(err) == txbuilder.ErrInsufficientValue {
 			logger.Warn(ctx, "Insufficient tx funding : %s", err)
 			balances.RevertPending()
-			return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
-				platform.NewRejectError(actions.RejectionsInsufficientTxFeeFunding, err.Error())),
-				"reject")
+			return nil, platform.NewRejectError(actions.RejectionsInsufficientTxFeeFunding, err.Error())
 		}
 
 		balances.RevertPending()
-		return errors.Wrap(err, "sign")
+		return nil, errors.Wrap(err, "sign")
 	}
 
 	freezeTxID := *freezeTx.MsgTx.TxHash()
@@ -423,7 +386,7 @@ func (a *Agent) processFreezeOrder(ctx context.Context, transaction *state.Trans
 	freezeTransaction, err := a.caches.Transactions.AddRaw(ctx, freezeTx.MsgTx, nil)
 	if err != nil {
 		balances.RevertPending()
-		return errors.Wrap(err, "add response tx")
+		return nil, errors.Wrap(err, "add response tx")
 	}
 	defer a.caches.Transactions.Release(ctx, freezeTxID)
 
@@ -451,36 +414,33 @@ func (a *Agent) processFreezeOrder(ctx context.Context, transaction *state.Trans
 
 	etx, err := buildExpandedTx(freezeTx.MsgTx, []*wire.MsgTx{tx})
 	if err != nil {
-		return errors.Wrap(err, "expanded tx")
+		return nil, errors.Wrap(err, "expanded tx")
 	}
 
 	logger.InfoWithFields(ctx, []logger.Field{
 		logger.Stringer("response_txid", freezeTxID),
 	}, "Responding with freeze")
-	if err := a.BroadcastTx(ctx, etx, nil); err != nil {
-		return errors.Wrap(err, "broadcast")
-	}
 
 	if err := a.Respond(ctx, txid, freezeTransaction); err != nil {
-		return errors.Wrap(err, "respond")
+		return etx, errors.Wrap(err, "respond")
 	}
 
 	if isFull {
 		if err := a.postTransactionToContractSubscriptions(ctx, freezeTransaction); err != nil {
-			return errors.Wrap(err, "post freeze to contract")
+			return etx, errors.Wrap(err, "post freeze to contract")
 		}
 	} else {
 		if err := a.postTransactionToSubscriptions(ctx, lockingScripts,
 			freezeTransaction); err != nil {
-			return errors.Wrap(err, "post freeze to locking scripts")
+			return etx, errors.Wrap(err, "post freeze to locking scripts")
 		}
 	}
 
-	return nil
+	return etx, nil
 }
 
 func (a *Agent) processThawOrder(ctx context.Context, transaction *state.Transaction,
-	order *actions.Order, outputIndex int) error {
+	order *actions.Order, outputIndex int) (*expanded_tx.ExpandedTx, error) {
 
 	logger.Info(ctx, "Processing thaw order")
 
@@ -502,26 +462,24 @@ func (a *Agent) processThawOrder(ctx context.Context, transaction *state.Transac
 
 	if err := thawTx.AddInput(wire.OutPoint{Hash: txid, Index: 0}, agentLockingScript,
 		contractOutput.Value); err != nil {
-		return errors.Wrap(err, "add input")
+		return nil, errors.Wrap(err, "add input")
 	}
 
 	freezeTxIDHash, err := bitcoin.NewHash32(order.FreezeTxId)
 	if err != nil {
-		return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
-			platform.NewRejectError(actions.RejectionsMsgMalformed,
-				fmt.Sprintf("FreezeTxId: %s", err))), "reject")
+		return nil, platform.NewRejectError(actions.RejectionsMsgMalformed,
+			fmt.Sprintf("FreezeTxId: %s", err))
 	}
 	freezeTxID := *freezeTxIDHash
 
 	freezeTransaction, err := a.caches.Transactions.Get(ctx, freezeTxID)
 	if err != nil {
-		return errors.Wrap(err, "get tx")
+		return nil, errors.Wrap(err, "get tx")
 	}
 
 	if freezeTransaction == nil {
-		return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
-			platform.NewRejectError(actions.RejectionsMsgMalformed,
-				"FreezeTxId: not found")), "reject")
+		return nil, platform.NewRejectError(actions.RejectionsMsgMalformed,
+			"FreezeTxId: not found")
 	}
 	defer a.caches.Transactions.Release(ctx, freezeTxID)
 
@@ -544,18 +502,17 @@ func (a *Agent) processThawOrder(ctx context.Context, transaction *state.Transac
 
 	if freeze == nil {
 		freezeTransaction.Unlock()
-		return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
-			platform.NewRejectError(actions.RejectionsMsgMalformed,
-				"FreezeTxId: freeze action not found")), "reject")
+		return nil, platform.NewRejectError(actions.RejectionsMsgMalformed,
+			"FreezeTxId: freeze action not found")
 	}
 
 	isFull := false
 	if len(freeze.Quantities) == 0 {
-		return errors.New("Missing freeze quantities")
+		return nil, errors.New("Missing freeze quantities")
 	} else if len(freeze.Quantities) == 1 {
 		if int(freeze.Quantities[0].Index) >= outputCount {
 			freezeTransaction.Unlock()
-			return fmt.Errorf("Invalid freeze quantity index %d : %d >= %d", 0,
+			return nil, fmt.Errorf("Invalid freeze quantity index %d : %d >= %d", 0,
 				freeze.Quantities[0].Index, outputCount)
 		}
 
@@ -566,7 +523,7 @@ func (a *Agent) processThawOrder(ctx context.Context, transaction *state.Transac
 
 			if err := thawTx.AddOutput(agentLockingScript, 1, false, true); err != nil {
 				freezeTransaction.Unlock()
-				return errors.Wrap(err, "add contract output")
+				return nil, errors.Wrap(err, "add contract output")
 			}
 
 			freeze.Quantities = append(freeze.Quantities, &actions.QuantityIndexField{
@@ -592,9 +549,7 @@ func (a *Agent) processThawOrder(ctx context.Context, transaction *state.Transac
 		defer contract.Unlock()
 
 		if !contract.IsFrozen(now) {
-			return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
-				platform.NewRejectError(actions.RejectionsMsgMalformed, "Contract not frozen")),
-				"reject")
+			return nil, platform.NewRejectError(actions.RejectionsMsgMalformed, "Contract not frozen")
 		}
 
 	} else {
@@ -611,13 +566,11 @@ func (a *Agent) processThawOrder(ctx context.Context, transaction *state.Transac
 
 			instrument, err = a.caches.Instruments.Get(ctx, agentLockingScript, instrumentCode)
 			if err != nil {
-				return errors.Wrap(err, "get instrument")
+				return nil, errors.Wrap(err, "get instrument")
 			}
 
 			if instrument == nil {
-				return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
-					platform.NewRejectError(actions.RejectionsInstrumentNotFound, "")),
-					"reject")
+				return nil, platform.NewRejectError(actions.RejectionsInstrumentNotFound, "")
 			}
 			defer a.caches.Instruments.Release(ctx, agentLockingScript, instrumentCode)
 
@@ -625,16 +578,15 @@ func (a *Agent) processThawOrder(ctx context.Context, transaction *state.Transac
 			defer instrument.Unlock()
 
 			if !instrument.IsFrozen(now) {
-				return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
-					platform.NewRejectError(actions.RejectionsMsgMalformed,
-						"Instrument not frozen")), "reject")
+				return nil, platform.NewRejectError(actions.RejectionsMsgMalformed,
+					"Instrument not frozen")
 			}
 
 		} else {
 			for i, target := range freeze.Quantities {
 				if int(target.Index) >= outputCount {
 					freezeTransaction.Unlock()
-					return fmt.Errorf("Invalid freeze quantity index %d : %d >= %d", i,
+					return nil, fmt.Errorf("Invalid freeze quantity index %d : %d >= %d", i,
 						target.Index, outputCount)
 				}
 
@@ -643,7 +595,7 @@ func (a *Agent) processThawOrder(ctx context.Context, transaction *state.Transac
 
 				if err := thawTx.AddOutput(output.LockingScript, 1, false, true); err != nil {
 					freezeTransaction.Unlock()
-					return errors.Wrap(err, "add contract output")
+					return nil, errors.Wrap(err, "add contract output")
 				}
 			}
 
@@ -652,7 +604,7 @@ func (a *Agent) processThawOrder(ctx context.Context, transaction *state.Transac
 			balances, err = a.caches.Balances.GetMulti(ctx, agentLockingScript, instrumentCode,
 				lockingScripts)
 			if err != nil {
-				return errors.Wrap(err, "get balances")
+				return nil, errors.Wrap(err, "get balances")
 			}
 			defer a.caches.Balances.ReleaseMulti(ctx, agentLockingScript, instrumentCode, balances)
 
@@ -662,7 +614,7 @@ func (a *Agent) processThawOrder(ctx context.Context, transaction *state.Transac
 			case uint64:
 				now = v
 			case error:
-				return errors.Wrap(v, "balance locker")
+				return nil, errors.Wrap(v, "balance locker")
 			}
 			defer balances.Unlock()
 
@@ -671,18 +623,17 @@ func (a *Agent) processThawOrder(ctx context.Context, transaction *state.Transac
 	}
 
 	if err := thaw.Validate(); err != nil {
-		return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
-			platform.NewRejectError(actions.RejectionsMsgMalformed, err.Error())), "reject")
+		return nil, platform.NewRejectError(actions.RejectionsMsgMalformed, err.Error())
 	}
 
 	thawScript, err := protocol.Serialize(thaw, a.IsTest())
 	if err != nil {
-		return errors.Wrap(err, "serialize thaw")
+		return nil, errors.Wrap(err, "serialize thaw")
 	}
 
 	thawScriptOutputIndex := len(thawTx.Outputs)
 	if err := thawTx.AddOutput(thawScript, 0, false, false); err != nil {
-		return errors.Wrap(err, "add thaw output")
+		return nil, errors.Wrap(err, "add thaw output")
 	}
 
 	// Add the contract fee.
@@ -695,29 +646,27 @@ func (a *Agent) processThawOrder(ctx context.Context, transaction *state.Transac
 	if contractFee > 0 {
 		if err := thawTx.AddOutput(a.FeeLockingScript(), contractFee, true,
 			false); err != nil {
-			return errors.Wrap(err, "add contract fee")
+			return nil, errors.Wrap(err, "add contract fee")
 		}
 	} else if err := thawTx.SetChangeLockingScript(a.FeeLockingScript(), ""); err != nil {
-		return errors.Wrap(err, "set change")
+		return nil, errors.Wrap(err, "set change")
 	}
 
 	// Sign thaw tx.
 	if _, err := thawTx.Sign([]bitcoin.Key{a.Key()}); err != nil {
 		if errors.Cause(err) == txbuilder.ErrInsufficientValue {
 			logger.Warn(ctx, "Insufficient tx funding : %s", err)
-			return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
-				platform.NewRejectError(actions.RejectionsInsufficientTxFeeFunding, err.Error())),
-				"reject")
+			return nil, platform.NewRejectError(actions.RejectionsInsufficientTxFeeFunding, err.Error())
 		}
 
-		return errors.Wrap(err, "sign")
+		return nil, errors.Wrap(err, "sign")
 	}
 
 	thawTxID := *thawTx.MsgTx.TxHash()
 
 	thawTransaction, err := a.caches.Transactions.AddRaw(ctx, thawTx.MsgTx, nil)
 	if err != nil {
-		return errors.Wrap(err, "add response tx")
+		return nil, errors.Wrap(err, "add response tx")
 	}
 	defer a.caches.Transactions.Release(ctx, thawTxID)
 
@@ -743,36 +692,33 @@ func (a *Agent) processThawOrder(ctx context.Context, transaction *state.Transac
 
 	etx, err := buildExpandedTx(thawTx.MsgTx, []*wire.MsgTx{tx})
 	if err != nil {
-		return errors.Wrap(err, "expanded tx")
+		return nil, errors.Wrap(err, "expanded tx")
 	}
 
 	logger.InfoWithFields(ctx, []logger.Field{
 		logger.Stringer("response_txid", thawTxID),
 	}, "Responding with thaw")
-	if err := a.BroadcastTx(ctx, etx, nil); err != nil {
-		return errors.Wrap(err, "broadcast")
-	}
 
 	if err := a.Respond(ctx, txid, thawTransaction); err != nil {
-		return errors.Wrap(err, "respond")
+		return etx, errors.Wrap(err, "respond")
 	}
 
 	if isFull {
 		if err := a.postTransactionToContractSubscriptions(ctx, thawTransaction); err != nil {
-			return errors.Wrap(err, "post thaw to contract")
+			return etx, errors.Wrap(err, "post thaw to contract")
 		}
 	} else {
 		if err := a.postTransactionToSubscriptions(ctx, lockingScripts,
 			thawTransaction); err != nil {
-			return errors.Wrap(err, "post thaw to locking scripts")
+			return etx, errors.Wrap(err, "post thaw to locking scripts")
 		}
 	}
 
-	return nil
+	return etx, nil
 }
 
 func (a *Agent) processConfiscateOrder(ctx context.Context, transaction *state.Transaction,
-	order *actions.Order, outputIndex int) error {
+	order *actions.Order, outputIndex int) (*expanded_tx.ExpandedTx, error) {
 
 	logger.Info(ctx, "Processing confiscation order")
 
@@ -795,7 +741,7 @@ func (a *Agent) processConfiscateOrder(ctx context.Context, transaction *state.T
 
 	if err := confiscationTx.AddInput(wire.OutPoint{Hash: txid, Index: 0}, agentLockingScript,
 		contractOutput.Value); err != nil {
-		return errors.Wrap(err, "add input")
+		return nil, errors.Wrap(err, "add input")
 	}
 
 	var instrumentCode state.InstrumentCode
@@ -808,12 +754,11 @@ func (a *Agent) processConfiscateOrder(ctx context.Context, transaction *state.T
 
 	instrument, err := a.caches.Instruments.Get(ctx, agentLockingScript, instrumentCode)
 	if err != nil {
-		return errors.Wrap(err, "get instrument")
+		return nil, errors.Wrap(err, "get instrument")
 	}
 
 	if instrument == nil {
-		return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
-			platform.NewRejectError(actions.RejectionsInstrumentNotFound, "")), "reject")
+		return nil, platform.NewRejectError(actions.RejectionsInstrumentNotFound, "")
 	}
 	defer a.caches.Instruments.Release(ctx, agentLockingScript, instrumentCode)
 
@@ -821,15 +766,12 @@ func (a *Agent) processConfiscateOrder(ctx context.Context, transaction *state.T
 
 	if instrument.Creation == nil {
 		instrument.Unlock()
-		return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
-			platform.NewRejectError(actions.RejectionsInstrumentNotFound, "")), "reject")
+		return nil, platform.NewRejectError(actions.RejectionsInstrumentNotFound, "")
 	}
 
 	if !instrument.Creation.EnforcementOrdersPermitted {
 		instrument.Unlock()
-		return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
-			platform.NewRejectError(actions.RejectionsInstrumentNotPermitted, "")),
-			"reject")
+		return nil, platform.NewRejectError(actions.RejectionsInstrumentNotPermitted, "")
 	}
 
 	instrument.Unlock()
@@ -838,23 +780,20 @@ func (a *Agent) processConfiscateOrder(ctx context.Context, transaction *state.T
 	// DepositQty by previous balance
 	depositAddress, err := bitcoin.DecodeRawAddress(order.DepositAddress)
 	if err != nil {
-		return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
-			platform.NewRejectError(actions.RejectionsMsgMalformed,
-				fmt.Sprintf("DepositAddress: %s", err))), "reject")
+		return nil, platform.NewRejectError(actions.RejectionsMsgMalformed,
+			fmt.Sprintf("DepositAddress: %s", err))
 	}
 
 	depositHash, err := depositAddress.Hash()
 	if err != nil {
-		return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
-			platform.NewRejectError(actions.RejectionsMsgMalformed,
-				fmt.Sprintf("DepositAddress: Hash: %s", err))), "reject")
+		return nil, platform.NewRejectError(actions.RejectionsMsgMalformed,
+			fmt.Sprintf("DepositAddress: Hash: %s", err))
 	}
 
 	depositLockingScript, err := depositAddress.LockingScript()
 	if err != nil {
-		return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
-			platform.NewRejectError(actions.RejectionsMsgMalformed,
-				fmt.Sprintf("DepositAddress: LockingScript: %s", err))), "reject")
+		return nil, platform.NewRejectError(actions.RejectionsMsgMalformed,
+			fmt.Sprintf("DepositAddress: LockingScript: %s", err))
 	}
 
 	hashes := make(map[bitcoin.Hash20]bool)
@@ -864,36 +803,30 @@ func (a *Agent) processConfiscateOrder(ctx context.Context, transaction *state.T
 	for i, target := range order.TargetAddresses {
 		targetAddress, err := bitcoin.DecodeRawAddress(target.Address)
 		if err != nil {
-			return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
-				platform.NewRejectError(actions.RejectionsMsgMalformed,
-					fmt.Sprintf("TargetAddresses[%d]: Address: %s", i, err))), "reject")
+			return nil, platform.NewRejectError(actions.RejectionsMsgMalformed,
+				fmt.Sprintf("TargetAddresses[%d]: Address: %s", i, err))
 		}
 
 		if target.Quantity == 0 {
-			return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
-				platform.NewRejectError(actions.RejectionsMsgMalformed,
-					fmt.Sprintf("TargetAddresses[%d]: Quantity: can't be zero", i))), "reject")
+			return nil, platform.NewRejectError(actions.RejectionsMsgMalformed,
+				fmt.Sprintf("TargetAddresses[%d]: Quantity: can't be zero", i))
 		}
 
 		hash, err := targetAddress.Hash()
 		if err != nil {
-			return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
-				platform.NewRejectError(actions.RejectionsMsgMalformed,
-					fmt.Sprintf("TargetAddresses[%d]: Address: Hash: %s", i, err))), "reject")
+			return nil, platform.NewRejectError(actions.RejectionsMsgMalformed,
+				fmt.Sprintf("TargetAddresses[%d]: Address: Hash: %s", i, err))
 		}
 
 		lockingScript, err := targetAddress.LockingScript()
 		if err != nil {
-			return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
-				platform.NewRejectError(actions.RejectionsMsgMalformed,
-					fmt.Sprintf("TargetAddresses[%d]: Address: LockingScript: %s", i, err))),
-				"reject")
+			return nil, platform.NewRejectError(actions.RejectionsMsgMalformed,
+				fmt.Sprintf("TargetAddresses[%d]: Address: LockingScript: %s", i, err))
 		}
 
 		if _, exists := hashes[*hash]; exists {
-			return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
-				platform.NewRejectError(actions.RejectionsMsgMalformed,
-					fmt.Sprintf("TargetAddresses[%d]: Address: duplicated", i))), "reject")
+			return nil, platform.NewRejectError(actions.RejectionsMsgMalformed,
+				fmt.Sprintf("TargetAddresses[%d]: Address: duplicated", i))
 		}
 
 		lockingScripts = append(lockingScripts, lockingScript)
@@ -907,7 +840,7 @@ func (a *Agent) processConfiscateOrder(ctx context.Context, transaction *state.T
 		})
 
 		if err := confiscationTx.AddOutput(lockingScript, 1, false, true); err != nil {
-			return errors.Wrap(err, "add output")
+			return nil, errors.Wrap(err, "add output")
 		}
 
 		logger.InfoWithFields(ctx, []logger.Field{
@@ -920,7 +853,7 @@ func (a *Agent) processConfiscateOrder(ctx context.Context, transaction *state.T
 	balances, err := a.caches.Balances.GetMulti(ctx, agentLockingScript, instrumentCode,
 		lockingScripts)
 	if err != nil {
-		return errors.Wrap(err, "get balances")
+		return nil, errors.Wrap(err, "get balances")
 	}
 	defer a.caches.Balances.ReleaseMulti(ctx, agentLockingScript, instrumentCode, balances)
 
@@ -928,7 +861,7 @@ func (a *Agent) processConfiscateOrder(ctx context.Context, transaction *state.T
 		state.ZeroBalance(depositLockingScript))
 	if err != nil {
 		balances.RevertPending()
-		return errors.Wrap(err, "get deposit balance")
+		return nil, errors.Wrap(err, "get deposit balance")
 	}
 	defer a.caches.Balances.Release(ctx, agentLockingScript, instrumentCode, depositBalance)
 
@@ -943,7 +876,7 @@ func (a *Agent) processConfiscateOrder(ctx context.Context, transaction *state.T
 	case uint64:
 		now = v
 	case error:
-		return errors.Wrap(v, "balance locker")
+		return nil, errors.Wrap(v, "balance locker")
 	}
 	defer allBalances.Unlock()
 
@@ -953,9 +886,8 @@ func (a *Agent) processConfiscateOrder(ctx context.Context, transaction *state.T
 		if balance == nil {
 			balances.RevertPending()
 
-			return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
-				platform.NewRejectError(actions.RejectionsMsgMalformed,
-					fmt.Sprintf("TargetAddresses[%d]: no balance", i))), "reject")
+			return nil, platform.NewRejectError(actions.RejectionsMsgMalformed,
+				fmt.Sprintf("TargetAddresses[%d]: no balance", i))
 		}
 
 		quantity := quantities[i]
@@ -969,13 +901,7 @@ func (a *Agent) processConfiscateOrder(ctx context.Context, transaction *state.T
 				logger.Uint64("quantity", quantity),
 			}, "Failed to add confiscation : %s", err)
 
-			if rejectError, ok := errors.Cause(err).(platform.RejectError); ok {
-				rejectError.Message = fmt.Sprintf("TargetAddresses[%d]: %s", i, rejectError.Message)
-				return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex, rejectError),
-					"reject")
-			}
-
-			return errors.Wrapf(err, "add confiscation %d", i)
+			return nil, errors.Wrapf(err, "add confiscation %d", i)
 		}
 
 		confiscation.Quantities[i].Quantity = finalQuantity
@@ -984,9 +910,8 @@ func (a *Agent) processConfiscateOrder(ctx context.Context, transaction *state.T
 	if _, exists := hashes[*depositHash]; exists {
 		balances.RevertPending()
 
-		return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
-			platform.NewRejectError(actions.RejectionsMsgMalformed,
-				fmt.Sprintf("DepositAddress: duplicated"))), "reject")
+		return nil, platform.NewRejectError(actions.RejectionsMsgMalformed,
+			fmt.Sprintf("DepositAddress: duplicated"))
 	}
 
 	if err := depositBalance.AddPendingCredit(depositQuantity, now); err != nil {
@@ -996,38 +921,31 @@ func (a *Agent) processConfiscateOrder(ctx context.Context, transaction *state.T
 		}, "Failed to add deposit : %s", err)
 		balances.RevertPending()
 
-		if rejectError, ok := errors.Cause(err).(platform.RejectError); ok {
-			rejectError.Message = fmt.Sprintf("credit: %s", rejectError.Message)
-			return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex, rejectError),
-				"reject")
-		}
-
-		return errors.Wrap(err, "add credit")
+		return nil, errors.Wrap(err, "add credit")
 	}
 
 	confiscation.DepositQty = depositBalance.SettlePendingQuantity()
 
 	if err := confiscation.Validate(); err != nil {
 		balances.RevertPending()
-		return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
-			platform.NewRejectError(actions.RejectionsMsgMalformed, err.Error())), "reject")
+		return nil, platform.NewRejectError(actions.RejectionsMsgMalformed, err.Error())
 	}
 
 	if err := confiscationTx.AddOutput(depositLockingScript, 1, false, true); err != nil {
 		balances.RevertPending()
-		return errors.Wrap(err, "add deposit output")
+		return nil, errors.Wrap(err, "add deposit output")
 	}
 
 	confiscationScript, err := protocol.Serialize(confiscation, a.IsTest())
 	if err != nil {
 		balances.RevertPending()
-		return errors.Wrap(err, "serialize confiscation")
+		return nil, errors.Wrap(err, "serialize confiscation")
 	}
 
 	confiscationScriptOutputIndex := len(confiscationTx.Outputs)
 	if err := confiscationTx.AddOutput(confiscationScript, 0, false, false); err != nil {
 		balances.RevertPending()
-		return errors.Wrap(err, "add confiscation output")
+		return nil, errors.Wrap(err, "add confiscation output")
 	}
 
 	// Add the contract fee.
@@ -1036,11 +954,11 @@ func (a *Agent) processConfiscateOrder(ctx context.Context, transaction *state.T
 		if err := confiscationTx.AddOutput(a.FeeLockingScript(), contractFee, true,
 			false); err != nil {
 			balances.RevertPending()
-			return errors.Wrap(err, "add contract fee")
+			return nil, errors.Wrap(err, "add contract fee")
 		}
 	} else if err := confiscationTx.SetChangeLockingScript(a.FeeLockingScript(), ""); err != nil {
 		balances.RevertPending()
-		return errors.Wrap(err, "set change")
+		return nil, errors.Wrap(err, "set change")
 	}
 
 	// Sign confiscation tx.
@@ -1048,19 +966,17 @@ func (a *Agent) processConfiscateOrder(ctx context.Context, transaction *state.T
 		balances.RevertPending()
 		if errors.Cause(err) == txbuilder.ErrInsufficientValue {
 			logger.Warn(ctx, "Insufficient tx funding : %s", err)
-			return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
-				platform.NewRejectError(actions.RejectionsInsufficientTxFeeFunding, err.Error())),
-				"reject")
+			return nil, platform.NewRejectError(actions.RejectionsInsufficientTxFeeFunding, err.Error())
 		}
 
-		return errors.Wrap(err, "sign")
+		return nil, errors.Wrap(err, "sign")
 	}
 
 	confiscationTxID := *confiscationTx.MsgTx.TxHash()
 
 	confiscationTransaction, err := a.caches.Transactions.AddRaw(ctx, confiscationTx.MsgTx, nil)
 	if err != nil {
-		return errors.Wrap(err, "add response tx")
+		return nil, errors.Wrap(err, "add response tx")
 	}
 	defer a.caches.Transactions.Release(ctx, confiscationTxID)
 
@@ -1079,34 +995,30 @@ func (a *Agent) processConfiscateOrder(ctx context.Context, transaction *state.T
 
 	etx, err := buildExpandedTx(confiscationTx.MsgTx, []*wire.MsgTx{tx})
 	if err != nil {
-		return errors.Wrap(err, "expanded tx")
+		return nil, errors.Wrap(err, "expanded tx")
 	}
 
 	logger.InfoWithFields(ctx, []logger.Field{
 		logger.Stringer("response_txid", confiscationTxID),
 	}, "Responding with confiscation")
-	if err := a.BroadcastTx(ctx, etx, nil); err != nil {
-		return errors.Wrap(err, "broadcast")
-	}
 
 	if err := a.Respond(ctx, txid, confiscationTransaction); err != nil {
-		return errors.Wrap(err, "respond")
+		return etx, errors.Wrap(err, "respond")
 	}
 
 	if err := a.postTransactionToSubscriptions(ctx, append(lockingScripts, depositLockingScript),
 		confiscationTransaction); err != nil {
-		return errors.Wrap(err, "post confiscation to locking scripts")
+		return etx, errors.Wrap(err, "post confiscation to locking scripts")
 	}
 
-	return nil
+	return etx, nil
 }
 
 func (a *Agent) processReconciliationOrder(ctx context.Context, transaction *state.Transaction,
-	order *actions.Order, outputIndex int) error {
+	order *actions.Order, outputIndex int) (*expanded_tx.ExpandedTx, error) {
 
-	return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
-		platform.NewRejectError(actions.RejectionsDeprecated,
-			"Reconciliation order is deprecated")), "reject")
+	return nil, platform.NewRejectError(actions.RejectionsDeprecated,
+		"Reconciliation order is deprecated")
 }
 
 func (a *Agent) processFreeze(ctx context.Context, transaction *state.Transaction,
@@ -1136,7 +1048,7 @@ func (a *Agent) processFreeze(ctx context.Context, transaction *state.Transactio
 
 	transaction.Unlock()
 
-	if _, err := a.addResponseTxID(ctx, orderTxID, outputIndex, txid); err != nil {
+	if _, err := a.addResponseTxID(ctx, orderTxID, txid); err != nil {
 		return errors.Wrap(err, "add response txid")
 	}
 
@@ -1268,6 +1180,10 @@ func (a *Agent) processFreeze(ctx context.Context, transaction *state.Transactio
 		}
 	}
 
+	transaction.Lock()
+	transaction.SetProcessed(a.ContractHash(), outputIndex)
+	transaction.Unlock()
+
 	return nil
 }
 
@@ -1296,7 +1212,7 @@ func (a *Agent) processThaw(ctx context.Context, transaction *state.Transaction,
 
 	transaction.Unlock()
 
-	if _, err := a.addResponseTxID(ctx, orderTxID, outputIndex, txid); err != nil {
+	if _, err := a.addResponseTxID(ctx, orderTxID, txid); err != nil {
 		return errors.Wrap(err, "add response txid")
 	}
 
@@ -1434,6 +1350,10 @@ func (a *Agent) processThaw(ctx context.Context, transaction *state.Transaction,
 		}
 	}
 
+	transaction.Lock()
+	transaction.SetProcessed(a.ContractHash(), outputIndex)
+	transaction.Unlock()
+
 	return nil
 }
 
@@ -1462,7 +1382,7 @@ func (a *Agent) processConfiscation(ctx context.Context, transaction *state.Tran
 
 	outputCount := transaction.OutputCount()
 
-	if _, err := a.addResponseTxID(ctx, orderTxID, outputIndex, txid); err != nil {
+	if _, err := a.addResponseTxID(ctx, orderTxID, txid); err != nil {
 		transaction.Unlock()
 		return errors.Wrap(err, "add response txid")
 	}
@@ -1642,6 +1562,10 @@ func (a *Agent) processConfiscation(ctx context.Context, transaction *state.Tran
 		addedDepositBalance.MarkModified()
 	}
 
+	transaction.Lock()
+	transaction.SetProcessed(a.ContractHash(), outputIndex)
+	transaction.Unlock()
+
 	return nil
 }
 
@@ -1670,9 +1594,13 @@ func (a *Agent) processReconciliation(ctx context.Context, transaction *state.Tr
 
 	transaction.Unlock()
 
-	if _, err := a.addResponseTxID(ctx, orderTxID, outputIndex, txid); err != nil {
+	if _, err := a.addResponseTxID(ctx, orderTxID, txid); err != nil {
 		return errors.Wrap(err, "add response txid")
 	}
+
+	transaction.Lock()
+	transaction.SetProcessed(a.ContractHash(), outputIndex)
+	transaction.Unlock()
 
 	return errors.New("Not Implemented")
 }

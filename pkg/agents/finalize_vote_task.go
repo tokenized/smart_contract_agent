@@ -7,6 +7,7 @@ import (
 
 	"github.com/tokenized/logger"
 	"github.com/tokenized/pkg/bitcoin"
+	"github.com/tokenized/pkg/expanded_tx"
 	"github.com/tokenized/pkg/txbuilder"
 	"github.com/tokenized/pkg/wire"
 	"github.com/tokenized/smart_contract_agent/internal/platform"
@@ -61,7 +62,8 @@ func (t *FinalizeVoteTask) ContractLockingScript() bitcoin.Script {
 	return t.contractLockingScript
 }
 
-func (t *FinalizeVoteTask) Run(ctx context.Context, interrupt <-chan interface{}) error {
+func (t *FinalizeVoteTask) Run(ctx context.Context,
+	interrupt <-chan interface{}) (*expanded_tx.ExpandedTx, error) {
 	t.lock.Lock()
 	defer t.lock.Unlock()
 
@@ -73,7 +75,7 @@ func (t *FinalizeVoteTask) Run(ctx context.Context, interrupt <-chan interface{}
 }
 
 func FinalizeVote(ctx context.Context, factory AgentFactory, contractLockingScript bitcoin.Script,
-	voteTxID bitcoin.Hash32) error {
+	voteTxID bitcoin.Hash32) (*expanded_tx.ExpandedTx, error) {
 
 	ctx = logger.ContextWithLogFields(ctx, logger.Stringer("trace", uuid.New()))
 
@@ -84,18 +86,20 @@ func FinalizeVote(ctx context.Context, factory AgentFactory, contractLockingScri
 
 	agent, err := factory.GetAgent(ctx, contractLockingScript)
 	if err != nil {
-		return errors.Wrap(err, "get agent")
+		return nil, errors.Wrap(err, "get agent")
 	}
 
 	if agent == nil {
-		return errors.New("Agent not found")
+		return nil, errors.New("Agent not found")
 	}
 	defer agent.Release(ctx)
 
 	return agent.FinalizeVote(ctx, voteTxID)
 }
 
-func (a *Agent) FinalizeVote(ctx context.Context, voteTxID bitcoin.Hash32) error {
+func (a *Agent) FinalizeVote(ctx context.Context,
+	voteTxID bitcoin.Hash32) (*expanded_tx.ExpandedTx, error) {
+
 	agentLockingScript := a.LockingScript()
 	ctx = logger.ContextWithLogFields(ctx, logger.Stringer("vote_txid", voteTxID),
 		logger.Stringer("contract_locking_script", agentLockingScript))
@@ -104,11 +108,11 @@ func (a *Agent) FinalizeVote(ctx context.Context, voteTxID bitcoin.Hash32) error
 
 	vote, err := a.caches.Votes.Get(ctx, agentLockingScript, voteTxID)
 	if err != nil {
-		return errors.Wrap(err, "get vote")
+		return nil, errors.Wrap(err, "get vote")
 	}
 
 	if vote == nil {
-		return errors.New("Vote not found")
+		return nil, errors.New("Vote not found")
 	}
 	defer a.caches.Votes.Release(ctx, agentLockingScript, voteTxID)
 
@@ -116,15 +120,15 @@ func (a *Agent) FinalizeVote(ctx context.Context, voteTxID bitcoin.Hash32) error
 	defer vote.Unlock()
 
 	if vote.Result != nil {
-		return errors.New("Vote already complete")
+		return nil, errors.New("Vote already complete")
 	}
 
 	if vote.Proposal == nil {
-		return errors.New("Missing vote proposal")
+		return nil, errors.New("Missing vote proposal")
 	}
 
 	if vote.ProposalTxID == nil {
-		return errors.New("Missing vote proposal txid")
+		return nil, errors.New("Missing vote proposal txid")
 	}
 
 	tally, result := vote.CalculateResults(ctx)
@@ -133,11 +137,11 @@ func (a *Agent) FinalizeVote(ctx context.Context, voteTxID bitcoin.Hash32) error
 
 	proposalTransaction, err := a.caches.Transactions.Get(ctx, proposalTxID)
 	if err != nil {
-		return errors.Wrap(err, "get proposal tx")
+		return nil, errors.Wrap(err, "get proposal tx")
 	}
 
 	if proposalTransaction == nil {
-		return errors.New("Proposal transaction not found")
+		return nil, errors.New("Proposal transaction not found")
 	}
 	defer a.caches.Transactions.Release(ctx, proposalTxID)
 
@@ -146,7 +150,7 @@ func (a *Agent) FinalizeVote(ctx context.Context, voteTxID bitcoin.Hash32) error
 	contractOutput := proposalTransaction.Output(1)
 	if !contractOutput.LockingScript.Equal(agentLockingScript) {
 		proposalTransaction.Unlock()
-		return errors.New("Proposal result output not to contract")
+		return nil, errors.New("Proposal result output not to contract")
 	}
 	proposalOutputValue := contractOutput.Value
 
@@ -180,29 +184,28 @@ func (a *Agent) FinalizeVote(ctx context.Context, voteTxID bitcoin.Hash32) error
 	}
 
 	if err := voteResult.Validate(); err != nil {
-		return errors.Wrap(a.sendRejection(ctx, proposalTransaction, 1,
-			platform.NewRejectError(actions.RejectionsMsgMalformed, err.Error())), "reject")
+		return nil, platform.NewRejectError(actions.RejectionsMsgMalformed, err.Error())
 	}
 
 	voteResultTx := txbuilder.NewTxBuilder(a.FeeRate(), a.DustFeeRate())
 
 	if err := voteResultTx.AddInput(wire.OutPoint{Hash: proposalTxID, Index: 1}, agentLockingScript,
 		proposalOutputValue); err != nil {
-		return errors.Wrap(err, "add input")
+		return nil, errors.Wrap(err, "add input")
 	}
 
 	if err := voteResultTx.AddOutput(agentLockingScript, 1, false, false); err != nil {
-		return errors.Wrap(err, "add contract output")
+		return nil, errors.Wrap(err, "add contract output")
 	}
 
 	voteResultScript, err := protocol.Serialize(voteResult, a.IsTest())
 	if err != nil {
-		return errors.Wrap(err, "serialize vote result")
+		return nil, errors.Wrap(err, "serialize vote result")
 	}
 
 	voteResultScriptOutputIndex := len(voteResultTx.Outputs)
 	if err := voteResultTx.AddOutput(voteResultScript, 0, false, false); err != nil {
-		return errors.Wrap(err, "add vote result output")
+		return nil, errors.Wrap(err, "add vote result output")
 	}
 
 	// Add the contract fee and holder proposal fee.
@@ -213,15 +216,15 @@ func (a *Agent) FinalizeVote(ctx context.Context, voteTxID bitcoin.Hash32) error
 	if contractFee > 0 {
 		if err := voteResultTx.AddOutput(a.FeeLockingScript(), contractFee, true,
 			false); err != nil {
-			return errors.Wrap(err, "add contract fee")
+			return nil, errors.Wrap(err, "add contract fee")
 		}
 	} else if err := voteResultTx.SetChangeLockingScript(a.FeeLockingScript(), ""); err != nil {
-		return errors.Wrap(err, "set change")
+		return nil, errors.Wrap(err, "set change")
 	}
 
 	// Sign vote tx.
 	if _, err := voteResultTx.Sign([]bitcoin.Key{a.Key()}); err != nil {
-		return errors.Wrap(err, "sign")
+		return nil, errors.Wrap(err, "sign")
 	}
 
 	voteResultTxID := *voteResultTx.MsgTx.TxHash()
@@ -231,7 +234,7 @@ func (a *Agent) FinalizeVote(ctx context.Context, voteTxID bitcoin.Hash32) error
 
 	voteResultTransaction, err := a.caches.Transactions.AddRaw(ctx, voteResultTx.MsgTx, nil)
 	if err != nil {
-		return errors.Wrap(err, "add response tx")
+		return nil, errors.Wrap(err, "add response tx")
 	}
 	defer a.caches.Transactions.Release(ctx, voteResultTxID)
 
@@ -247,16 +250,12 @@ func (a *Agent) FinalizeVote(ctx context.Context, voteTxID bitcoin.Hash32) error
 
 	etx, err := buildExpandedTx(voteResultTx.MsgTx, []*wire.MsgTx{proposalTx})
 	if err != nil {
-		return errors.Wrap(err, "expanded tx")
-	}
-
-	if err := a.BroadcastTx(ctx, etx, nil); err != nil {
-		return errors.Wrap(err, "broadcast")
+		return nil, errors.Wrap(err, "expanded tx")
 	}
 
 	if err := a.postTransactionToContractSubscriptions(ctx, voteResultTransaction); err != nil {
-		return errors.Wrap(err, "post vote result")
+		return etx, errors.Wrap(err, "post vote result")
 	}
 
-	return nil
+	return etx, nil
 }

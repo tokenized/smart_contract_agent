@@ -57,6 +57,9 @@ func Test_Process(t *testing.T) {
 
 	// Contract input
 	offerTx := wire.NewMsgTx(1)
+	offer := &actions.ContractOffer{}
+	offerScript, _ := protocol.Serialize(offer, true)
+	offerTx.AddTxOut(wire.NewTxOut(0, offerScript))
 	offerTx.AddTxOut(wire.NewTxOut(2200, contractLockingScript))
 	contractOfferTxID := *offerTx.TxHash()
 
@@ -175,6 +178,9 @@ func Test_Process(t *testing.T) {
 
 	// Contract input
 	definitionTx := wire.NewMsgTx(1)
+	definition := &actions.InstrumentDefinition{}
+	definitionScript, _ := protocol.Serialize(definition, true)
+	definitionTx.AddTxOut(wire.NewTxOut(0, definitionScript))
 	definitionTx.AddTxOut(wire.NewTxOut(2200, contractLockingScript))
 	instrumentDefinitionTxID := *definitionTx.TxHash()
 
@@ -388,6 +394,9 @@ func Test_Process(t *testing.T) {
 
 		// Contract input
 		transferTx := wire.NewMsgTx(1)
+		transfer := &actions.Transfer{}
+		transferScript, _ := protocol.Serialize(transfer, true)
+		transferTx.AddTxOut(wire.NewTxOut(0, transferScript))
 		transferTx.AddTxOut(wire.NewTxOut(2200, contractLockingScript))
 		transferTxID := *transferTx.TxHash()
 
@@ -567,6 +576,9 @@ func Test_Process(t *testing.T) {
 
 		// Contract input
 		transferTx := wire.NewMsgTx(1)
+		transfer := &actions.Transfer{}
+		transferScript, _ := protocol.Serialize(transfer, true)
+		transferTx.AddTxOut(wire.NewTxOut(0, transferScript))
 		transferTx.AddTxOut(wire.NewTxOut(2200, contractLockingScript))
 		transferTxID := *transferTx.TxHash()
 

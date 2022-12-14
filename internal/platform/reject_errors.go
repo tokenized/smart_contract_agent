@@ -24,6 +24,19 @@ func NewRejectError(code int, message string) RejectError {
 	}
 }
 
+func NewDefaultRejectError(err error) RejectError {
+	if rejectError, ok := err.(RejectError); ok {
+		return rejectError
+	}
+
+	return RejectError{
+		Code:        actions.RejectionsMsgMalformed,
+		Message:     err.Error(),
+		InputIndex:  0,
+		OutputIndex: -1,
+	}
+}
+
 func NewRejectErrorWithOutputIndex(code int, message string, outputIndex int) RejectError {
 	return RejectError{
 		Code:        uint32(code),

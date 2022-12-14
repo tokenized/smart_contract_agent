@@ -323,9 +323,9 @@ func (b *Balance) PendingTransferTxID() *bitcoin.Hash32 {
 
 // AddPendingDebit adds a pending modification to reduce the balance.
 func (b *Balance) AddPendingDebit(quantity, now uint64) error {
-	if pendingTranferTxID := b.PendingTransferTxID(); pendingTranferTxID != nil {
+	if pendingTransferTxID := b.PendingTransferTxID(); pendingTransferTxID != nil {
 		return platform.NewRejectError(actions.RejectionsHoldingsLocked,
-			pendingTranferTxID.String())
+			pendingTransferTxID.String())
 	}
 
 	available := b.Available(now)

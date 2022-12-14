@@ -82,8 +82,6 @@ func main() {
 		logger.Fatal(ctx, "Failed to create storage : %s", err)
 	}
 
-	scheduler := platform.NewScheduler()
-
 	peerChannelsFactory := peer_channels.NewFactory()
 
 	if cfg.SpyNode.ConnectionType != spyNodeClient.ConnectionTypeFull {
@@ -94,6 +92,10 @@ func main() {
 	if err != nil {
 		logger.Fatal(ctx, "Failed to create spynode remote client : %s", err)
 	}
+
+	broadcaster := NewSpyNodeBroadcaster(spyNode)
+
+	scheduler := platform.NewScheduler(broadcaster)
 
 	cache := cacher.NewCache(store, cfg.Cache)
 	caches, err := state.NewCaches(cache)
@@ -109,8 +111,8 @@ func main() {
 	}
 
 	service := service.NewService(cfg.AgentKey, lockingScript, cfg.Agents, feeLockingScript,
-		spyNode, caches, balanceLocker, store, NewSpyNodeBroadcaster(spyNode), spyNode,
-		platform.NewHeaders(spyNode), scheduler, peerChannelsFactory)
+		spyNode, caches, balanceLocker, store, broadcaster, spyNode, platform.NewHeaders(spyNode),
+		scheduler, peerChannelsFactory)
 	spyNode.RegisterHandler(service)
 
 	var spyNodeWait, cacheWait, lockerWait, schedulerWait, peerChannelWait sync.WaitGroup

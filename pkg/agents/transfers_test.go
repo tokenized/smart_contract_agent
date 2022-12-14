@@ -1575,7 +1575,7 @@ func Test_Transfers_Multi_Expire(t *testing.T) {
 	config := DefaultConfig()
 	config.MultiContractExpiration.Duration = time.Millisecond * 250
 
-	scheduler := platform.NewScheduler()
+	scheduler := platform.NewScheduler(broadcaster2)
 	_, feeLockingScript, _ := state.MockKey()
 	mockAgentFactory := NewMockAgentFactory(config, feeLockingScript, caches.Caches, balanceLocker,
 		store, broadcaster1, nil, nil, scheduler)

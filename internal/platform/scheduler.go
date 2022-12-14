@@ -6,7 +6,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/tokenized/logger"
 	"github.com/tokenized/pkg/bitcoin"
+	"github.com/tokenized/pkg/expanded_tx"
 	"github.com/tokenized/threads"
 
 	"github.com/pkg/errors"
@@ -19,18 +21,25 @@ type Scheduler struct {
 	// should be refreshed.
 	refreshNotify chan interface{}
 
+	broadcaster Broadcaster
+
 	lock sync.Mutex
 }
 
 type Task interface {
 	ID() bitcoin.Hash32
 	Start() time.Time
-	Run(ctx context.Context, interrupt <-chan interface{}) error
+	Run(ctx context.Context, interrupt <-chan interface{}) (*expanded_tx.ExpandedTx, error)
 }
 
-func NewScheduler() *Scheduler {
+type Broadcaster interface {
+	BroadcastTx(context.Context, *expanded_tx.ExpandedTx, []uint32) error
+}
+
+func NewScheduler(broadcaster Broadcaster) *Scheduler {
 	return &Scheduler{
 		refreshNotify: make(chan interface{}, 1),
+		broadcaster:   broadcaster,
 	}
 }
 
@@ -91,21 +100,28 @@ func (s *Scheduler) Run(ctx context.Context, interrupt <-chan interface{}) error
 			},
 		}
 
-		nextTask := s.findNextTask()
-		if nextTask != nil {
-			if now.After(nextTask.Start()) {
-				if err := nextTask.Run(ctx, interrupt); err != nil {
-					if errors.Cause(err) == threads.Interrupted {
+		task := s.findNextTask()
+		if task != nil {
+			if now.After(task.Start()) {
+				etx, runErr := task.Run(ctx, interrupt)
+				if etx != nil {
+					if berr := s.broadcaster.BroadcastTx(ctx, etx, nil); berr != nil {
+						logger.Error(ctx, "Failed to broadcast tx : %s", berr)
+					}
+				}
+
+				if runErr != nil {
+					if errors.Cause(runErr) == threads.Interrupted {
 						return threads.Interrupted
 					}
 
-					return errors.Wrap(err, nextTask.ID().String())
+					return errors.Wrap(runErr, task.ID().String())
 				}
 
-				s.remove(nextTask.ID())
+				s.remove(task.ID())
 			}
 
-			durationToStart := nextTask.Start().Sub(now)
+			durationToStart := task.Start().Sub(now)
 			timer := time.NewTimer(durationToStart)
 			selects = append(selects, reflect.SelectCase{
 				Dir:  reflect.SelectRecv,
@@ -122,15 +138,22 @@ func (s *Scheduler) Run(ctx context.Context, interrupt <-chan interface{}) error
 			// continue to reset next task
 
 		case 2: // next task start
-			if err := nextTask.Run(ctx, interrupt); err != nil {
-				if errors.Cause(err) == threads.Interrupted {
+			etx, runErr := task.Run(ctx, interrupt)
+			if etx != nil {
+				if berr := s.broadcaster.BroadcastTx(ctx, etx, nil); berr != nil {
+					logger.Error(ctx, "Failed to broadcast tx : %s", berr)
+				}
+			}
+
+			if runErr != nil {
+				if errors.Cause(runErr) == threads.Interrupted {
 					return threads.Interrupted
 				}
 
-				return errors.Wrap(err, nextTask.ID().String())
+				return errors.Wrap(runErr, task.ID().String())
 			}
 
-			s.remove(nextTask.ID())
+			s.remove(task.ID())
 		}
 	}
 }

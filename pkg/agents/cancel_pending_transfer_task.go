@@ -7,6 +7,7 @@ import (
 
 	"github.com/tokenized/logger"
 	"github.com/tokenized/pkg/bitcoin"
+	"github.com/tokenized/pkg/expanded_tx"
 	"github.com/tokenized/smart_contract_agent/internal/state"
 	"github.com/tokenized/specification/dist/golang/actions"
 	"github.com/tokenized/specification/dist/golang/protocol"
@@ -68,7 +69,8 @@ func (t *CancelPendingTransferTask) ContractLockingScript() bitcoin.Script {
 	return t.contractLockingScript
 }
 
-func (t *CancelPendingTransferTask) Run(ctx context.Context, interrupt <-chan interface{}) error {
+func (t *CancelPendingTransferTask) Run(ctx context.Context,
+	interrupt <-chan interface{}) (*expanded_tx.ExpandedTx, error) {
 	t.lock.Lock()
 	defer t.lock.Unlock()
 
@@ -80,7 +82,7 @@ func (t *CancelPendingTransferTask) Run(ctx context.Context, interrupt <-chan in
 }
 
 func CancelPendingTransfer(ctx context.Context, factory AgentFactory,
-	contractLockingScript bitcoin.Script, transferTxID bitcoin.Hash32) error {
+	contractLockingScript bitcoin.Script, transferTxID bitcoin.Hash32) (*expanded_tx.ExpandedTx, error) {
 
 	ctx = logger.ContextWithLogFields(ctx, logger.Stringer("trace", uuid.New()))
 
@@ -91,18 +93,20 @@ func CancelPendingTransfer(ctx context.Context, factory AgentFactory,
 
 	agent, err := factory.GetAgent(ctx, contractLockingScript)
 	if err != nil {
-		return errors.Wrap(err, "get agent")
+		return nil, errors.Wrap(err, "get agent")
 	}
 
 	if agent == nil {
-		return errors.New("Agent not found")
+		return nil, errors.New("Agent not found")
 	}
 	defer agent.Release(ctx)
 
 	return agent.CancelPendingTransfer(ctx, transferTxID)
 }
 
-func (a *Agent) CancelPendingTransfer(ctx context.Context, transferTxID bitcoin.Hash32) error {
+func (a *Agent) CancelPendingTransfer(ctx context.Context,
+	transferTxID bitcoin.Hash32) (*expanded_tx.ExpandedTx, error) {
+
 	agentLockingScript := a.LockingScript()
 	ctx = logger.ContextWithLogFields(ctx, logger.Stringer("transfer_txid", transferTxID),
 		logger.Stringer("contract_locking_script", agentLockingScript))
@@ -112,11 +116,11 @@ func (a *Agent) CancelPendingTransfer(ctx context.Context, transferTxID bitcoin.
 	// Get transfer transaction and action.
 	transferTransaction, err := a.caches.Transactions.Get(ctx, transferTxID)
 	if err != nil {
-		return errors.Wrap(err, "get tx")
+		return nil, errors.Wrap(err, "get tx")
 	}
 
 	if transferTransaction == nil {
-		return errors.New("Transaction not found")
+		return nil, errors.New("Transaction not found")
 	}
 	defer a.caches.Transactions.Release(ctx, transferTxID)
 
@@ -138,13 +142,13 @@ func (a *Agent) CancelPendingTransfer(ctx context.Context, transferTxID bitcoin.
 	transferTransaction.Unlock()
 
 	if transfer == nil {
-		return errors.New("Missing transfer action")
+		return nil, errors.New("Missing transfer action")
 	}
 
 	transferContracts, err := parseTransferContracts(transferTransaction, transfer,
 		agentLockingScript)
 	if err != nil {
-		return errors.Wrap(err, "parse contracts")
+		return nil, errors.Wrap(err, "parse contracts")
 	}
 
 	// Collect balances effected by transfer.
@@ -194,7 +198,7 @@ func (a *Agent) CancelPendingTransfer(ctx context.Context, transferTxID bitcoin.
 		balances, err := a.caches.Balances.GetMulti(instrumentCtx, agentLockingScript,
 			instrumentCode, lockingScripts)
 		if err != nil {
-			return errors.Wrap(err, "get balances")
+			return nil, errors.Wrap(err, "get balances")
 		}
 		defer a.caches.Balances.ReleaseMulti(instrumentCtx, agentLockingScript, instrumentCode,
 			balances)
@@ -207,12 +211,12 @@ func (a *Agent) CancelPendingTransfer(ctx context.Context, transferTxID bitcoin.
 	switch v := lockerResponse.(type) {
 	case uint64:
 	case error:
-		return errors.Wrap(v, "balance locker")
+		return nil, errors.Wrap(v, "balance locker")
 	}
 
 	// Cancel pending transfers associated with this transfer txid.
 	allBalances.CancelPending(transferTxID)
 	allBalances.Unlock()
 
-	return nil
+	return nil, nil
 }

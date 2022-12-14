@@ -27,7 +27,7 @@ func Test_Proposal_Valid(t *testing.T) {
 	ctx := logger.ContextWithLogger(context.Background(), true, true, "")
 	store := storage.NewMockStorage()
 	broadcaster := state.NewMockTxBroadcaster()
-	scheduler := platform.NewScheduler()
+	scheduler := platform.NewScheduler(broadcaster)
 	caches := state.StartTestCaches(ctx, t, store, cacher.DefaultConfig(), time.Second)
 	balanceLocker := state.NewInlineBalanceLocker()
 	_, feeLockingScript, _ := state.MockKey()
@@ -447,11 +447,11 @@ func Test_Ballots_Valid(t *testing.T) {
 		}
 	}
 
-	if err := agent.FinalizeVote(ctx, voteTxID); err != nil {
+	responseTx2, err := agent.FinalizeVote(ctx, voteTxID)
+	if err != nil {
 		t.Fatalf("Failed to finalize vote : %s", err)
 	}
 
-	responseTx2 := broadcaster.GetLastTx()
 	if responseTx2 == nil {
 		t.Fatalf("No response tx")
 	}

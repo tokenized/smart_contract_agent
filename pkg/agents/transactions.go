@@ -3,6 +3,7 @@ package agents
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/tokenized/channels/wallet"
 	"github.com/tokenized/logger"
@@ -129,10 +130,18 @@ func (a *Agent) Process(ctx context.Context, transaction *state.Transaction,
 	for i, action := range actionList {
 		if isRequest(action.Action) {
 			if feeRate < minFeeRate {
-				return errors.Wrap(a.sendRejection(ctx, transaction, action.OutputIndex,
+				etx, err := a.createRejection(ctx, transaction, action.OutputIndex,
 					platform.NewRejectError(actions.RejectionsInsufficientTxFeeFunding,
-						fmt.Sprintf("fee rate %.4f, minimum %.4f", feeRate, minFeeRate))),
-					"reject")
+						fmt.Sprintf("fee rate %.4f, minimum %.4f", feeRate, minFeeRate)))
+				if err != nil {
+					return errors.Wrap(err, "create rejection")
+				}
+
+				if etx != nil {
+					if err := a.BroadcastTx(ctx, etx, nil); err != nil {
+						return errors.Wrap(err, "broadcast")
+					}
+				}
 			}
 		}
 
@@ -147,6 +156,7 @@ func (a *Agent) Process(ctx context.Context, transaction *state.Transaction,
 
 func (a *Agent) processAction(ctx context.Context, transaction *state.Transaction,
 	txid bitcoin.Hash32, action actions.Action, outputIndex int) error {
+	start := time.Now()
 
 	processed := transaction.ContractProcessed(a.ContractHash(), outputIndex)
 	if len(processed) > 0 {
@@ -167,11 +177,21 @@ func (a *Agent) processAction(ctx context.Context, transaction *state.Transactio
 		logger.String("action_name", action.TypeName()),
 	}, "Processing action")
 
+	isRequest := isRequest(action)
+
 	if err := action.Validate(); err != nil {
-		if isRequest(action) {
-			return errors.Wrap(a.sendRejection(ctx, transaction, outputIndex,
-				platform.NewRejectError(actions.RejectionsMsgMalformed, err.Error())),
-				"reject")
+		if isRequest {
+			etx, err := a.createRejection(ctx, transaction, outputIndex,
+				platform.NewRejectError(actions.RejectionsMsgMalformed, err.Error()))
+			if err != nil {
+				return errors.Wrap(err, "create rejection")
+			}
+
+			if etx != nil {
+				if err := a.BroadcastTx(ctx, etx, nil); err != nil {
+					return errors.Wrap(err, "broadcast")
+				}
+			}
 		} else {
 			logger.ErrorWithFields(ctx, []logger.Field{
 				logger.Stringer("txid", txid),
@@ -182,86 +202,126 @@ func (a *Agent) processAction(ctx context.Context, transaction *state.Transactio
 		}
 	}
 
+	var responseEtx *expanded_tx.ExpandedTx
+	var processError error
 	switch act := action.(type) {
 	case *actions.ContractOffer:
-		return a.processContractOffer(ctx, transaction, act, outputIndex)
+		responseEtx, processError = a.processContractOffer(ctx, transaction, act, outputIndex)
 
 	case *actions.ContractAmendment:
-		return a.processContractAmendment(ctx, transaction, act, outputIndex)
+		responseEtx, processError = a.processContractAmendment(ctx, transaction, act, outputIndex)
 
 	case *actions.ContractFormation:
-		return a.processContractFormation(ctx, transaction, act, outputIndex)
+		processError = a.processContractFormation(ctx, transaction, act, outputIndex)
 
 	case *actions.ContractAddressChange:
-		return a.processContractAddressChange(ctx, transaction, act, outputIndex)
+		responseEtx, processError = a.processContractAddressChange(ctx, transaction, act,
+			outputIndex)
 
 	case *actions.BodyOfAgreementOffer:
-		return a.processBodyOfAgreementOffer(ctx, transaction, act, outputIndex)
+		responseEtx, processError = a.processBodyOfAgreementOffer(ctx, transaction, act,
+			outputIndex)
 
 	case *actions.BodyOfAgreementAmendment:
-		return a.processBodyOfAgreementAmendment(ctx, transaction, act, outputIndex)
+		responseEtx, processError = a.processBodyOfAgreementAmendment(ctx, transaction, act,
+			outputIndex)
 
 	case *actions.BodyOfAgreementFormation:
-		return a.processBodyOfAgreementFormation(ctx, transaction, act, outputIndex)
+		processError = a.processBodyOfAgreementFormation(ctx, transaction, act, outputIndex)
 
 	case *actions.InstrumentDefinition:
-		return a.processInstrumentDefinition(ctx, transaction, act, outputIndex)
+		responseEtx, processError = a.processInstrumentDefinition(ctx, transaction, act,
+			outputIndex)
 
 	case *actions.InstrumentModification:
-		return a.processInstrumentModification(ctx, transaction, act, outputIndex)
+		responseEtx, processError = a.processInstrumentModification(ctx, transaction, act,
+			outputIndex)
 
 	case *actions.InstrumentCreation:
-		return a.processInstrumentCreation(ctx, transaction, act, outputIndex)
+		processError = a.processInstrumentCreation(ctx, transaction, act, outputIndex)
 
 	case *actions.Transfer:
-		return a.processTransfer(ctx, transaction, act, outputIndex)
+		responseEtx, processError = a.processTransfer(ctx, transaction, act, outputIndex)
 
 	case *actions.Settlement:
-		return a.processSettlement(ctx, transaction, act, outputIndex)
+		processError = a.processSettlement(ctx, transaction, act, outputIndex)
 
 	case *actions.RectificationSettlement:
 		// TODO Create function that watches for "double spent" requests and sends Rectification
 		// Settlements. --ce
-		return a.processRectificationSettlement(ctx, transaction, act, outputIndex)
+		processError = a.processRectificationSettlement(ctx, transaction, act, outputIndex)
 
 	case *actions.Proposal:
-		return a.processProposal(ctx, transaction, act, outputIndex)
+		responseEtx, processError = a.processProposal(ctx, transaction, act, outputIndex)
 
 	case *actions.Vote:
-		return a.processVote(ctx, transaction, act, outputIndex)
+		processError = a.processVote(ctx, transaction, act, outputIndex)
 
 	case *actions.BallotCast:
-		return a.processBallotCast(ctx, transaction, act, outputIndex)
+		responseEtx, processError = a.processBallotCast(ctx, transaction, act, outputIndex)
 
 	case *actions.BallotCounted:
-		return a.processBallotCounted(ctx, transaction, act, outputIndex)
+		processError = a.processBallotCounted(ctx, transaction, act, outputIndex)
 
 	case *actions.Result:
-		return a.processVoteResult(ctx, transaction, act, outputIndex)
+		processError = a.processVoteResult(ctx, transaction, act, outputIndex)
 
 	case *actions.Order:
-		return a.processOrder(ctx, transaction, act, outputIndex)
+		responseEtx, processError = a.processOrder(ctx, transaction, act, outputIndex)
 
 	case *actions.Freeze:
-		return a.processFreeze(ctx, transaction, act, outputIndex)
+		processError = a.processFreeze(ctx, transaction, act, outputIndex)
 
 	case *actions.Thaw:
-		return a.processThaw(ctx, transaction, act, outputIndex)
+		processError = a.processThaw(ctx, transaction, act, outputIndex)
 
 	case *actions.Confiscation:
-		return a.processConfiscation(ctx, transaction, act, outputIndex)
+		processError = a.processConfiscation(ctx, transaction, act, outputIndex)
 
 	case *actions.DeprecatedReconciliation:
-		return a.processReconciliation(ctx, transaction, act, outputIndex)
+		processError = a.processReconciliation(ctx, transaction, act, outputIndex)
 
 	case *actions.Message:
-		return a.processMessage(ctx, transaction, act, outputIndex)
+		responseEtx, processError = a.processMessage(ctx, transaction, act, outputIndex)
 
 	case *actions.Rejection:
-		return a.processRejection(ctx, transaction, act, outputIndex)
+		responseEtx, processError = a.processRejection(ctx, transaction, act, outputIndex)
 
 	default:
 		return fmt.Errorf("Action not supported: %s", action.Code())
+	}
+
+	logger.InfoWithFields(ctx, []logger.Field{
+		logger.MillisecondsFromNano("elapsed_ms", time.Since(start).Nanoseconds()),
+		logger.Stringer("txid", txid),
+		logger.Int("output_index", outputIndex),
+		logger.String("action_code", action.Code()),
+		logger.String("action_name", action.TypeName()),
+	}, "Processed action")
+
+	if responseEtx != nil {
+		if err := a.BroadcastTx(ctx, responseEtx, nil); err != nil {
+			return errors.Wrap(err, "broadcast")
+		}
+	}
+
+	if processError != nil {
+		if rejectError, ok := errors.Cause(processError).(platform.RejectError); ok {
+			etx, err := a.createRejection(ctx, transaction, outputIndex, rejectError)
+			if err != nil {
+				return errors.Wrap(err, "create rejection")
+			}
+
+			if etx != nil {
+				if err := a.BroadcastTx(ctx, etx, nil); err != nil {
+					return errors.Wrap(err, "broadcast")
+				}
+			}
+
+			return nil
+		}
+
+		return errors.Wrap(processError, "process")
 	}
 
 	return nil
@@ -294,8 +354,17 @@ func (a *Agent) ProcessUnsafe(ctx context.Context, transaction *state.Transactio
 				return nil
 			}
 
-			return errors.Wrap(a.sendRejection(ctx, transaction, action.OutputIndex,
-				platform.NewRejectError(actions.RejectionsDoubleSpend, "")), "reject")
+			etx, err := a.createRejection(ctx, transaction, action.OutputIndex,
+				platform.NewRejectError(actions.RejectionsDoubleSpend, ""))
+			if err != nil {
+				return errors.Wrap(err, "create rejection")
+			}
+
+			if etx != nil {
+				if err := a.BroadcastTx(ctx, etx, nil); err != nil {
+					return errors.Wrap(err, "broadcast")
+				}
+			}
 		}
 
 		// If it isn't a request then we can process it like normal.
