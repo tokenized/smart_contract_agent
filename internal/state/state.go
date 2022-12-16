@@ -19,9 +19,7 @@ type Caches struct {
 	Contracts            *ContractCache
 	Instruments          *InstrumentCache
 	Balances             *BalanceCache
-	Transactions         *TransactionCache
 	Subscriptions        *SubscriptionCache
-	Services             *ContractServicesCache
 	Votes                *VoteCache
 	Ballots              *BallotCache
 	RecoveryTransactions *RecoveryTransactionsCache
@@ -49,23 +47,11 @@ func NewCaches(cache *cacher.Cache) (*Caches, error) {
 	}
 	result.Balances = balances
 
-	transactions, err := NewTransactionCache(cache)
-	if err != nil {
-		return nil, errors.Wrap(err, "transactions")
-	}
-	result.Transactions = transactions
-
 	subscriptions, err := NewSubscriptionCache(cache)
 	if err != nil {
 		return nil, errors.Wrap(err, "subscriptions")
 	}
 	result.Subscriptions = subscriptions
-
-	services, err := NewContractServicesCache(cache)
-	if err != nil {
-		return nil, errors.Wrap(err, "services")
-	}
-	result.Services = services
 
 	votes, err := NewVoteCache(cache)
 	if err != nil {

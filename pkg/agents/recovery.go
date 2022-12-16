@@ -136,7 +136,7 @@ func (a *Agent) ProcessRecoveryRequests(ctx context.Context) error {
 func (a *Agent) processRecoveryRequest(ctx context.Context,
 	request *state.RecoveryTransaction) error {
 
-	transaction, err := a.caches.Transactions.Get(ctx, request.TxID)
+	transaction, err := a.transactions.Get(ctx, request.TxID)
 	if err != nil {
 		return errors.Wrap(err, "get tx")
 	}
@@ -144,13 +144,12 @@ func (a *Agent) processRecoveryRequest(ctx context.Context,
 	if transaction == nil {
 		return errors.New("Transaction Not Found")
 	}
-	defer a.caches.Transactions.Release(ctx, request.TxID)
+	defer a.transactions.Release(ctx, request.TxID)
 
-	agentLockingScript := a.LockingScript()
 	isTest := a.IsTest()
-	actionList, err := compileActions(transaction, agentLockingScript, isTest)
+	actionList, err := CompileActions(ctx, transaction, isTest)
 	if err != nil {
-		return errors.Wrap(err, "compile tx")
+		return errors.Wrap(err, "compile actions")
 	}
 
 	var recoveryActions []Action

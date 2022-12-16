@@ -9,7 +9,7 @@ import (
 	"github.com/tokenized/pkg/txbuilder"
 	"github.com/tokenized/pkg/wire"
 	"github.com/tokenized/smart_contract_agent/internal/platform"
-	"github.com/tokenized/smart_contract_agent/internal/state"
+	"github.com/tokenized/smart_contract_agent/pkg/transactions"
 	"github.com/tokenized/specification/dist/golang/actions"
 	"github.com/tokenized/specification/dist/golang/messages"
 	"github.com/tokenized/specification/dist/golang/protocol"
@@ -17,7 +17,7 @@ import (
 	"github.com/pkg/errors"
 )
 
-func (a *Agent) processRejection(ctx context.Context, transaction *state.Transaction,
+func (a *Agent) processRejection(ctx context.Context, transaction *transactions.Transaction,
 	rejection *actions.Rejection, outputIndex int) (*expanded_tx.ExpandedTx, error) {
 
 	transaction.Lock()
@@ -71,7 +71,7 @@ func (a *Agent) processRejection(ctx context.Context, transaction *state.Transac
 
 	// Check if this is a reject from another contract in a multi-contract transfer to a settlement
 	// request.
-	rejectedTransaction, err := a.caches.Transactions.Get(ctx, rejectedTxID)
+	rejectedTransaction, err := a.transactions.Get(ctx, rejectedTxID)
 	if err != nil {
 		return nil, errors.Wrap(err, "get tx")
 	}
@@ -82,7 +82,7 @@ func (a *Agent) processRejection(ctx context.Context, transaction *state.Transac
 		}, "Rejected transaction not found")
 		return nil, nil
 	}
-	defer a.caches.Transactions.Release(ctx, rejectedTxID)
+	defer a.transactions.Release(ctx, rejectedTxID)
 
 	// Find action
 	isTest := a.IsTest()
@@ -126,7 +126,7 @@ func (a *Agent) processRejection(ctx context.Context, transaction *state.Transac
 		return nil, nil
 	}
 	transferTxID := transferTransaction.GetTxID()
-	defer a.caches.Transactions.Release(ctx, transferTxID)
+	defer a.transactions.Release(ctx, transferTxID)
 
 	logger.InfoWithFields(ctx, []logger.Field{
 		logger.Stringer("transfer_txid", transferTxID),
@@ -182,7 +182,7 @@ func (a *Agent) processRejection(ctx context.Context, transaction *state.Transac
 		transferContracts.PreviousLockingScript)
 }
 
-func firstInputTxID(transaction *state.Transaction) bitcoin.Hash32 {
+func firstInputTxID(transaction *transactions.Transaction) bitcoin.Hash32 {
 	transaction.Lock()
 	firstInput := transaction.Input(0)
 	txid := firstInput.PreviousOutPoint.Hash
@@ -192,9 +192,9 @@ func firstInputTxID(transaction *state.Transaction) bitcoin.Hash32 {
 }
 
 func (a *Agent) traceToTransfer(ctx context.Context,
-	txid bitcoin.Hash32) (*state.Transaction, *actions.Transfer, int, error) {
+	txid bitcoin.Hash32) (*transactions.Transaction, *actions.Transfer, int, error) {
 
-	previousTransaction, err := a.caches.Transactions.Get(ctx, txid)
+	previousTransaction, err := a.transactions.Get(ctx, txid)
 	if err != nil {
 		return nil, nil, 0, errors.Wrap(err, "get tx")
 	}
@@ -223,7 +223,7 @@ func (a *Agent) traceToTransfer(ctx context.Context,
 			}
 		}
 		previousTransaction.Unlock()
-		a.caches.Transactions.Release(ctx, txid)
+		a.transactions.Release(ctx, txid)
 
 		if message != nil && (message.MessageCode == messages.CodeSettlementRequest ||
 			message.MessageCode == messages.CodeSignatureRequest) {
@@ -278,7 +278,7 @@ func (a *Agent) traceToTransfer(ctx context.Context,
 
 // createRejection creates a reject message transaction that spends the specified output and contains
 // the specified reject code.
-func (a *Agent) createRejection(ctx context.Context, transaction *state.Transaction, outputIndex int,
+func (a *Agent) createRejection(ctx context.Context, transaction *transactions.Transaction, outputIndex int,
 	rejectError error) (*expanded_tx.ExpandedTx, error) {
 
 	var reject *platform.RejectError
@@ -445,11 +445,11 @@ func (a *Agent) createRejection(ctx context.Context, transaction *state.Transact
 	}
 
 	rejectTxID := *rejectTx.MsgTx.TxHash()
-	rejectTransaction, err := a.caches.Transactions.AddRaw(ctx, rejectTx.MsgTx, nil)
+	rejectTransaction, err := a.transactions.AddRaw(ctx, rejectTx.MsgTx, nil)
 	if err != nil {
 		return nil, errors.Wrap(err, "add response tx")
 	}
-	defer a.caches.Transactions.Release(ctx, rejectTxID)
+	defer a.transactions.Release(ctx, rejectTxID)
 
 	// Set rejection tx as processed.
 	rejectTransaction.Lock()

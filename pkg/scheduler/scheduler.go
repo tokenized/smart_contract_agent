@@ -1,4 +1,4 @@
-package platform
+package scheduler
 
 import (
 	"context"

@@ -13,13 +13,14 @@ import (
 	"github.com/tokenized/pkg/wire"
 	"github.com/tokenized/smart_contract_agent/internal/platform"
 	"github.com/tokenized/smart_contract_agent/internal/state"
+	"github.com/tokenized/smart_contract_agent/pkg/transactions"
 	"github.com/tokenized/specification/dist/golang/actions"
 	"github.com/tokenized/specification/dist/golang/protocol"
 
 	"github.com/pkg/errors"
 )
 
-func (a *Agent) processProposal(ctx context.Context, transaction *state.Transaction,
+func (a *Agent) processProposal(ctx context.Context, transaction *transactions.Transaction,
 	proposal *actions.Proposal, outputIndex int) (*expanded_tx.ExpandedTx, error) {
 
 	agentLockingScript := a.LockingScript()
@@ -411,7 +412,7 @@ func (a *Agent) processProposal(ctx context.Context, transaction *state.Transact
 		return nil, errors.New("Vote already exists")
 	}
 
-	if err := stateVote.Prepare(ctx, a.caches, a.balanceLocker, contract, votingSystem,
+	if err := stateVote.Prepare(ctx, a.caches, a.locker, contract, votingSystem,
 		&now); err != nil {
 		return nil, errors.Wrap(err, "prepare vote")
 	}
@@ -420,11 +421,11 @@ func (a *Agent) processProposal(ctx context.Context, transaction *state.Transact
 	// signed.--ce
 	// vote.Timestamp = now // now might have changed while locking balance
 
-	voteTransaction, err := a.caches.Transactions.AddRaw(ctx, voteTx.MsgTx, nil)
+	voteTransaction, err := a.transactions.AddRaw(ctx, voteTx.MsgTx, nil)
 	if err != nil {
 		return nil, errors.Wrap(err, "add response tx")
 	}
-	defer a.caches.Transactions.Release(ctx, voteTxID)
+	defer a.transactions.Release(ctx, voteTxID)
 
 	// Set vote tx as processed since the contract is now formed.
 	voteTransaction.Lock()
@@ -456,14 +457,14 @@ func (a *Agent) processProposal(ctx context.Context, transaction *state.Transact
 			logger.Timestamp("task_start", int64(proposal.VoteCutOffTimestamp)),
 		}, "Scheduling finalize vote")
 
-		task := NewFinalizeVoteTask(cutOffTime, a.factory, agentLockingScript, voteTxID)
+		task := NewFinalizeVoteTask(cutOffTime, a.agentStore, agentLockingScript, voteTxID)
 		a.scheduler.Schedule(ctx, task)
 	}
 
 	return etx, nil
 }
 
-func (a *Agent) processVote(ctx context.Context, transaction *state.Transaction,
+func (a *Agent) processVote(ctx context.Context, transaction *transactions.Transaction,
 	vote *actions.Vote, outputIndex int) error {
 
 	// First input must be the agent's locking script
@@ -523,7 +524,7 @@ func (a *Agent) processVote(ctx context.Context, transaction *state.Transaction,
 
 	if addedVote.Proposal == nil {
 		// Fetch proposal
-		proposalTransaction, err := a.caches.Transactions.Get(ctx, proposalTxID)
+		proposalTransaction, err := a.transactions.Get(ctx, proposalTxID)
 		if err != nil {
 			return errors.Wrap(err, "get proposal tx")
 		}
@@ -573,7 +574,7 @@ func (a *Agent) processVote(ctx context.Context, transaction *state.Transaction,
 		// TODO This might not get the right balances. It needs to have the balances from when the
 		// vote was created. --ce
 		now := a.Now()
-		if err := addedVote.Prepare(ctx, a.caches, a.balanceLocker, contract, votingSystem,
+		if err := addedVote.Prepare(ctx, a.caches, a.locker, contract, votingSystem,
 			&now); err != nil {
 			return errors.Wrap(err, "prepare vote")
 		}
@@ -586,7 +587,7 @@ func (a *Agent) processVote(ctx context.Context, transaction *state.Transaction,
 	return nil
 }
 
-func (a *Agent) processBallotCast(ctx context.Context, transaction *state.Transaction,
+func (a *Agent) processBallotCast(ctx context.Context, transaction *transactions.Transaction,
 	ballotCast *actions.BallotCast, outputIndex int) (*expanded_tx.ExpandedTx, error) {
 
 	agentLockingScript := a.LockingScript()
@@ -758,11 +759,11 @@ func (a *Agent) processBallotCast(ctx context.Context, transaction *state.Transa
 	vote.ApplyVote(ballotCast.Vote, quantity)
 	vote.Unlock()
 
-	ballotCountedTransaction, err := a.caches.Transactions.AddRaw(ctx, ballotCountedTx.MsgTx, nil)
+	ballotCountedTransaction, err := a.transactions.AddRaw(ctx, ballotCountedTx.MsgTx, nil)
 	if err != nil {
 		return nil, errors.Wrap(err, "add response tx")
 	}
-	defer a.caches.Transactions.Release(ctx, ballotCountedTxID)
+	defer a.transactions.Release(ctx, ballotCountedTxID)
 
 	// Set ballot counted tx as processed since the contract is now formed.
 	ballotCountedTransaction.Lock()
@@ -791,7 +792,7 @@ func (a *Agent) processBallotCast(ctx context.Context, transaction *state.Transa
 	return etx, nil
 }
 
-func (a *Agent) processBallotCounted(ctx context.Context, transaction *state.Transaction,
+func (a *Agent) processBallotCounted(ctx context.Context, transaction *transactions.Transaction,
 	ballotCounted *actions.BallotCounted, outputIndex int) error {
 
 	// First input must be the agent's locking script
@@ -848,7 +849,7 @@ func (a *Agent) processBallotCounted(ctx context.Context, transaction *state.Tra
 		return errors.New("Missing vote proposal")
 	}
 
-	ballotCastTransaction, err := a.caches.Transactions.Get(ctx, ballotCastTxID)
+	ballotCastTransaction, err := a.transactions.Get(ctx, ballotCastTxID)
 	if err != nil {
 		return errors.Wrap(err, "get ballot cast tx")
 	}
@@ -856,7 +857,7 @@ func (a *Agent) processBallotCounted(ctx context.Context, transaction *state.Tra
 	if ballotCastTransaction == nil {
 		return errors.New("Ballot cast transaction not found")
 	}
-	defer a.caches.Transactions.Release(ctx, ballotCastTxID)
+	defer a.transactions.Release(ctx, ballotCastTxID)
 
 	ballotCastTransaction.Lock()
 	ballotCastInputOutput, err := transaction.InputOutput(0)
@@ -907,7 +908,7 @@ func (a *Agent) processBallotCounted(ctx context.Context, transaction *state.Tra
 	return nil
 }
 
-func (a *Agent) processVoteResult(ctx context.Context, transaction *state.Transaction,
+func (a *Agent) processVoteResult(ctx context.Context, transaction *transactions.Transaction,
 	result *actions.Result, outputIndex int) error {
 
 	// First input must be the agent's locking script
@@ -964,7 +965,8 @@ func (a *Agent) processVoteResult(ctx context.Context, transaction *state.Transa
 // fetchReferenceVote fetches a vote for a reference txid provided in an amendment or modification.
 // It returns nil if the txid is empty, or an error if the vote is not found or not complete.
 func fetchReferenceVote(ctx context.Context, caches *state.Caches,
-	contractLockingScript bitcoin.Script, txid []byte, isTest bool) (*state.Vote, error) {
+	transactions *transactions.TransactionCache, contractLockingScript bitcoin.Script, txid []byte,
+	isTest bool) (*state.Vote, error) {
 
 	if len(txid) == 0 {
 		return nil, nil
@@ -976,7 +978,7 @@ func fetchReferenceVote(ctx context.Context, caches *state.Caches,
 	}
 
 	// Retrieve Vote Result
-	voteResultTransaction, err := caches.Transactions.Get(ctx, *refTxID)
+	voteResultTransaction, err := transactions.Get(ctx, *refTxID)
 	if err != nil {
 		return nil, errors.Wrap(err, "get ref tx")
 	}
@@ -985,7 +987,7 @@ func fetchReferenceVote(ctx context.Context, caches *state.Caches,
 		return nil, platform.NewRejectError(actions.RejectionsMsgMalformed,
 			"RefTxID: Vote Result Tx Not Found")
 	}
-	defer caches.Transactions.Release(ctx, *refTxID)
+	defer transactions.Release(ctx, *refTxID)
 
 	var voteResult *actions.Result
 	voteResultTransaction.Lock()

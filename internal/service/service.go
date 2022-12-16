@@ -6,12 +6,18 @@ import (
 	"encoding/binary"
 	"sync"
 
+	"github.com/tokenized/channels/wallet"
 	"github.com/tokenized/pkg/bitcoin"
+	"github.com/tokenized/pkg/expanded_tx"
+	"github.com/tokenized/pkg/merkle_proof"
 	"github.com/tokenized/pkg/peer_channels"
 	"github.com/tokenized/pkg/storage"
-	"github.com/tokenized/smart_contract_agent/internal/platform"
 	"github.com/tokenized/smart_contract_agent/internal/state"
 	"github.com/tokenized/smart_contract_agent/pkg/agents"
+	"github.com/tokenized/smart_contract_agent/pkg/contract_services"
+	"github.com/tokenized/smart_contract_agent/pkg/locker"
+	"github.com/tokenized/smart_contract_agent/pkg/scheduler"
+	"github.com/tokenized/smart_contract_agent/pkg/transactions"
 	spynode "github.com/tokenized/spynode/pkg/client"
 
 	"github.com/pkg/errors"
@@ -33,13 +39,15 @@ type Service struct {
 
 	spyNodeClient spynode.Client
 	caches        *state.Caches
-	balanceLocker state.BalanceLocker
+	transactions  *transactions.TransactionCache
+	services      *contract_services.ContractServicesCache
+	locker        locker.Locker
 	store         storage.StreamStorage
 
 	broadcaster         agents.Broadcaster
 	fetcher             agents.Fetcher
 	headers             agents.BlockHeaders
-	scheduler           *platform.Scheduler
+	scheduler           *scheduler.Scheduler
 	peerChannelsFactory *peer_channels.Factory
 
 	nextSpyNodeMessageID uint64
@@ -49,8 +57,9 @@ type Service struct {
 
 func NewService(key bitcoin.Key, lockingScript bitcoin.Script, config agents.Config,
 	feeLockingScript bitcoin.Script, spyNodeClient spynode.Client, caches *state.Caches,
-	balanceLocker state.BalanceLocker, store storage.StreamStorage, broadcaster agents.Broadcaster,
-	fetcher agents.Fetcher, headers agents.BlockHeaders, scheduler *platform.Scheduler,
+	transactions *transactions.TransactionCache, services *contract_services.ContractServicesCache,
+	locker locker.Locker, store storage.StreamStorage, broadcaster agents.Broadcaster,
+	fetcher agents.Fetcher, headers agents.BlockHeaders, scheduler *scheduler.Scheduler,
 	peerChannelsFactory *peer_channels.Factory) *Service {
 
 	return &Service{
@@ -60,7 +69,9 @@ func NewService(key bitcoin.Key, lockingScript bitcoin.Script, config agents.Con
 		feeLockingScript:     feeLockingScript,
 		spyNodeClient:        spyNodeClient,
 		caches:               caches,
-		balanceLocker:        balanceLocker,
+		transactions:         transactions,
+		services:             services,
+		locker:               locker,
 		store:                store,
 		broadcaster:          broadcaster,
 		fetcher:              fetcher,
@@ -89,8 +100,8 @@ func (s *Service) Load(ctx context.Context) error {
 	}
 
 	agent, err := agents.NewAgent(ctx, s.key, s.lockingScript, s.config, s.feeLockingScript,
-		s.caches, s.balanceLocker, s.store, s.broadcaster, s.fetcher, s.headers, s.scheduler, s,
-		s.peerChannelsFactory)
+		s.caches, s.transactions, s.services, s.locker, s.store, s.broadcaster, s.fetcher,
+		s.headers, s.scheduler, s, s.peerChannelsFactory)
 	if err != nil {
 		return errors.Wrap(err, "new agent")
 	}
@@ -159,4 +170,51 @@ func (s *Service) Release(ctx context.Context) {
 		s.agent.Release(ctx)
 		s.agent = nil
 	}
+}
+
+func (s *Service) addTx(ctx context.Context, txid bitcoin.Hash32,
+	spyNodeTx *spynode.Tx) (*transactions.Transaction, error) {
+
+	transaction := &transactions.Transaction{
+		Tx: spyNodeTx.Tx,
+	}
+
+	transaction.SpentOutputs = make([]*expanded_tx.Output, len(spyNodeTx.Outputs))
+	for i, txout := range spyNodeTx.Outputs {
+		transaction.SpentOutputs[i] = &expanded_tx.Output{
+			Value:         txout.Value,
+			LockingScript: txout.LockingScript,
+		}
+	}
+
+	if spyNodeTx.State.Safe {
+		transaction.State = wallet.TxStateSafe
+	} else {
+		if spyNodeTx.State.UnSafe {
+			transaction.State |= wallet.TxStateUnsafe
+		}
+		if spyNodeTx.State.Cancelled {
+			transaction.State |= wallet.TxStateCancelled
+		}
+	}
+
+	if spyNodeTx.State.MerkleProof != nil {
+		mp := spyNodeTx.State.MerkleProof.ConvertToMerkleProof(txid)
+		transaction.MerkleProofs = []*merkle_proof.MerkleProof{mp}
+	}
+
+	addedTx, err := s.transactions.Add(ctx, transaction)
+	if err != nil {
+		return nil, errors.Wrap(err, "add tx")
+	}
+
+	if addedTx != transaction && spyNodeTx.State.MerkleProof != nil {
+		mp := spyNodeTx.State.MerkleProof.ConvertToMerkleProof(txid)
+		// Transaction already existed, so try to add the merkle proof to it.
+		addedTx.Lock()
+		addedTx.AddMerkleProof(mp)
+		addedTx.Unlock()
+	}
+
+	return addedTx, nil
 }

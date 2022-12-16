@@ -1,4 +1,4 @@
-package platform
+package headers
 
 import (
 	"context"
@@ -10,11 +10,13 @@ import (
 	"github.com/pkg/errors"
 )
 
+// GetBlockHeaders is the interface used by spynode client to provide block headers.
 type GetBlockHeaders interface {
 	BlockHash(context.Context, int) (*bitcoin.Hash32, error)
 	GetHeaders(context.Context, int, int) (*spyNodeClient.Headers, error)
 }
 
+// BlockHeaders is the interface implemented by this package to provide block headers.
 type BlockHeaders interface {
 	BlockHash(context.Context, int) (*bitcoin.Hash32, error)
 	GetHeader(context.Context, int) (*wire.BlockHeader, error)

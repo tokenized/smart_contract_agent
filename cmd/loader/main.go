@@ -18,6 +18,9 @@ import (
 	"github.com/tokenized/smart_contract_agent/internal/state"
 	"github.com/tokenized/smart_contract_agent/internal/whatsonchain"
 	"github.com/tokenized/smart_contract_agent/pkg/agents"
+	"github.com/tokenized/smart_contract_agent/pkg/contract_services"
+	"github.com/tokenized/smart_contract_agent/pkg/locker"
+	"github.com/tokenized/smart_contract_agent/pkg/transactions"
 	"github.com/tokenized/threads"
 
 	"github.com/pkg/errors"
@@ -87,11 +90,21 @@ func main() {
 		logger.Fatal(ctx, "Failed to create caches : %s", err)
 	}
 
-	balanceLocker := state.NewThreadedBalanceLocker(1000)
+	transactions, err := transactions.NewTransactionCache(cache)
+	if err != nil {
+		logger.Fatal(ctx, "Failed to create transactions cache : %s", err)
+	}
+
+	services, err := contract_services.NewContractServicesCache(cache)
+	if err != nil {
+		logger.Fatal(ctx, "Failed to create services cache : %s", err)
+	}
+
+	locker := locker.NewThreadedLocker(1000)
 
 	broadcaster := NewNoopBroadcaster()
 
-	factory := NewFactory()
+	agentStore := NewStore()
 
 	peerChannelsFactory := peer_channels.NewFactory()
 
@@ -101,12 +114,13 @@ func main() {
 	}
 
 	agent, err := agents.NewAgent(ctx, cfg.AgentKey, lockingScript, cfg.Agents, feeLockingScript,
-		caches, balanceLocker, store, broadcaster, woc, woc, nil, factory, peerChannelsFactory)
+		caches, transactions, services, locker, store, broadcaster, woc, woc, nil, agentStore,
+		peerChannelsFactory)
 	if err != nil {
 		logger.Fatal(ctx, "Failed to create agent : %s", err)
 	}
 
-	factory.SetAgent(agent)
+	agentStore.SetAgent(agent)
 
 	var cacheWait, lockerWait, loadWait sync.WaitGroup
 
@@ -117,11 +131,11 @@ func main() {
 		}, &cacheWait)
 
 	lockerThread, lockerComplete := threads.NewInterruptableThreadComplete("Balance Locker",
-		balanceLocker.Run, &lockerWait)
+		locker.Run, &lockerWait)
 
 	loadThread, loadComplete := threads.NewInterruptableThreadComplete("Load",
 		func(ctx context.Context, interrupt <-chan interface{}) error {
-			return load(ctx, interrupt, agent, caches.Transactions, woc)
+			return load(ctx, interrupt, agent, transactions, woc)
 		}, &loadWait)
 
 	cacheThread.Start(ctx)
@@ -171,10 +185,10 @@ func main() {
 	cacheWait.Wait()
 }
 
-func getTx(ctx context.Context, transactions *state.TransactionCache, woc *whatsonchain.Service,
-	txid bitcoin.Hash32) (*state.Transaction, error) {
+func getTx(ctx context.Context, transactionsCache *transactions.TransactionCache,
+	woc *whatsonchain.Service, txid bitcoin.Hash32) (*transactions.Transaction, error) {
 
-	if transaction, err := transactions.Get(ctx, txid); err != nil {
+	if transaction, err := transactionsCache.Get(ctx, txid); err != nil {
 		return nil, errors.Wrapf(err, "get transaction: %s", txid)
 	} else if transaction != nil {
 		return transaction, nil
@@ -186,15 +200,15 @@ func getTx(ctx context.Context, transactions *state.TransactionCache, woc *whats
 		return nil, errors.Wrapf(err, "woc get tx: %s", txid)
 	}
 
-	newTransaction := &state.Transaction{
+	newTransaction := &transactions.Transaction{
 		Tx:    gotTx,
 		State: wallet.TxStateSafe, // assume safe because it is history
 	}
-	return transactions.Add(ctx, newTransaction)
+	return transactionsCache.Add(ctx, newTransaction)
 }
 
-func getInputs(ctx context.Context, transactions *state.TransactionCache,
-	woc *whatsonchain.Service, transaction *state.Transaction) error {
+func getInputs(ctx context.Context, transactions *transactions.TransactionCache,
+	woc *whatsonchain.Service, transaction *transactions.Transaction) error {
 
 	transaction.Lock()
 	for index, txin := range transaction.Tx.TxIn {
@@ -220,7 +234,7 @@ func getInputs(ctx context.Context, transactions *state.TransactionCache,
 	return nil
 }
 
-func loadTx(ctx context.Context, agent *agents.Agent, transactions *state.TransactionCache,
+func loadTx(ctx context.Context, agent *agents.Agent, transactions *transactions.TransactionCache,
 	woc *whatsonchain.Service, txid bitcoin.Hash32) error {
 
 	logger.InfoWithFields(ctx, []logger.Field{
@@ -237,15 +251,20 @@ func loadTx(ctx context.Context, agent *agents.Agent, transactions *state.Transa
 		return errors.Wrapf(err, "get inputs: %s", txid)
 	}
 
-	if err := agent.UpdateTransaction(ctx, transaction); err != nil {
-		return errors.Wrapf(err, "update transaction")
+	actionList, err := agents.CompileActions(ctx, transaction, agent.IsTest())
+	if err != nil {
+		return errors.Wrapf(err, "compile actions: %s", txid)
+	}
+
+	if err := agent.UpdateTransaction(ctx, transaction, actionList); err != nil {
+		return errors.Wrapf(err, "update transaction: %s", txid)
 	}
 
 	return nil
 }
 
 func load(ctx context.Context, interrupt <-chan interface{}, agent *agents.Agent,
-	transactions *state.TransactionCache, woc *whatsonchain.Service) error {
+	transactions *transactions.TransactionCache, woc *whatsonchain.Service) error {
 
 	history, err := woc.GetLockingScriptHistory(ctx, agent.LockingScript())
 	if err != nil {
@@ -299,33 +318,33 @@ func (*NoopBroadcaster) BroadcastTx(ctx context.Context, etx *expanded_tx.Expand
 	return nil
 }
 
-type Factory struct {
+type Store struct {
 	lockingScript bitcoin.Script
 	agent         *agents.Agent
 
 	lock sync.Mutex
 }
 
-func NewFactory() *Factory {
-	return &Factory{}
+func NewStore() *Store {
+	return &Store{}
 }
 
-func (f *Factory) SetAgent(agent *agents.Agent) {
-	f.lock.Lock()
-	defer f.lock.Unlock()
+func (s *Store) SetAgent(agent *agents.Agent) {
+	s.lock.Lock()
+	defer s.lock.Unlock()
 
-	f.lockingScript = agent.LockingScript()
-	f.agent = agent
+	s.lockingScript = agent.LockingScript()
+	s.agent = agent
 }
 
-func (f *Factory) GetAgent(ctx context.Context,
+func (s *Store) GetAgent(ctx context.Context,
 	lockingScript bitcoin.Script) (*agents.Agent, error) {
-	f.lock.Lock()
-	defer f.lock.Unlock()
+	s.lock.Lock()
+	defer s.lock.Unlock()
 
-	if !f.lockingScript.Equal(lockingScript) {
+	if !s.lockingScript.Equal(lockingScript) {
 		return nil, nil
 	}
 
-	return f.agent.Copy(ctx), nil
+	return s.agent.Copy(ctx), nil
 }

@@ -13,8 +13,11 @@ import (
 	"github.com/tokenized/pkg/peer_channels"
 	"github.com/tokenized/pkg/storage"
 	"github.com/tokenized/pkg/wire"
-	"github.com/tokenized/smart_contract_agent/internal/platform"
 	"github.com/tokenized/smart_contract_agent/internal/state"
+	"github.com/tokenized/smart_contract_agent/pkg/contract_services"
+	"github.com/tokenized/smart_contract_agent/pkg/locker"
+	"github.com/tokenized/smart_contract_agent/pkg/scheduler"
+	"github.com/tokenized/smart_contract_agent/pkg/transactions"
 	"github.com/tokenized/specification/dist/golang/actions"
 
 	"github.com/pkg/errors"
@@ -55,18 +58,20 @@ type Agent struct {
 	lockingScript    bitcoin.Script
 	feeLockingScript bitcoin.Script
 
-	store         storage.CopyList
-	caches        *state.Caches
-	balanceLocker state.BalanceLocker
+	store        storage.CopyList
+	caches       *state.Caches
+	transactions *transactions.TransactionCache
+	services     *contract_services.ContractServicesCache
+	locker       locker.Locker
 
 	broadcaster Broadcaster
 	fetcher     Fetcher
 	headers     BlockHeaders
 
-	// scheduler and factory are used to schedule tasks that spawn a new agent and perform a
+	// scheduler and store are used to schedule tasks that spawn a new agent and perform a
 	// function. For example, vote finalization and multi-contract transfer expiration.
-	scheduler *platform.Scheduler
-	factory   AgentFactory
+	scheduler  *scheduler.Scheduler
+	agentStore Store
 
 	peerChannelsFactory   *peer_channels.Factory
 	peerChannelsProtocols *channels.Protocols
@@ -87,14 +92,15 @@ type BlockHeaders interface {
 	GetHeader(context.Context, int) (*wire.BlockHeader, error)
 }
 
-type AgentFactory interface {
+type Store interface {
 	GetAgent(ctx context.Context, lockingScript bitcoin.Script) (*Agent, error)
 }
 
 func NewAgent(ctx context.Context, key bitcoin.Key, lockingScript bitcoin.Script, config Config,
-	feeLockingScript bitcoin.Script, caches *state.Caches, balanceLocker state.BalanceLocker,
-	store storage.CopyList, broadcaster Broadcaster, fetcher Fetcher, headers BlockHeaders,
-	scheduler *platform.Scheduler, factory AgentFactory,
+	feeLockingScript bitcoin.Script, caches *state.Caches,
+	transactions *transactions.TransactionCache, services *contract_services.ContractServicesCache,
+	locker locker.Locker, store storage.CopyList, broadcaster Broadcaster, fetcher Fetcher,
+	headers BlockHeaders, scheduler *scheduler.Scheduler, agentStore Store,
 	peerChannelsFactory *peer_channels.Factory) (*Agent, error) {
 
 	newContract := &state.Contract{
@@ -113,13 +119,15 @@ func NewAgent(ctx context.Context, key bitcoin.Key, lockingScript bitcoin.Script
 		lockingScript:         lockingScript,
 		feeLockingScript:      feeLockingScript,
 		caches:                caches,
-		balanceLocker:         balanceLocker,
+		transactions:          transactions,
+		services:              services,
+		locker:                locker,
 		store:                 store,
 		broadcaster:           broadcaster,
 		fetcher:               fetcher,
 		headers:               headers,
 		scheduler:             scheduler,
-		factory:               factory,
+		agentStore:            agentStore,
 		peerChannelsFactory:   peerChannelsFactory,
 		peerChannelsProtocols: channels.NewProtocols(channelsExpandedTx.NewProtocol()),
 	}

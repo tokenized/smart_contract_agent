@@ -6,14 +6,14 @@ import (
 	"github.com/tokenized/logger"
 	"github.com/tokenized/pkg/expanded_tx"
 	"github.com/tokenized/smart_contract_agent/internal/platform"
-	"github.com/tokenized/smart_contract_agent/internal/state"
+	"github.com/tokenized/smart_contract_agent/pkg/transactions"
 	"github.com/tokenized/specification/dist/golang/actions"
 	"github.com/tokenized/specification/dist/golang/messages"
 
 	"github.com/pkg/errors"
 )
 
-func (a *Agent) processMessage(ctx context.Context, transaction *state.Transaction,
+func (a *Agent) processMessage(ctx context.Context, transaction *transactions.Transaction,
 	message *actions.Message, outputIndex int) (*expanded_tx.ExpandedTx, error) {
 
 	// Verify appropriate output belongs to this contract.
@@ -146,14 +146,14 @@ func (a *Agent) processMessage(ctx context.Context, transaction *state.Transacti
 	return responseEtx, processErr
 }
 
-func (a *Agent) processNonRelevantMessage(ctx context.Context, transaction *state.Transaction,
+func (a *Agent) processNonRelevantMessage(ctx context.Context, transaction *transactions.Transaction,
 	message *actions.Message) error {
 
 	transaction.Lock()
 	firstInput := transaction.Input(0)
 	transaction.Unlock()
 
-	previousTransaction, err := a.caches.Transactions.Get(ctx, firstInput.PreviousOutPoint.Hash)
+	previousTransaction, err := a.transactions.Get(ctx, firstInput.PreviousOutPoint.Hash)
 	if err != nil {
 		return errors.Wrap(err, "get tx")
 	}
@@ -164,7 +164,7 @@ func (a *Agent) processNonRelevantMessage(ctx context.Context, transaction *stat
 		}, "Previous transaction not found")
 		return nil
 	}
-	defer a.caches.Transactions.Release(ctx, firstInput.PreviousOutPoint.Hash)
+	defer a.transactions.Release(ctx, firstInput.PreviousOutPoint.Hash)
 
 	return nil
 }

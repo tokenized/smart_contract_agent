@@ -13,6 +13,7 @@ import (
 	"github.com/tokenized/pkg/bitcoin"
 	"github.com/tokenized/pkg/bsor"
 	"github.com/tokenized/pkg/storage"
+	"github.com/tokenized/smart_contract_agent/pkg/locker"
 	"github.com/tokenized/specification/dist/golang/actions"
 	"github.com/tokenized/specification/dist/golang/protocol"
 
@@ -179,7 +180,7 @@ func (c *VoteCache) ReleaseMulti(ctx context.Context, contractLockingScript bitc
 	}
 }
 
-func (v *Vote) Prepare(ctx context.Context, caches *Caches, balanceLocker BalanceLocker,
+func (v *Vote) Prepare(ctx context.Context, caches *Caches, locker locker.Locker,
 	contract *Contract, votingSystem *actions.VotingSystemField, now *uint64) error {
 
 	contract.Lock()
@@ -215,12 +216,12 @@ func (v *Vote) Prepare(ctx context.Context, caches *Caches, balanceLocker Balanc
 	}
 
 	if len(v.Proposal.InstrumentCode) == 0 || v.ContractWideVote {
-		if err := v.BuildContractBallots(ctx, caches, balanceLocker, contract, votingSystem,
+		if err := v.BuildContractBallots(ctx, caches, locker, contract, votingSystem,
 			now); err != nil {
 			return errors.Wrap(err, "build contract ballots")
 		}
 	} else {
-		if err := v.BuildInstrumentBallots(ctx, caches, balanceLocker, contract, votingSystem,
+		if err := v.BuildInstrumentBallots(ctx, caches, locker, contract, votingSystem,
 			now); err != nil {
 			return errors.Wrap(err, "instrument ballots")
 		}
@@ -324,9 +325,8 @@ func (v *Vote) CalculateResults(ctx context.Context) ([]uint64, string) {
 	return tallys, string(result)
 }
 
-func (v *Vote) BuildInstrumentBallots(ctx context.Context, caches *Caches,
-	balanceLocker BalanceLocker, contract *Contract, votingSystem *actions.VotingSystemField,
-	now *uint64) error {
+func (v *Vote) BuildInstrumentBallots(ctx context.Context, caches *Caches, locker locker.Locker,
+	contract *Contract, votingSystem *actions.VotingSystemField, now *uint64) error {
 
 	instrumentHash20, err := bitcoin.NewHash20(v.Proposal.InstrumentCode)
 	if err != nil {
@@ -384,13 +384,13 @@ func (v *Vote) BuildInstrumentBallots(ctx context.Context, caches *Caches,
 	}
 	defer caches.Balances.ReleaseMulti(ctx, contractLockingScript, instrumentCode, balances)
 
-	lockerResponseChannel := balanceLocker.AddRequest(BalanceSet{balances})
+	lockerResponseChannel := locker.AddRequest(BalanceSet{balances})
 	lockerResponse := <-lockerResponseChannel
 	switch v := lockerResponse.(type) {
 	case uint64:
 		*now = v
 	case error:
-		return errors.Wrap(v, "balance locker")
+		return errors.Wrap(v, "locker")
 	}
 
 	for _, balance := range balances {
@@ -455,9 +455,8 @@ func (v *Vote) BuildInstrumentBallots(ctx context.Context, caches *Caches,
 	return nil
 }
 
-func (v *Vote) BuildContractBallots(ctx context.Context, caches *Caches,
-	balanceLocker BalanceLocker, contract *Contract, votingSystem *actions.VotingSystemField,
-	now *uint64) error {
+func (v *Vote) BuildContractBallots(ctx context.Context, caches *Caches, locker locker.Locker,
+	contract *Contract, votingSystem *actions.VotingSystemField, now *uint64) error {
 
 	contract.Lock()
 	if contract.Formation == nil {
@@ -527,13 +526,13 @@ func (v *Vote) BuildContractBallots(ctx context.Context, caches *Caches,
 		}
 		defer caches.Balances.ReleaseMulti(ctx, contractLockingScript, instrumentCode, balances)
 
-		lockerResponseChannel := balanceLocker.AddRequest(BalanceSet{balances})
+		lockerResponseChannel := locker.AddRequest(BalanceSet{balances})
 		lockerResponse := <-lockerResponseChannel
 		switch v := lockerResponse.(type) {
 		case uint64:
 			*now = v
 		case error:
-			return errors.Wrap(v, "balance locker")
+			return errors.Wrap(v, "locker")
 		}
 
 		for _, balance := range balances {

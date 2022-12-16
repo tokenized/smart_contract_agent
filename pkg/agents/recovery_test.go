@@ -14,6 +14,8 @@ import (
 	"github.com/tokenized/pkg/txbuilder"
 	"github.com/tokenized/pkg/wire"
 	"github.com/tokenized/smart_contract_agent/internal/state"
+	"github.com/tokenized/smart_contract_agent/pkg/locker"
+	"github.com/tokenized/smart_contract_agent/pkg/transactions"
 	"github.com/tokenized/specification/dist/golang/actions"
 	"github.com/tokenized/specification/dist/golang/protocol"
 )
@@ -26,8 +28,8 @@ func Test_Recovery_AcceptContractOffer(t *testing.T) {
 	agentConfig.RecoveryMode = true
 	cacherConfig := cacher.DefaultConfig()
 
-	caches := state.StartTestCaches(ctx, t, store, cacherConfig, time.Second)
-	balanceLocker := state.NewInlineBalanceLocker()
+	caches := StartTestCaches(ctx, t, store, cacherConfig, time.Second)
+	locker := locker.NewInlineLocker()
 
 	contractKey, contractLockingScript, _ := state.MockKey()
 	_, _, masterAddress := state.MockKey()
@@ -42,7 +44,7 @@ func Test_Recovery_AcceptContractOffer(t *testing.T) {
 	}
 
 	agent, err := NewAgent(ctx, contractKey, contractLockingScript, agentConfig, feeLockingScript,
-		caches.Caches, balanceLocker, store, broadcaster, nil, nil, nil, nil, peer_channels.NewFactory())
+		caches.Caches, caches.Transactions, caches.Services, locker, store, broadcaster, nil, nil, nil, nil, peer_channels.NewFactory())
 	if err != nil {
 		t.Fatalf("Failed to create agent : %s", err)
 	}
@@ -108,24 +110,25 @@ func Test_Recovery_AcceptContractOffer(t *testing.T) {
 
 	t.Logf("Created tx : %s", tx.String(bitcoin.MainNet))
 
-	addTransaction := &state.Transaction{
+	addTransaction := &transactions.Transaction{
 		Tx:           tx.MsgTx,
 		SpentOutputs: spentOutputs,
 	}
 
-	transaction, err := caches.Caches.Transactions.Add(ctx, addTransaction)
+	transaction, err := caches.Transactions.Add(ctx, addTransaction)
 	if err != nil {
 		t.Fatalf("Failed to add transaction : %s", err)
 	}
 
 	if err := agent.Process(ctx, transaction, []Action{{
-		OutputIndex: contractOfferScriptOutputIndex,
-		Action:      contractOffer,
+		AgentLockingScripts: []bitcoin.Script{contractLockingScript},
+		OutputIndex:         contractOfferScriptOutputIndex,
+		Action:              contractOffer,
 	}}); err != nil {
 		t.Fatalf("Failed to process transaction : %s", err)
 	}
 
-	caches.Caches.Transactions.Release(ctx, transaction.GetTxID())
+	caches.Transactions.Release(ctx, transaction.GetTxID())
 
 	responseTx := broadcaster.GetLastTx()
 	if responseTx != nil {
@@ -211,8 +214,8 @@ func Test_Recovery_ContractOfferAlreadyAccepted(t *testing.T) {
 	agentConfig.RecoveryMode = true
 	cacherConfig := cacher.DefaultConfig()
 
-	caches := state.StartTestCaches(ctx, t, store, cacherConfig, time.Second)
-	balanceLocker := state.NewInlineBalanceLocker()
+	caches := StartTestCaches(ctx, t, store, cacherConfig, time.Second)
+	locker := locker.NewInlineLocker()
 
 	contractKey, contractLockingScript, _ := state.MockKey()
 	_, _, masterAddress := state.MockKey()
@@ -227,7 +230,7 @@ func Test_Recovery_ContractOfferAlreadyAccepted(t *testing.T) {
 	}
 
 	agent, err := NewAgent(ctx, contractKey, contractLockingScript, agentConfig, feeLockingScript,
-		caches.Caches, balanceLocker, store, broadcaster, nil, nil, nil, nil,
+		caches.Caches, caches.Transactions, caches.Services, locker, store, broadcaster, nil, nil, nil, nil,
 		peer_channels.NewFactory())
 	if err != nil {
 		t.Fatalf("Failed to create agent : %s", err)
@@ -294,24 +297,25 @@ func Test_Recovery_ContractOfferAlreadyAccepted(t *testing.T) {
 
 	t.Logf("Created tx : %s", tx.String(bitcoin.MainNet))
 
-	addTransaction := &state.Transaction{
+	addTransaction := &transactions.Transaction{
 		Tx:           tx.MsgTx,
 		SpentOutputs: spentOutputs,
 	}
 
-	transaction, err := caches.Caches.Transactions.Add(ctx, addTransaction)
+	transaction, err := caches.Transactions.Add(ctx, addTransaction)
 	if err != nil {
 		t.Fatalf("Failed to add transaction : %s", err)
 	}
 
 	if err := agent.Process(ctx, transaction, []Action{{
-		OutputIndex: contractOfferScriptOutputIndex,
-		Action:      contractOffer,
+		AgentLockingScripts: []bitcoin.Script{contractLockingScript},
+		OutputIndex:         contractOfferScriptOutputIndex,
+		Action:              contractOffer,
 	}}); err != nil {
 		t.Fatalf("Failed to process transaction : %s", err)
 	}
 
-	caches.Caches.Transactions.Release(ctx, transaction.GetTxID())
+	caches.Transactions.Release(ctx, transaction.GetTxID())
 
 	responseTx := broadcaster.GetLastTx()
 	if responseTx != nil {
@@ -384,24 +388,25 @@ func Test_Recovery_ContractOfferAlreadyAccepted(t *testing.T) {
 
 	t.Logf("Created response tx : %s", formationTx.String(bitcoin.MainNet))
 
-	addTransaction = &state.Transaction{
+	addTransaction = &transactions.Transaction{
 		Tx:           formationTx.MsgTx,
 		SpentOutputs: spentOutputs,
 	}
 
-	transaction, err = caches.Caches.Transactions.Add(ctx, addTransaction)
+	transaction, err = caches.Transactions.Add(ctx, addTransaction)
 	if err != nil {
 		t.Fatalf("Failed to add transaction : %s", err)
 	}
 
 	if err := agent.Process(ctx, transaction, []Action{{
-		OutputIndex: contractFormationScriptOutputIndex,
-		Action:      contractFormation,
+		AgentLockingScripts: []bitcoin.Script{contractLockingScript},
+		OutputIndex:         contractFormationScriptOutputIndex,
+		Action:              contractFormation,
 	}}); err != nil {
 		t.Fatalf("Failed to process transaction : %s", err)
 	}
 
-	caches.Caches.Transactions.Release(ctx, transaction.GetTxID())
+	caches.Transactions.Release(ctx, transaction.GetTxID())
 
 	recoveryTxs, err = caches.Caches.RecoveryTransactions.Get(ctx, contractLockingScript)
 	if err != nil {

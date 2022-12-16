@@ -5,10 +5,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/pkg/errors"
 	"github.com/tokenized/logger"
 	"github.com/tokenized/pkg/peer_channels"
 	"github.com/tokenized/threads"
+
+	"github.com/pkg/errors"
 )
 
 func (s *Service) PeerChannelListen(ctx context.Context, interrupt <-chan interface{},

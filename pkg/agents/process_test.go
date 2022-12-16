@@ -17,6 +17,8 @@ import (
 	"github.com/tokenized/pkg/txbuilder"
 	"github.com/tokenized/pkg/wire"
 	"github.com/tokenized/smart_contract_agent/internal/state"
+	"github.com/tokenized/smart_contract_agent/pkg/locker"
+	"github.com/tokenized/smart_contract_agent/pkg/transactions"
 	"github.com/tokenized/specification/dist/golang/actions"
 	"github.com/tokenized/specification/dist/golang/instruments"
 	"github.com/tokenized/specification/dist/golang/protocol"
@@ -27,8 +29,8 @@ func Test_Process(t *testing.T) {
 	store := storage.NewMockStorage()
 	broadcaster := state.NewMockTxBroadcaster()
 
-	caches := state.StartTestCaches(ctx, t, store, cacher.DefaultConfig(), time.Second)
-	balanceLocker := state.NewInlineBalanceLocker()
+	caches := StartTestCaches(ctx, t, store, cacher.DefaultConfig(), time.Second)
+	locker := locker.NewInlineLocker()
 
 	contractKey, contractLockingScript, contractAddress := state.MockKey()
 	_, feeLockingScript, _ := state.MockKey()
@@ -45,7 +47,7 @@ func Test_Process(t *testing.T) {
 	}
 
 	agent, err := NewAgent(ctx, contractKey, contractLockingScript, DefaultConfig(),
-		feeLockingScript, caches.Caches, balanceLocker, store, broadcaster, nil, nil, nil, nil,
+		feeLockingScript, caches.Caches, caches.Transactions, caches.Services, locker, store, broadcaster, nil, nil, nil, nil,
 		peer_channels.NewFactory())
 	if err != nil {
 		t.Fatalf("Failed to create agent : %s", err)
@@ -63,18 +65,18 @@ func Test_Process(t *testing.T) {
 	offerTx.AddTxOut(wire.NewTxOut(2200, contractLockingScript))
 	contractOfferTxID := *offerTx.TxHash()
 
-	contractOfferTransaction := &state.Transaction{
+	contractOfferTransaction := &transactions.Transaction{
 		Tx:           offerTx,
 		State:        wallet.TxStateSafe,
 		SpentOutputs: outputs,
 	}
 
-	contractOfferTransaction, err = caches.Caches.Transactions.Add(ctx,
+	contractOfferTransaction, err = caches.Transactions.Add(ctx,
 		contractOfferTransaction)
 	if err != nil {
 		t.Fatalf("Failed to add contract offer tx : %s", err)
 	}
-	caches.Caches.Transactions.Release(ctx, contractOfferTxID)
+	caches.Transactions.Release(ctx, contractOfferTxID)
 
 	outputs = append(outputs, &expanded_tx.Output{
 		LockingScript: contractLockingScript,
@@ -119,25 +121,26 @@ func Test_Process(t *testing.T) {
 	tx.AddTxOut(wire.NewTxOut(0, contractFormationScript))
 	contractFormationTxID := *tx.TxHash()
 
-	contractFormationTransaction := &state.Transaction{
+	contractFormationTransaction := &transactions.Transaction{
 		Tx:           tx,
 		State:        wallet.TxStateSafe,
 		SpentOutputs: outputs,
 	}
 
-	contractFormationTransaction, err = caches.Caches.Transactions.Add(ctx,
+	contractFormationTransaction, err = caches.Transactions.Add(ctx,
 		contractFormationTransaction)
 	if err != nil {
 		t.Fatalf("Failed to add contract formation tx : %s", err)
 	}
 
 	if err := agent.Process(ctx, contractFormationTransaction, []Action{{
-		OutputIndex: contractFormationScriptOutputIndex,
-		Action:      contractFormation,
+		AgentLockingScripts: []bitcoin.Script{contractLockingScript},
+		OutputIndex:         contractFormationScriptOutputIndex,
+		Action:              contractFormation,
 	}}); err != nil {
 		t.Fatalf("Failed to process contract formation : %s", err)
 	}
-	caches.Caches.Transactions.Release(ctx, contractFormationTxID)
+	caches.Transactions.Release(ctx, contractFormationTxID)
 
 	// Check contract is correct.
 	currentContract, err := caches.Caches.Contracts.Get(ctx, contractLockingScript)
@@ -184,18 +187,18 @@ func Test_Process(t *testing.T) {
 	definitionTx.AddTxOut(wire.NewTxOut(2200, contractLockingScript))
 	instrumentDefinitionTxID := *definitionTx.TxHash()
 
-	instrumentDefinitionTransaction := &state.Transaction{
+	instrumentDefinitionTransaction := &transactions.Transaction{
 		Tx:           definitionTx,
 		State:        wallet.TxStateSafe,
 		SpentOutputs: outputs,
 	}
 
-	instrumentDefinitionTransaction, err = caches.Caches.Transactions.Add(ctx,
+	instrumentDefinitionTransaction, err = caches.Transactions.Add(ctx,
 		instrumentDefinitionTransaction)
 	if err != nil {
 		t.Fatalf("Failed to add instrument definition tx : %s", err)
 	}
-	caches.Caches.Transactions.Release(ctx, instrumentDefinitionTxID)
+	caches.Transactions.Release(ctx, instrumentDefinitionTxID)
 
 	outputs = append(outputs, &expanded_tx.Output{
 		LockingScript: contractLockingScript,
@@ -241,24 +244,25 @@ func Test_Process(t *testing.T) {
 	tx.AddTxOut(wire.NewTxOut(0, instrumentCreationScript))
 	instrumentCreationTxID := *tx.TxHash()
 
-	instrumentCreationTx := &state.Transaction{
+	instrumentCreationTx := &transactions.Transaction{
 		Tx:           tx,
 		State:        wallet.TxStateSafe,
 		SpentOutputs: outputs,
 	}
 
-	instrumentCreationTx, err = caches.Caches.Transactions.Add(ctx, instrumentCreationTx)
+	instrumentCreationTx, err = caches.Transactions.Add(ctx, instrumentCreationTx)
 	if err != nil {
 		t.Fatalf("Failed to add instrument creation tx : %s", err)
 	}
 
 	if err := agent.Process(ctx, instrumentCreationTx, []Action{{
-		OutputIndex: instrumentCreationScriptOutputIndex,
-		Action:      instrumentCreation,
+		AgentLockingScripts: []bitcoin.Script{contractLockingScript},
+		OutputIndex:         instrumentCreationScriptOutputIndex,
+		Action:              instrumentCreation,
 	}}); err != nil {
 		t.Fatalf("Failed to process instrument creation : %s", err)
 	}
-	caches.Caches.Transactions.Release(ctx, instrumentCreationTxID)
+	caches.Transactions.Release(ctx, instrumentCreationTxID)
 
 	// Check instrument is correct.
 	currentContract, err = caches.Caches.Contracts.Get(ctx, contractLockingScript)
@@ -400,18 +404,18 @@ func Test_Process(t *testing.T) {
 		transferTx.AddTxOut(wire.NewTxOut(2200, contractLockingScript))
 		transferTxID := *transferTx.TxHash()
 
-		transferTransaction := &state.Transaction{
+		transferTransaction := &transactions.Transaction{
 			Tx:           transferTx,
 			State:        wallet.TxStateSafe,
 			SpentOutputs: outputs,
 		}
 
-		transferTransaction, err = caches.Caches.Transactions.Add(ctx,
+		transferTransaction, err = caches.Transactions.Add(ctx,
 			transferTransaction)
 		if err != nil {
 			t.Fatalf("Failed to add transfer tx : %s", err)
 		}
-		caches.Caches.Transactions.Release(ctx, transferTxID)
+		caches.Transactions.Release(ctx, transferTxID)
 
 		outputs = append(outputs, &expanded_tx.Output{
 			LockingScript: contractLockingScript,
@@ -481,26 +485,27 @@ func Test_Process(t *testing.T) {
 		settlementTxID := *tx.TxHash()
 		txids = append(txids, settlementTxID)
 
-		settlementTx := &state.Transaction{
+		settlementTx := &transactions.Transaction{
 			Tx:           tx,
 			State:        wallet.TxStateSafe,
 			SpentOutputs: outputs,
 		}
 
-		settlementTx, err = caches.Caches.Transactions.Add(ctx, settlementTx)
+		settlementTx, err = caches.Transactions.Add(ctx, settlementTx)
 		if err != nil {
 			t.Fatalf("Failed to add settlement tx : %s", err)
 		}
 
 		t.Logf("Sending transfer request : %s", settlementTxID)
 		if err := agent.Process(ctx, settlementTx, []Action{{
-			OutputIndex: settlementScriptOutputIndex,
-			Action:      settlement,
+			AgentLockingScripts: []bitcoin.Script{contractLockingScript},
+			OutputIndex:         settlementScriptOutputIndex,
+			Action:              settlement,
 		}}); err != nil {
 			t.Fatalf("Failed to process settlement : %s", err)
 		}
 		t.Logf("Processed transfer request : %s", settlementTxID)
-		caches.Caches.Transactions.Release(ctx, settlementTxID)
+		caches.Transactions.Release(ctx, settlementTxID)
 	}
 
 	// Check caches.Balances
@@ -582,18 +587,18 @@ func Test_Process(t *testing.T) {
 		transferTx.AddTxOut(wire.NewTxOut(2200, contractLockingScript))
 		transferTxID := *transferTx.TxHash()
 
-		transferTransaction := &state.Transaction{
+		transferTransaction := &transactions.Transaction{
 			Tx:           transferTx,
 			State:        wallet.TxStateSafe,
 			SpentOutputs: outputs,
 		}
 
-		transferTransaction, err = caches.Caches.Transactions.Add(ctx,
+		transferTransaction, err = caches.Transactions.Add(ctx,
 			transferTransaction)
 		if err != nil {
 			t.Fatalf("Failed to add transfer tx : %s", err)
 		}
-		caches.Caches.Transactions.Release(ctx, transferTxID)
+		caches.Transactions.Release(ctx, transferTxID)
 
 		outputs = append(outputs, &expanded_tx.Output{
 			LockingScript: contractLockingScript,
@@ -663,24 +668,25 @@ func Test_Process(t *testing.T) {
 		settlementTxID := *tx.TxHash()
 		txids2 = append(txids2, settlementTxID)
 
-		settlementTx := &state.Transaction{
+		settlementTx := &transactions.Transaction{
 			Tx:           tx,
 			State:        wallet.TxStateSafe,
 			SpentOutputs: outputs,
 		}
 
-		settlementTx, err = caches.Caches.Transactions.Add(ctx, settlementTx)
+		settlementTx, err = caches.Transactions.Add(ctx, settlementTx)
 		if err != nil {
 			t.Fatalf("Failed to add settlement tx : %s", err)
 		}
 
 		if err := agent.Process(ctx, settlementTx, []Action{{
-			OutputIndex: settlementScriptOutputIndex,
-			Action:      settlement,
+			AgentLockingScripts: []bitcoin.Script{contractLockingScript},
+			OutputIndex:         settlementScriptOutputIndex,
+			Action:              settlement,
 		}}); err != nil {
 			t.Fatalf("Failed to process settlement : %s", err)
 		}
-		caches.Caches.Transactions.Release(ctx, settlementTxID)
+		caches.Transactions.Release(ctx, settlementTxID)
 	}
 
 	for i := 0; i < recipientCount; i++ {

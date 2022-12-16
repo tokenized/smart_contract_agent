@@ -13,6 +13,7 @@ import (
 	"github.com/tokenized/pkg/peer_channels"
 	"github.com/tokenized/smart_contract_agent/internal/state"
 	"github.com/tokenized/smart_contract_agent/pkg/client"
+	"github.com/tokenized/smart_contract_agent/pkg/transactions"
 	spyNodeClient "github.com/tokenized/spynode/pkg/client"
 
 	"github.com/google/uuid"
@@ -70,7 +71,7 @@ func (a *Agent) ProcessPeerChannelMessage(ctx context.Context, msg peer_channels
 	agentLockingScript := a.LockingScript()
 	isTest := a.IsTest()
 
-	requestOutputs, err := relevantRequestOutputs(request.Tx, agentLockingScript, isTest)
+	requestOutputs, err := relevantRequestOutputs(ctx, request.Tx, agentLockingScript, isTest)
 	if err != nil {
 		return errors.Wrap(err, "tx is relevant")
 	}
@@ -104,13 +105,13 @@ func (a *Agent) ProcessPeerChannelMessage(ctx context.Context, msg peer_channels
 	}
 
 	// If request has already been responded to then send response directly.
-	transaction, err := a.caches.Transactions.Get(ctx, txid)
+	transaction, err := a.transactions.Get(ctx, txid)
 	if err != nil {
 		return errors.Wrap(err, "get tx")
 	}
 
 	if transaction != nil {
-		defer a.caches.Transactions.Release(ctx, txid)
+		defer a.transactions.Release(ctx, txid)
 
 		contractHash := a.ContractHash()
 		allResponded := true
@@ -128,7 +129,7 @@ func (a *Agent) ProcessPeerChannelMessage(ctx context.Context, msg peer_channels
 						continue
 					}
 
-					responseEtx, err := a.caches.Transactions.GetExpandedTx(ctx,
+					responseEtx, err := a.transactions.GetExpandedTx(ctx,
 						*processed.ResponseTxID)
 					if err != nil {
 						return errors.Wrap(err, "get resposne tx")
@@ -170,10 +171,10 @@ func (a *Agent) ProcessPeerChannelMessage(ctx context.Context, msg peer_channels
 	// If the tx is not already known then save it and broadcast it.
 	if transaction == nil {
 		// Save transaction
-		if _, err := a.caches.Transactions.AddExpandedTx(ctx, request.Tx); err != nil {
+		if _, err := a.transactions.AddExpandedTx(ctx, request.Tx); err != nil {
 			return errors.Wrap(err, "add expanded tx")
 		}
-		a.caches.Transactions.Release(ctx, txid)
+		a.transactions.Release(ctx, txid)
 
 		if err := a.BroadcastTx(ctx, request.Tx, nil); err != nil {
 			if _, ok := errors.Cause(err).(spyNodeClient.RejectError); ok {
@@ -246,7 +247,7 @@ func (a *Agent) RemoveResponder(ctx context.Context, requestTxID bitcoin.Hash32,
 }
 
 func (a *Agent) Respond(ctx context.Context, requestTxID bitcoin.Hash32,
-	responseTransaction *state.Transaction) error {
+	responseTransaction *transactions.Transaction) error {
 
 	agentLockingScript := a.LockingScript()
 	responder, err := a.caches.Responders.Get(ctx, agentLockingScript, requestTxID)
@@ -268,7 +269,7 @@ func (a *Agent) Respond(ctx context.Context, requestTxID bitcoin.Hash32,
 	responder.Unlock()
 
 	responseTransaction.Lock()
-	responseEtx, err := a.caches.Transactions.ExpandedTx(ctx, responseTransaction)
+	responseEtx, err := a.transactions.ExpandedTx(ctx, responseTransaction)
 	responseTransaction.Unlock()
 	if err != nil {
 		return errors.Wrap(err, "expanded tx")

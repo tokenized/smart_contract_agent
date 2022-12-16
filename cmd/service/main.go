@@ -15,10 +15,14 @@ import (
 	"github.com/tokenized/pkg/expanded_tx"
 	"github.com/tokenized/pkg/peer_channels"
 	"github.com/tokenized/pkg/storage"
-	"github.com/tokenized/smart_contract_agent/internal/platform"
+	"github.com/tokenized/smart_contract_agent/internal/service"
 	"github.com/tokenized/smart_contract_agent/internal/state"
 	"github.com/tokenized/smart_contract_agent/pkg/agents"
-	"github.com/tokenized/smart_contract_agent/pkg/service"
+	"github.com/tokenized/smart_contract_agent/pkg/contract_services"
+	"github.com/tokenized/smart_contract_agent/pkg/headers"
+	"github.com/tokenized/smart_contract_agent/pkg/locker"
+	"github.com/tokenized/smart_contract_agent/pkg/scheduler"
+	"github.com/tokenized/smart_contract_agent/pkg/transactions"
 	spyNodeClient "github.com/tokenized/spynode/pkg/client"
 	"github.com/tokenized/threads"
 )
@@ -95,7 +99,7 @@ func main() {
 
 	broadcaster := NewSpyNodeBroadcaster(spyNode)
 
-	scheduler := platform.NewScheduler(broadcaster)
+	scheduler := scheduler.NewScheduler(broadcaster)
 
 	cache := cacher.NewCache(store, cfg.Cache)
 	caches, err := state.NewCaches(cache)
@@ -103,7 +107,17 @@ func main() {
 		logger.Fatal(ctx, "Failed to create caches : %s", err)
 	}
 
-	balanceLocker := state.NewThreadedBalanceLocker(1000)
+	transactions, err := transactions.NewTransactionCache(cache)
+	if err != nil {
+		logger.Fatal(ctx, "Failed to create transactions cache : %s", err)
+	}
+
+	services, err := contract_services.NewContractServicesCache(cache)
+	if err != nil {
+		logger.Fatal(ctx, "Failed to create services cache : %s", err)
+	}
+
+	locker := locker.NewThreadedLocker(1000)
 
 	lockingScript, err := cfg.AgentKey.LockingScript()
 	if err != nil {
@@ -111,8 +125,8 @@ func main() {
 	}
 
 	service := service.NewService(cfg.AgentKey, lockingScript, cfg.Agents, feeLockingScript,
-		spyNode, caches, balanceLocker, store, broadcaster, spyNode, platform.NewHeaders(spyNode),
-		scheduler, peerChannelsFactory)
+		spyNode, caches, transactions, services, locker, store, broadcaster, spyNode,
+		headers.NewHeaders(spyNode), scheduler, peerChannelsFactory)
 	spyNode.RegisterHandler(service)
 
 	var spyNodeWait, cacheWait, lockerWait, schedulerWait, peerChannelWait sync.WaitGroup
@@ -127,7 +141,7 @@ func main() {
 		}, &cacheWait)
 
 	lockerThread, lockerComplete := threads.NewInterruptableThreadComplete("Balance Locker",
-		balanceLocker.Run, &lockerWait)
+		locker.Run, &lockerWait)
 
 	spyNodeThread, spyNodeComplete := threads.NewInterruptableThreadComplete("SpyNode", spyNode.Run,
 		&spyNodeWait)

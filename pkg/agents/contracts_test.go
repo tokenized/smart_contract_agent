@@ -16,6 +16,8 @@ import (
 	"github.com/tokenized/pkg/storage"
 	"github.com/tokenized/pkg/txbuilder"
 	"github.com/tokenized/smart_contract_agent/internal/state"
+	"github.com/tokenized/smart_contract_agent/pkg/locker"
+	"github.com/tokenized/smart_contract_agent/pkg/transactions"
 	"github.com/tokenized/specification/dist/golang/actions"
 	"github.com/tokenized/specification/dist/golang/permissions"
 	"github.com/tokenized/specification/dist/golang/protocol"
@@ -26,9 +28,9 @@ func Test_Contracts_Offer_Invalid(t *testing.T) {
 	store := storage.NewMockStorage()
 	broadcaster := state.NewMockTxBroadcaster()
 
-	caches := state.StartTestCaches(ctx, t, store, cacher.DefaultConfig(), time.Second)
+	caches := StartTestCaches(ctx, t, store, cacher.DefaultConfig(), time.Second)
 
-	balanceLocker := state.NewInlineBalanceLocker()
+	locker := locker.NewInlineLocker()
 
 	contractKey, contractLockingScript, _ := state.MockKey()
 	_, feeLockingScript, _ := state.MockKey()
@@ -42,8 +44,8 @@ func Test_Contracts_Offer_Invalid(t *testing.T) {
 	}
 
 	agent, err := NewAgent(ctx, contractKey, contractLockingScript, DefaultConfig(),
-		feeLockingScript, caches.Caches, balanceLocker, store, broadcaster, nil, nil, nil, nil,
-		peer_channels.NewFactory())
+		feeLockingScript, caches.Caches, caches.Transactions, caches.Services, locker, store,
+		broadcaster, nil, nil, nil, nil, peer_channels.NewFactory())
 	if err != nil {
 		t.Fatalf("Failed to create agent : %s", err)
 	}
@@ -105,19 +107,20 @@ func Test_Contracts_Offer_Invalid(t *testing.T) {
 
 	t.Logf("Created tx : %s", tx.String(bitcoin.MainNet))
 
-	addTransaction := &state.Transaction{
+	addTransaction := &transactions.Transaction{
 		Tx:           tx.MsgTx,
 		SpentOutputs: spentOutputs,
 	}
 
-	transaction, err := caches.Caches.Transactions.Add(ctx, addTransaction)
+	transaction, err := caches.Transactions.Add(ctx, addTransaction)
 	if err != nil {
 		t.Fatalf("Failed to add transaction : %s", err)
 	}
 
 	if err := agent.Process(ctx, transaction, []Action{{
-		OutputIndex: contractOfferScriptOutputIndex,
-		Action:      contractOffer,
+		AgentLockingScripts: []bitcoin.Script{contractLockingScript},
+		OutputIndex:         contractOfferScriptOutputIndex,
+		Action:              contractOffer,
 	}}); err != nil {
 		t.Fatalf("Failed to process transaction : %s", err)
 	}
@@ -160,7 +163,7 @@ func Test_Contracts_Offer_Invalid(t *testing.T) {
 	js, _ := json.MarshalIndent(rejection, "", "  ")
 	t.Logf("Rejection : %s", js)
 
-	caches.Caches.Transactions.Release(ctx, transaction.GetTxID())
+	caches.Transactions.Release(ctx, transaction.GetTxID())
 
 	agent.Release(ctx)
 	caches.Caches.Contracts.Release(ctx, contractLockingScript)
@@ -172,9 +175,9 @@ func Test_Contracts_Offer_Valid(t *testing.T) {
 	store := storage.NewMockStorage()
 	broadcaster := state.NewMockTxBroadcaster()
 
-	caches := state.StartTestCaches(ctx, t, store, cacher.DefaultConfig(), time.Second)
+	caches := StartTestCaches(ctx, t, store, cacher.DefaultConfig(), time.Second)
 
-	balanceLocker := state.NewInlineBalanceLocker()
+	locker := locker.NewInlineLocker()
 
 	contractKey, contractLockingScript, _ := state.MockKey()
 	_, feeLockingScript, _ := state.MockKey()
@@ -189,7 +192,7 @@ func Test_Contracts_Offer_Valid(t *testing.T) {
 	}
 
 	agent, err := NewAgent(ctx, contractKey, contractLockingScript, DefaultConfig(),
-		feeLockingScript, caches.Caches, balanceLocker, store, broadcaster, nil, nil, nil, nil,
+		feeLockingScript, caches.Caches, caches.Transactions, caches.Services, locker, store, broadcaster, nil, nil, nil, nil,
 		peer_channels.NewFactory())
 	if err != nil {
 		t.Fatalf("Failed to create agent : %s", err)
@@ -256,24 +259,25 @@ func Test_Contracts_Offer_Valid(t *testing.T) {
 
 	t.Logf("Created tx : %s", tx.String(bitcoin.MainNet))
 
-	addTransaction := &state.Transaction{
+	addTransaction := &transactions.Transaction{
 		Tx:           tx.MsgTx,
 		SpentOutputs: spentOutputs,
 	}
 
-	transaction, err := caches.Caches.Transactions.Add(ctx, addTransaction)
+	transaction, err := caches.Transactions.Add(ctx, addTransaction)
 	if err != nil {
 		t.Fatalf("Failed to add transaction : %s", err)
 	}
 
 	if err := agent.Process(ctx, transaction, []Action{{
-		OutputIndex: contractOfferScriptOutputIndex,
-		Action:      contractOffer,
+		AgentLockingScripts: []bitcoin.Script{contractLockingScript},
+		OutputIndex:         contractOfferScriptOutputIndex,
+		Action:              contractOffer,
 	}}); err != nil {
 		t.Fatalf("Failed to process transaction : %s", err)
 	}
 
-	caches.Caches.Transactions.Release(ctx, transaction.GetTxID())
+	caches.Transactions.Release(ctx, transaction.GetTxID())
 
 	responseTx := broadcaster.GetLastTx()
 	if responseTx == nil {
@@ -361,9 +365,9 @@ func Test_Contracts_Offer_AlreadyExists(t *testing.T) {
 	store := storage.NewMockStorage()
 	broadcaster := state.NewMockTxBroadcaster()
 
-	caches := state.StartTestCaches(ctx, t, store, cacher.DefaultConfig(), time.Second)
+	caches := StartTestCaches(ctx, t, store, cacher.DefaultConfig(), time.Second)
 
-	balanceLocker := state.NewInlineBalanceLocker()
+	locker := locker.NewInlineLocker()
 
 	contractKey, contractLockingScript, _ := state.MockKey()
 	_, feeLockingScript, _ := state.MockKey()
@@ -384,7 +388,7 @@ func Test_Contracts_Offer_AlreadyExists(t *testing.T) {
 	}
 
 	agent, err := NewAgent(ctx, contractKey, contractLockingScript, DefaultConfig(),
-		feeLockingScript, caches.Caches, balanceLocker, store, broadcaster, nil, nil, nil, nil,
+		feeLockingScript, caches.Caches, caches.Transactions, caches.Services, locker, store, broadcaster, nil, nil, nil, nil,
 		peer_channels.NewFactory())
 	if err != nil {
 		t.Fatalf("Failed to create agent : %s", err)
@@ -446,19 +450,20 @@ func Test_Contracts_Offer_AlreadyExists(t *testing.T) {
 
 	t.Logf("Created tx : %s", tx.String(bitcoin.MainNet))
 
-	addTransaction := &state.Transaction{
+	addTransaction := &transactions.Transaction{
 		Tx:           tx.MsgTx,
 		SpentOutputs: spentOutputs,
 	}
 
-	transaction, err := caches.Caches.Transactions.Add(ctx, addTransaction)
+	transaction, err := caches.Transactions.Add(ctx, addTransaction)
 	if err != nil {
 		t.Fatalf("Failed to add transaction : %s", err)
 	}
 
 	if err := agent.Process(ctx, transaction, []Action{{
-		OutputIndex: contractOfferScriptOutputIndex,
-		Action:      contractOffer,
+		AgentLockingScripts: []bitcoin.Script{contractLockingScript},
+		OutputIndex:         contractOfferScriptOutputIndex,
+		Action:              contractOffer,
 	}}); err != nil {
 		t.Fatalf("Failed to process transaction : %s", err)
 	}
@@ -501,7 +506,7 @@ func Test_Contracts_Offer_AlreadyExists(t *testing.T) {
 	js, _ := json.MarshalIndent(rejection, "", "  ")
 	t.Logf("Rejection : %s", js)
 
-	caches.Caches.Transactions.Release(ctx, transaction.GetTxID())
+	caches.Transactions.Release(ctx, transaction.GetTxID())
 
 	agent.Release(ctx)
 	caches.Caches.Contracts.Release(ctx, contractLockingScript)
@@ -513,17 +518,17 @@ func Test_Contracts_Amendment_Valid(t *testing.T) {
 	store := storage.NewMockStorage()
 	broadcaster := state.NewMockTxBroadcaster()
 
-	caches := state.StartTestCaches(ctx, t, store, cacher.DefaultConfig(), time.Second)
-	contractKey, contractLockingScript, adminKey, adminLockingScript, contract := state.MockContract(ctx, caches)
+	caches := StartTestCaches(ctx, t, store, cacher.DefaultConfig(), time.Second)
+	contractKey, contractLockingScript, adminKey, adminLockingScript, contract := state.MockContract(ctx, &caches.TestCaches)
 
-	balanceLocker := state.NewInlineBalanceLocker()
+	locker := locker.NewInlineLocker()
 
 	var keyHash bitcoin.Hash32
 	rand.Read(keyHash[:])
 	_, feeLockingScript, _ := state.MockKey()
 
 	agent, err := NewAgent(ctx, contractKey, contractLockingScript, DefaultConfig(),
-		feeLockingScript, caches.Caches, balanceLocker, store, broadcaster, nil, nil, nil, nil,
+		feeLockingScript, caches.Caches, caches.Transactions, caches.Services, locker, store, broadcaster, nil, nil, nil, nil,
 		peer_channels.NewFactory())
 	if err != nil {
 		t.Fatalf("Failed to create agent : %s", err)
@@ -622,24 +627,25 @@ func Test_Contracts_Amendment_Valid(t *testing.T) {
 
 	t.Logf("Created tx : %s", tx.String(bitcoin.MainNet))
 
-	addTransaction := &state.Transaction{
+	addTransaction := &transactions.Transaction{
 		Tx:           tx.MsgTx,
 		SpentOutputs: spentOutputs,
 	}
 
-	transaction, err := caches.Caches.Transactions.Add(ctx, addTransaction)
+	transaction, err := caches.Transactions.Add(ctx, addTransaction)
 	if err != nil {
 		t.Fatalf("Failed to add transaction : %s", err)
 	}
 
 	if err := agent.Process(ctx, transaction, []Action{{
-		OutputIndex: contractAmendmentScriptOutputIndex,
-		Action:      contractAmendment,
+		AgentLockingScripts: []bitcoin.Script{contractLockingScript},
+		OutputIndex:         contractAmendmentScriptOutputIndex,
+		Action:              contractAmendment,
 	}}); err != nil {
 		t.Fatalf("Failed to process transaction : %s", err)
 	}
 
-	caches.Caches.Transactions.Release(ctx, transaction.GetTxID())
+	caches.Transactions.Release(ctx, transaction.GetTxID())
 
 	responseTx := broadcaster.GetLastTx()
 	if responseTx == nil {
@@ -705,11 +711,11 @@ func Test_Contracts_Amendment_AdminChange(t *testing.T) {
 	store := storage.NewMockStorage()
 	broadcaster := state.NewMockTxBroadcaster()
 
-	caches := state.StartTestCaches(ctx, t, store, cacher.DefaultConfig(), time.Second)
+	caches := StartTestCaches(ctx, t, store, cacher.DefaultConfig(), time.Second)
 	contractKey, contractLockingScript, adminKey, adminLockingScript, contract := state.MockContract(ctx,
-		caches)
+		&caches.TestCaches)
 
-	balanceLocker := state.NewInlineBalanceLocker()
+	locker := locker.NewInlineLocker()
 
 	var keyHash bitcoin.Hash32
 	rand.Read(keyHash[:])
@@ -717,8 +723,8 @@ func Test_Contracts_Amendment_AdminChange(t *testing.T) {
 	newAdminKey, newAdminLockingScript, newAdminAddress := state.MockKey()
 
 	agent, err := NewAgent(ctx, contractKey, contractLockingScript, DefaultConfig(),
-		feeLockingScript, caches.Caches, balanceLocker, store, broadcaster, nil, nil, nil, nil,
-		peer_channels.NewFactory())
+		feeLockingScript, caches.Caches, caches.Transactions, caches.Services, locker, store,
+		broadcaster, nil, nil, nil, nil, peer_channels.NewFactory())
 	if err != nil {
 		t.Fatalf("Failed to create agent : %s", err)
 	}
@@ -797,24 +803,25 @@ func Test_Contracts_Amendment_AdminChange(t *testing.T) {
 
 	t.Logf("Created tx : %s", tx.String(bitcoin.MainNet))
 
-	addTransaction := &state.Transaction{
+	addTransaction := &transactions.Transaction{
 		Tx:           tx.MsgTx,
 		SpentOutputs: spentOutputs,
 	}
 
-	transaction, err := caches.Caches.Transactions.Add(ctx, addTransaction)
+	transaction, err := caches.Transactions.Add(ctx, addTransaction)
 	if err != nil {
 		t.Fatalf("Failed to add transaction : %s", err)
 	}
 
 	if err := agent.Process(ctx, transaction, []Action{{
-		OutputIndex: contractAmendmentScriptOutputIndex,
-		Action:      contractAmendment,
+		AgentLockingScripts: []bitcoin.Script{contractLockingScript},
+		OutputIndex:         contractAmendmentScriptOutputIndex,
+		Action:              contractAmendment,
 	}}); err != nil {
 		t.Fatalf("Failed to process transaction : %s", err)
 	}
 
-	caches.Caches.Transactions.Release(ctx, transaction.GetTxID())
+	caches.Transactions.Release(ctx, transaction.GetTxID())
 
 	responseTx := broadcaster.GetLastTx()
 	if responseTx == nil {
@@ -880,9 +887,9 @@ func Test_Contracts_Amendment_Proposal(t *testing.T) {
 	store := storage.NewMockStorage()
 	broadcaster := state.NewMockTxBroadcaster()
 
-	caches := state.StartTestCaches(ctx, t, store, cacher.DefaultConfig(), time.Second)
+	caches := StartTestCaches(ctx, t, store, cacher.DefaultConfig(), time.Second)
 
-	balanceLocker := state.NewInlineBalanceLocker()
+	locker := locker.NewInlineLocker()
 
 	votingSystems := []*actions.VotingSystemField{
 		{
@@ -896,14 +903,14 @@ func Test_Contracts_Amendment_Proposal(t *testing.T) {
 	}
 
 	contractKey, contractLockingScript, adminKey, adminLockingScript, contract := state.MockContractWithVoteSystems(ctx,
-		caches, votingSystems)
+		&caches.TestCaches, votingSystems)
 
 	var keyHash bitcoin.Hash32
 	rand.Read(keyHash[:])
 	_, feeLockingScript, _ := state.MockKey()
 
 	agent, err := NewAgent(ctx, contractKey, contractLockingScript, DefaultConfig(),
-		feeLockingScript, caches.Caches, balanceLocker, store, broadcaster, nil, nil, nil, nil,
+		feeLockingScript, caches.Caches, caches.Transactions, caches.Services, locker, store, broadcaster, nil, nil, nil, nil,
 		peer_channels.NewFactory())
 	if err != nil {
 		t.Fatalf("Failed to create agent : %s", err)
@@ -955,7 +962,7 @@ func Test_Contracts_Amendment_Proposal(t *testing.T) {
 	js, _ = json.MarshalIndent(amendments, "", "  ")
 	t.Logf("Amendments : %s", js)
 
-	vote := state.MockVoteContractAmendmentCompleted(ctx, caches, adminLockingScript,
+	vote := MockVoteContractAmendmentCompleted(ctx, caches, adminLockingScript,
 		contractLockingScript, 0, amendments)
 	vote.Lock()
 	voteTxID := *vote.VoteTxID
@@ -1004,24 +1011,25 @@ func Test_Contracts_Amendment_Proposal(t *testing.T) {
 
 	t.Logf("Created tx : %s", tx.String(bitcoin.MainNet))
 
-	addTransaction := &state.Transaction{
+	addTransaction := &transactions.Transaction{
 		Tx:           tx.MsgTx,
 		SpentOutputs: spentOutputs,
 	}
 
-	transaction, err := caches.Caches.Transactions.Add(ctx, addTransaction)
+	transaction, err := caches.Transactions.Add(ctx, addTransaction)
 	if err != nil {
 		t.Fatalf("Failed to add transaction : %s", err)
 	}
 
 	if err := agent.Process(ctx, transaction, []Action{{
-		OutputIndex: contractAmendmentScriptOutputIndex,
-		Action:      contractAmendment,
+		AgentLockingScripts: []bitcoin.Script{contractLockingScript},
+		OutputIndex:         contractAmendmentScriptOutputIndex,
+		Action:              contractAmendment,
 	}}); err != nil {
 		t.Fatalf("Failed to process transaction : %s", err)
 	}
 
-	caches.Caches.Transactions.Release(ctx, transaction.GetTxID())
+	caches.Transactions.Release(ctx, transaction.GetTxID())
 
 	responseTx := broadcaster.GetLastTx()
 	if responseTx == nil {

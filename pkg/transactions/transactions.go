@@ -1,4 +1,4 @@
-package state
+package transactions
 
 import (
 	"context"
@@ -15,6 +15,7 @@ import (
 	"github.com/tokenized/pkg/expanded_tx"
 	"github.com/tokenized/pkg/merkle_proof"
 	"github.com/tokenized/pkg/wire"
+	"github.com/tokenized/smart_contract_agent/internal/state"
 	"github.com/tokenized/specification/dist/golang/actions"
 	"github.com/tokenized/specification/dist/golang/protocol"
 
@@ -28,6 +29,8 @@ const (
 
 var (
 	ErrNegativeFee = errors.New("Negative Fee")
+
+	endian = binary.LittleEndian
 )
 
 type TransactionCache struct {
@@ -36,9 +39,9 @@ type TransactionCache struct {
 }
 
 type Processed struct {
-	Contract     ContractHash    `bsor:"1" json:"contract"`
-	OutputIndex  int             `bsor:"2" json:"output_index"`
-	ResponseTxID *bitcoin.Hash32 `bsor:"3" json:"response_txid"`
+	Contract     state.ContractHash `bsor:"1" json:"contract"`
+	OutputIndex  int                `bsor:"2" json:"output_index"`
+	ResponseTxID *bitcoin.Hash32    `bsor:"3" json:"response_txid"`
 }
 
 type Transaction struct {
@@ -55,7 +58,7 @@ type Transaction struct {
 
 	Ancestors expanded_tx.AncestorTxs `bsor:"-" json:"ancestors,omitempty"`
 
-	isProcessing []ContractHash
+	isProcessing []state.ContractHash
 	isModified   bool
 	sync.Mutex   `bsor:"-"`
 }
@@ -327,7 +330,7 @@ func (c *TransactionCache) Release(ctx context.Context, txid bitcoin.Hash32) {
 	c.cacher.Release(ctx, TransactionPath(txid))
 }
 
-func (tx *Transaction) SetIsProcessing(contract ContractHash) bool {
+func (tx *Transaction) SetIsProcessing(contract state.ContractHash) bool {
 	for _, c := range tx.isProcessing {
 		if c.Equal(contract) {
 			return false
@@ -338,7 +341,7 @@ func (tx *Transaction) SetIsProcessing(contract ContractHash) bool {
 	return true
 }
 
-func (tx *Transaction) ClearIsProcessing(contract ContractHash) {
+func (tx *Transaction) ClearIsProcessing(contract state.ContractHash) {
 	for i, c := range tx.isProcessing {
 		if c.Equal(contract) {
 			tx.isProcessing = append(tx.isProcessing[:i], tx.isProcessing[i+1:]...)
@@ -347,7 +350,7 @@ func (tx *Transaction) ClearIsProcessing(contract ContractHash) {
 	}
 }
 
-func (tx *Transaction) SetProcessed(contract ContractHash, outputIndex int) bool {
+func (tx *Transaction) SetProcessed(contract state.ContractHash, outputIndex int) bool {
 	for _, processed := range tx.Processed {
 		if processed.Contract.Equal(contract) && processed.OutputIndex == outputIndex {
 			return false
@@ -362,7 +365,7 @@ func (tx *Transaction) SetProcessed(contract ContractHash, outputIndex int) bool
 	return true
 }
 
-func (tx *Transaction) AddResponseTxID(contract ContractHash, outputIndex int,
+func (tx *Transaction) AddResponseTxID(contract state.ContractHash, outputIndex int,
 	txid bitcoin.Hash32) bool {
 
 	for _, processed := range tx.Processed {
@@ -381,7 +384,9 @@ func (tx *Transaction) AddResponseTxID(contract ContractHash, outputIndex int,
 	return true
 }
 
-func (tx *Transaction) ContractProcessed(contract ContractHash, outputIndex int) []*Processed {
+func (tx *Transaction) ContractProcessed(contract state.ContractHash,
+	outputIndex int) []*Processed {
+
 	var result []*Processed
 	for _, r := range tx.Processed {
 		if r.Contract.Equal(contract) && r.OutputIndex == outputIndex {
@@ -419,7 +424,6 @@ func (t *Transaction) CacheCopy() cacher.CacheValue {
 		SpentOutputs: make([]*expanded_tx.Output, len(t.SpentOutputs)),
 		Processed:    make([]*Processed, len(t.Processed)),
 		Ancestors:    make(expanded_tx.AncestorTxs, len(t.Ancestors)),
-		// isProcessing: make([]ContractHash, len(t.isProcessing)),
 	}
 
 	if t.Tx != nil {

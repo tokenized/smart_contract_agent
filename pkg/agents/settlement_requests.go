@@ -13,6 +13,8 @@ import (
 	"github.com/tokenized/pkg/wire"
 	"github.com/tokenized/smart_contract_agent/internal/platform"
 	"github.com/tokenized/smart_contract_agent/internal/state"
+	"github.com/tokenized/smart_contract_agent/pkg/headers"
+	"github.com/tokenized/smart_contract_agent/pkg/transactions"
 	"github.com/tokenized/specification/dist/golang/actions"
 	"github.com/tokenized/specification/dist/golang/messages"
 	"github.com/tokenized/specification/dist/golang/protocol"
@@ -20,7 +22,7 @@ import (
 	"github.com/pkg/errors"
 )
 
-func (a *Agent) processSettlementRequest(ctx context.Context, transaction *state.Transaction,
+func (a *Agent) processSettlementRequest(ctx context.Context, transaction *transactions.Transaction,
 	outputIndex int, settlementRequest *messages.SettlementRequest,
 	senderLockingScript, senderUnlockingScript bitcoin.Script) (*expanded_tx.ExpandedTx, error) {
 
@@ -51,7 +53,7 @@ func (a *Agent) processSettlementRequest(ctx context.Context, transaction *state
 		logger.Stringer("transfer_txid", transferTxID),
 	}, "TransferTxID")
 
-	transferTransaction, err := a.caches.Transactions.Get(ctx, transferTxID)
+	transferTransaction, err := a.transactions.Get(ctx, transferTxID)
 	if err != nil {
 		return nil, errors.Wrap(err, "get transfer tx")
 	}
@@ -61,7 +63,7 @@ func (a *Agent) processSettlementRequest(ctx context.Context, transaction *state
 			logger.Stringer("transfer_txid", transferTxID),
 		}, "Transfer tx not found")
 	}
-	defer a.caches.Transactions.Release(ctx, transferTxID)
+	defer a.transactions.Release(ctx, transferTxID)
 
 	isTest := a.IsTest()
 	var transfer *actions.Transfer
@@ -115,7 +117,7 @@ func (a *Agent) processSettlementRequest(ctx context.Context, transaction *state
 
 	isFinalContract := transferContracts.IsFinalContract()
 
-	headers := platform.NewHeadersCache(a.headers)
+	headers := headers.NewHeadersCache(a.headers)
 	requiresIdentityOracles, err := a.RequiresIdentityOracles(ctx)
 	if err != nil {
 		return nil, platform.NewDefaultRejectError(err)
@@ -186,14 +188,14 @@ func (a *Agent) processSettlementRequest(ctx context.Context, transaction *state
 		}
 	}
 
-	lockerResponseChannel := a.balanceLocker.AddRequest(allBalances)
+	lockerResponseChannel := a.locker.AddRequest(allBalances)
 	lockerResponse := <-lockerResponseChannel
 	var now uint64
 	switch v := lockerResponse.(type) {
 	case uint64:
 		now = v
 	case error:
-		return nil, errors.Wrap(v, "balance locker")
+		return nil, errors.Wrap(v, "locker")
 	}
 	defer allBalances.Unlock()
 
@@ -402,7 +404,7 @@ func getInstrumentSettlement(settlement *actions.Settlement, instrumentType stri
 // buildExternalSettlement updates the settlementTx for an instrument settlement by another contract
 // agent.
 func (a *Agent) buildExternalSettlement(ctx context.Context, settlementTx *txbuilder.TxBuilder,
-	transferTransaction *state.Transaction, instrumentTransfer *actions.InstrumentTransferField,
+	transferTransaction *transactions.Transaction, instrumentTransfer *actions.InstrumentTransferField,
 	contractOutput *wire.TxOut) error {
 
 	transferTxID := transferTransaction.GetTxID()
@@ -447,7 +449,7 @@ func (a *Agent) buildExternalSettlement(ctx context.Context, settlementTx *txbui
 }
 
 func (a *Agent) createSettlementRequest(ctx context.Context,
-	currentTransaction, transferTransaction *state.Transaction, currentOutputIndex int,
+	currentTransaction, transferTransaction *transactions.Transaction, currentOutputIndex int,
 	transfer *actions.Transfer, transferContracts *TransferContracts, balances state.BalanceSet,
 	settlement *actions.Settlement) (*expanded_tx.ExpandedTx, error) {
 
@@ -560,11 +562,11 @@ func (a *Agent) createSettlementRequest(ctx context.Context,
 	}
 
 	messageTxID := *messageTx.MsgTx.TxHash()
-	messageTransaction, err := a.caches.Transactions.AddRaw(ctx, messageTx.MsgTx, nil)
+	messageTransaction, err := a.transactions.AddRaw(ctx, messageTx.MsgTx, nil)
 	if err != nil {
 		return nil, errors.Wrap(err, "add response tx")
 	}
-	defer a.caches.Transactions.Release(ctx, messageTxID)
+	defer a.transactions.Release(ctx, messageTxID)
 
 	messageTransaction.Lock()
 	messageTransaction.SetProcessed(a.ContractHash(), messageScriptOutputIndex)
@@ -600,7 +602,7 @@ func (a *Agent) createSettlementRequest(ctx context.Context,
 			logger.Timestamp("task_start", int64(expireTimeStamp)),
 		}, "Scheduling cancel pending transfer")
 
-		task := NewCancelPendingTransferTask(expireTime, a.factory, agentLockingScript,
+		task := NewCancelPendingTransferTask(expireTime, a.agentStore, agentLockingScript,
 			transferTxID)
 		a.scheduler.Schedule(ctx, task)
 	}

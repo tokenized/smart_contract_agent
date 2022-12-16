@@ -14,13 +14,15 @@ import (
 	"github.com/tokenized/pkg/wire"
 	"github.com/tokenized/smart_contract_agent/internal/platform"
 	"github.com/tokenized/smart_contract_agent/internal/state"
+	"github.com/tokenized/smart_contract_agent/pkg/headers"
+	"github.com/tokenized/smart_contract_agent/pkg/transactions"
 	"github.com/tokenized/specification/dist/golang/actions"
 	"github.com/tokenized/specification/dist/golang/protocol"
 
 	"github.com/pkg/errors"
 )
 
-func (a *Agent) processTransfer(ctx context.Context, transaction *state.Transaction,
+func (a *Agent) processTransfer(ctx context.Context, transaction *transactions.Transaction,
 	transfer *actions.Transfer, outputIndex int) (*expanded_tx.ExpandedTx, error) {
 
 	// Verify appropriate output belongs to this contract.
@@ -53,7 +55,7 @@ func (a *Agent) processTransfer(ctx context.Context, transaction *state.Transact
 
 	// }
 
-	headers := platform.NewHeadersCache(a.headers)
+	headers := headers.NewHeadersCache(a.headers)
 	requiresIdentityOracles, err := a.RequiresIdentityOracles(ctx)
 	if err != nil {
 		return nil, platform.NewDefaultRejectError(err)
@@ -105,13 +107,13 @@ func (a *Agent) processTransfer(ctx context.Context, transaction *state.Transact
 		defer a.caches.Balances.ReleaseMulti(ctx, agentLockingScript, instrumentCode, balances)
 	}
 
-	lockerResponseChannel := a.balanceLocker.AddRequest(allBalances)
+	lockerResponseChannel := a.locker.AddRequest(allBalances)
 	lockerResponse := <-lockerResponseChannel
 	switch v := lockerResponse.(type) {
 	case uint64:
 		now = v
 	case error:
-		return nil, errors.Wrap(v, "balance locker")
+		return nil, errors.Wrap(v, "locker")
 	}
 	defer allBalances.Unlock()
 
@@ -257,7 +259,7 @@ func (a *Agent) processTransfer(ctx context.Context, transaction *state.Transact
 	return etx, nil
 }
 
-func (a *Agent) buildBitcoinTransfer(ctx context.Context, transferTransaction *state.Transaction,
+func (a *Agent) buildBitcoinTransfer(ctx context.Context, transferTransaction *transactions.Transaction,
 	settlementTx *txbuilder.TxBuilder, instrumentTransfer *actions.InstrumentTransferField) error {
 
 	transferTransaction.Lock()
@@ -319,17 +321,17 @@ func (a *Agent) buildBitcoinTransfer(ctx context.Context, transferTransaction *s
 	return nil
 }
 
-func (a *Agent) completeSettlement(ctx context.Context, transferTransaction *state.Transaction,
+func (a *Agent) completeSettlement(ctx context.Context, transferTransaction *transactions.Transaction,
 	transferOutputIndex int, transferTxID bitcoin.Hash32, settlementTx *txbuilder.TxBuilder,
 	settlementScriptOutputIndex int, balances state.BalanceSet,
 	now uint64) (*expanded_tx.ExpandedTx, error) {
 
 	settlementTxID := *settlementTx.MsgTx.TxHash()
-	settlementTransaction, err := a.caches.Transactions.AddRaw(ctx, settlementTx.MsgTx, nil)
+	settlementTransaction, err := a.transactions.AddRaw(ctx, settlementTx.MsgTx, nil)
 	if err != nil {
 		return nil, errors.Wrap(err, "add response tx")
 	}
-	defer a.caches.Transactions.Release(ctx, settlementTxID)
+	defer a.transactions.Release(ctx, settlementTxID)
 
 	// Settle balances regardless of tx acceptance by the network as the agent is the single source
 	// of truth.
@@ -366,7 +368,7 @@ func (a *Agent) completeSettlement(ctx context.Context, transferTransaction *sta
 	return etx, nil
 }
 
-func (a *Agent) processSettlement(ctx context.Context, transaction *state.Transaction,
+func (a *Agent) processSettlement(ctx context.Context, transaction *transactions.Transaction,
 	settlement *actions.Settlement, outputIndex int) error {
 
 	transferTxID, lockingScripts, err := a.applySettlements(ctx, transaction,
@@ -398,7 +400,7 @@ func (a *Agent) processSettlement(ctx context.Context, transaction *state.Transa
 	return nil
 }
 
-func (a *Agent) processRectificationSettlement(ctx context.Context, transaction *state.Transaction,
+func (a *Agent) processRectificationSettlement(ctx context.Context, transaction *transactions.Transaction,
 	settlement *actions.RectificationSettlement, outputIndex int) error {
 
 	transferTxID, lockingScripts, err := a.applySettlements(ctx, transaction,
@@ -426,7 +428,7 @@ func (a *Agent) processRectificationSettlement(ctx context.Context, transaction 
 	return nil
 }
 
-func (a *Agent) applySettlements(ctx context.Context, transaction *state.Transaction,
+func (a *Agent) applySettlements(ctx context.Context, transaction *transactions.Transaction,
 	settlements []*actions.InstrumentSettlementField,
 	timestamp uint64) (*bitcoin.Hash32, []bitcoin.Script, error) {
 
@@ -521,13 +523,13 @@ func (a *Agent) applySettlements(ctx context.Context, transaction *state.Transac
 		allAddedBalances[index] = addedBalances
 	}
 
-	lockerResponseChannel := a.balanceLocker.AddRequest(allAddedBalances)
+	lockerResponseChannel := a.locker.AddRequest(allAddedBalances)
 	lockerResponse := <-lockerResponseChannel
 	switch v := lockerResponse.(type) {
 	case uint64:
 		// now = v // timestamp
 	case error:
-		return transferTxID, lockingScripts, errors.Wrap(v, "balance locker")
+		return transferTxID, lockingScripts, errors.Wrap(v, "locker")
 	}
 	defer allAddedBalances.Unlock()
 
@@ -600,7 +602,7 @@ func (a *Agent) applySettlements(ctx context.Context, transaction *state.Transac
 // postTransactionToSubscriptions posts the transaction to any subscriptions for the relevant
 // locking scripts.
 func (a *Agent) postTransactionToSubscriptions(ctx context.Context, lockingScripts []bitcoin.Script,
-	transaction *state.Transaction) error {
+	transaction *transactions.Transaction) error {
 
 	agentLockingScript := a.LockingScript()
 
@@ -616,7 +618,7 @@ func (a *Agent) postTransactionToSubscriptions(ctx context.Context, lockingScrip
 	}
 
 	transaction.Lock()
-	expandedTx, err := a.caches.Transactions.ExpandedTx(ctx, transaction)
+	expandedTx, err := a.transactions.ExpandedTx(ctx, transaction)
 	transaction.Unlock()
 	if err != nil {
 		return errors.Wrap(err, "expanded tx")
@@ -727,7 +729,7 @@ func (c TransferContracts) IsMultiContract() bool {
 
 // parseContracts returns the previous, next, and full list of contracts in the order that they
 // should process the transfer.
-func parseTransferContracts(transferTransaction *state.Transaction, transfer *actions.Transfer,
+func parseTransferContracts(transferTransaction *transactions.Transaction, transfer *actions.Transfer,
 	currentLockingScript bitcoin.Script) (*TransferContracts, error) {
 
 	count := len(transfer.Instruments)
@@ -850,7 +852,7 @@ func parseTransferContracts(transferTransaction *state.Transaction, transfer *ac
 }
 
 func (a *Agent) initiateInstrumentTransferBalances(ctx context.Context,
-	transferTransaction *state.Transaction, instrument *state.Instrument,
+	transferTransaction *transactions.Transaction, instrument *state.Instrument,
 	instrumentCode state.InstrumentCode, instrumentTransfer *actions.InstrumentTransferField,
 	headers BlockHeaders) (state.Balances, []bitcoin.Script, []bitcoin.Script, error) {
 

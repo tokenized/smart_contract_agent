@@ -12,13 +12,14 @@ import (
 	"github.com/tokenized/pkg/wire"
 	"github.com/tokenized/smart_contract_agent/internal/platform"
 	"github.com/tokenized/smart_contract_agent/internal/state"
+	"github.com/tokenized/smart_contract_agent/pkg/transactions"
 	"github.com/tokenized/specification/dist/golang/actions"
 	"github.com/tokenized/specification/dist/golang/protocol"
 
 	"github.com/pkg/errors"
 )
 
-func (a *Agent) processOrder(ctx context.Context, transaction *state.Transaction,
+func (a *Agent) processOrder(ctx context.Context, transaction *transactions.Transaction,
 	order *actions.Order, outputIndex int) (*expanded_tx.ExpandedTx, error) {
 
 	agentLockingScript := a.LockingScript()
@@ -137,7 +138,7 @@ func (a *Agent) processOrder(ctx context.Context, transaction *state.Transaction
 	return nil, nil
 }
 
-func (a *Agent) processFreezeOrder(ctx context.Context, transaction *state.Transaction,
+func (a *Agent) processFreezeOrder(ctx context.Context, transaction *transactions.Transaction,
 	order *actions.Order, outputIndex int) (*expanded_tx.ExpandedTx, error) {
 
 	logger.Info(ctx, "Processing freeze order")
@@ -301,13 +302,13 @@ func (a *Agent) processFreezeOrder(ctx context.Context, transaction *state.Trans
 	}
 
 	if len(balances) > 0 {
-		lockerResponseChannel := a.balanceLocker.AddRequest(state.BalanceSet{balances})
+		lockerResponseChannel := a.locker.AddRequest(state.BalanceSet{balances})
 		lockerResponse := <-lockerResponseChannel
 		switch v := lockerResponse.(type) {
 		case uint64:
 			now = v
 		case error:
-			return nil, errors.Wrap(v, "balance locker")
+			return nil, errors.Wrap(v, "locker")
 		}
 		defer balances.Unlock()
 
@@ -383,12 +384,12 @@ func (a *Agent) processFreezeOrder(ctx context.Context, transaction *state.Trans
 
 	freezeTxID := *freezeTx.MsgTx.TxHash()
 
-	freezeTransaction, err := a.caches.Transactions.AddRaw(ctx, freezeTx.MsgTx, nil)
+	freezeTransaction, err := a.transactions.AddRaw(ctx, freezeTx.MsgTx, nil)
 	if err != nil {
 		balances.RevertPending()
 		return nil, errors.Wrap(err, "add response tx")
 	}
-	defer a.caches.Transactions.Release(ctx, freezeTxID)
+	defer a.transactions.Release(ctx, freezeTxID)
 
 	if isFull {
 		if len(order.InstrumentCode) == 0 {
@@ -439,7 +440,7 @@ func (a *Agent) processFreezeOrder(ctx context.Context, transaction *state.Trans
 	return etx, nil
 }
 
-func (a *Agent) processThawOrder(ctx context.Context, transaction *state.Transaction,
+func (a *Agent) processThawOrder(ctx context.Context, transaction *transactions.Transaction,
 	order *actions.Order, outputIndex int) (*expanded_tx.ExpandedTx, error) {
 
 	logger.Info(ctx, "Processing thaw order")
@@ -472,7 +473,7 @@ func (a *Agent) processThawOrder(ctx context.Context, transaction *state.Transac
 	}
 	freezeTxID := *freezeTxIDHash
 
-	freezeTransaction, err := a.caches.Transactions.Get(ctx, freezeTxID)
+	freezeTransaction, err := a.transactions.Get(ctx, freezeTxID)
 	if err != nil {
 		return nil, errors.Wrap(err, "get tx")
 	}
@@ -481,7 +482,7 @@ func (a *Agent) processThawOrder(ctx context.Context, transaction *state.Transac
 		return nil, platform.NewRejectError(actions.RejectionsMsgMalformed,
 			"FreezeTxId: not found")
 	}
-	defer a.caches.Transactions.Release(ctx, freezeTxID)
+	defer a.transactions.Release(ctx, freezeTxID)
 
 	freezeTransaction.Lock()
 
@@ -608,13 +609,13 @@ func (a *Agent) processThawOrder(ctx context.Context, transaction *state.Transac
 			}
 			defer a.caches.Balances.ReleaseMulti(ctx, agentLockingScript, instrumentCode, balances)
 
-			lockerResponseChannel := a.balanceLocker.AddRequest(state.BalanceSet{balances})
+			lockerResponseChannel := a.locker.AddRequest(state.BalanceSet{balances})
 			lockerResponse := <-lockerResponseChannel
 			switch v := lockerResponse.(type) {
 			case uint64:
 				now = v
 			case error:
-				return nil, errors.Wrap(v, "balance locker")
+				return nil, errors.Wrap(v, "locker")
 			}
 			defer balances.Unlock()
 
@@ -664,11 +665,11 @@ func (a *Agent) processThawOrder(ctx context.Context, transaction *state.Transac
 
 	thawTxID := *thawTx.MsgTx.TxHash()
 
-	thawTransaction, err := a.caches.Transactions.AddRaw(ctx, thawTx.MsgTx, nil)
+	thawTransaction, err := a.transactions.AddRaw(ctx, thawTx.MsgTx, nil)
 	if err != nil {
 		return nil, errors.Wrap(err, "add response tx")
 	}
-	defer a.caches.Transactions.Release(ctx, thawTxID)
+	defer a.transactions.Release(ctx, thawTxID)
 
 	if len(freeze.InstrumentCode) == 0 {
 		contract.Thaw(freeze.Timestamp)
@@ -717,7 +718,7 @@ func (a *Agent) processThawOrder(ctx context.Context, transaction *state.Transac
 	return etx, nil
 }
 
-func (a *Agent) processConfiscateOrder(ctx context.Context, transaction *state.Transaction,
+func (a *Agent) processConfiscateOrder(ctx context.Context, transaction *transactions.Transaction,
 	order *actions.Order, outputIndex int) (*expanded_tx.ExpandedTx, error) {
 
 	logger.Info(ctx, "Processing confiscation order")
@@ -870,13 +871,13 @@ func (a *Agent) processConfiscateOrder(ctx context.Context, transaction *state.T
 		state.Balances{depositBalance},
 	}
 
-	lockerResponseChannel := a.balanceLocker.AddRequest(allBalances)
+	lockerResponseChannel := a.locker.AddRequest(allBalances)
 	lockerResponse := <-lockerResponseChannel
 	switch v := lockerResponse.(type) {
 	case uint64:
 		now = v
 	case error:
-		return nil, errors.Wrap(v, "balance locker")
+		return nil, errors.Wrap(v, "locker")
 	}
 	defer allBalances.Unlock()
 
@@ -974,11 +975,11 @@ func (a *Agent) processConfiscateOrder(ctx context.Context, transaction *state.T
 
 	confiscationTxID := *confiscationTx.MsgTx.TxHash()
 
-	confiscationTransaction, err := a.caches.Transactions.AddRaw(ctx, confiscationTx.MsgTx, nil)
+	confiscationTransaction, err := a.transactions.AddRaw(ctx, confiscationTx.MsgTx, nil)
 	if err != nil {
 		return nil, errors.Wrap(err, "add response tx")
 	}
-	defer a.caches.Transactions.Release(ctx, confiscationTxID)
+	defer a.transactions.Release(ctx, confiscationTxID)
 
 	balances.FinalizeConfiscation(txid, confiscationTxID, now)
 	depositBalance.Settle(txid, confiscationTxID, now)
@@ -1014,14 +1015,14 @@ func (a *Agent) processConfiscateOrder(ctx context.Context, transaction *state.T
 	return etx, nil
 }
 
-func (a *Agent) processReconciliationOrder(ctx context.Context, transaction *state.Transaction,
+func (a *Agent) processReconciliationOrder(ctx context.Context, transaction *transactions.Transaction,
 	order *actions.Order, outputIndex int) (*expanded_tx.ExpandedTx, error) {
 
 	return nil, platform.NewRejectError(actions.RejectionsDeprecated,
 		"Reconciliation order is deprecated")
 }
 
-func (a *Agent) processFreeze(ctx context.Context, transaction *state.Transaction,
+func (a *Agent) processFreeze(ctx context.Context, transaction *transactions.Transaction,
 	freeze *actions.Freeze, outputIndex int) error {
 
 	// First input must be the agent's locking script
@@ -1159,13 +1160,13 @@ func (a *Agent) processFreeze(ctx context.Context, transaction *state.Transactio
 			}
 			defer a.caches.Balances.ReleaseMulti(ctx, agentLockingScript, instrumentCode, balances)
 
-			lockerResponseChannel := a.balanceLocker.AddRequest(state.BalanceSet{balances})
+			lockerResponseChannel := a.locker.AddRequest(state.BalanceSet{balances})
 			lockerResponse := <-lockerResponseChannel
 			switch v := lockerResponse.(type) {
 			case uint64:
 				// now = v
 			case error:
-				return errors.Wrap(v, "balance locker")
+				return errors.Wrap(v, "locker")
 			}
 			defer balances.Unlock()
 
@@ -1187,7 +1188,7 @@ func (a *Agent) processFreeze(ctx context.Context, transaction *state.Transactio
 	return nil
 }
 
-func (a *Agent) processThaw(ctx context.Context, transaction *state.Transaction,
+func (a *Agent) processThaw(ctx context.Context, transaction *transactions.Transaction,
 	thaw *actions.Thaw, outputIndex int) error {
 
 	// First input must be the agent's locking script
@@ -1222,7 +1223,7 @@ func (a *Agent) processThaw(ctx context.Context, transaction *state.Transaction,
 	}
 	freezeTxID := *freezeTxIDHash
 
-	freezeTransaction, err := a.caches.Transactions.Get(ctx, freezeTxID)
+	freezeTransaction, err := a.transactions.Get(ctx, freezeTxID)
 	if err != nil {
 		return errors.Wrap(err, "get tx")
 	}
@@ -1230,7 +1231,7 @@ func (a *Agent) processThaw(ctx context.Context, transaction *state.Transaction,
 	if freezeTransaction == nil {
 		return errors.New("Freeze tx not found")
 	}
-	defer a.caches.Transactions.Release(ctx, freezeTxID)
+	defer a.transactions.Release(ctx, freezeTxID)
 
 	freezeTransaction.Lock()
 
@@ -1336,13 +1337,13 @@ func (a *Agent) processThaw(ctx context.Context, transaction *state.Transaction,
 			}
 			defer a.caches.Balances.ReleaseMulti(ctx, agentLockingScript, instrumentCode, balances)
 
-			lockerResponseChannel := a.balanceLocker.AddRequest(state.BalanceSet{balances})
+			lockerResponseChannel := a.locker.AddRequest(state.BalanceSet{balances})
 			lockerResponse := <-lockerResponseChannel
 			switch v := lockerResponse.(type) {
 			case uint64:
 				// now = v
 			case error:
-				return errors.Wrap(v, "balance locker")
+				return errors.Wrap(v, "locker")
 			}
 			defer balances.Unlock()
 
@@ -1357,7 +1358,7 @@ func (a *Agent) processThaw(ctx context.Context, transaction *state.Transaction,
 	return nil
 }
 
-func (a *Agent) processConfiscation(ctx context.Context, transaction *state.Transaction,
+func (a *Agent) processConfiscation(ctx context.Context, transaction *transactions.Transaction,
 	confiscation *actions.Confiscation, outputIndex int) error {
 
 	// First input must be the agent's locking script
@@ -1458,12 +1459,12 @@ func (a *Agent) processConfiscation(ctx context.Context, transaction *state.Tran
 		state.Balances{addedDepositBalance},
 	}
 
-	lockerResponseChannel := a.balanceLocker.AddRequest(allBalances)
+	lockerResponseChannel := a.locker.AddRequest(allBalances)
 	lockerResponse := <-lockerResponseChannel
 	switch v := lockerResponse.(type) {
 	case uint64:
 	case error:
-		return errors.Wrap(v, "balance locker")
+		return errors.Wrap(v, "locker")
 	}
 	defer allBalances.Unlock()
 
@@ -1569,7 +1570,7 @@ func (a *Agent) processConfiscation(ctx context.Context, transaction *state.Tran
 	return nil
 }
 
-func (a *Agent) processReconciliation(ctx context.Context, transaction *state.Transaction,
+func (a *Agent) processReconciliation(ctx context.Context, transaction *transactions.Transaction,
 	reconciliation *actions.DeprecatedReconciliation, outputIndex int) error {
 
 	// First input must be the agent's locking script

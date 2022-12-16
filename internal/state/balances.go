@@ -906,8 +906,8 @@ func (bs *Balances) LockingScripts() []bitcoin.Script {
 	return result
 }
 
-func (bs *Balances) Lock() {
-	for _, b := range *bs {
+func (bs Balances) Lock() {
+	for _, b := range bs {
 		if b == nil {
 			continue
 		}
@@ -916,8 +916,8 @@ func (bs *Balances) Lock() {
 	}
 }
 
-func (bs *Balances) Unlock() {
-	for _, b := range *bs {
+func (bs Balances) Unlock() {
+	for _, b := range bs {
 		if b == nil {
 			continue
 		}
@@ -926,8 +926,8 @@ func (bs *Balances) Unlock() {
 	}
 }
 
-func (bs *BalanceSet) Lock() {
-	for _, b := range *bs {
+func (bs BalanceSet) Lock() {
+	for _, b := range bs {
 		if len(b) == 0 {
 			continue
 		}
@@ -936,8 +936,8 @@ func (bs *BalanceSet) Lock() {
 	}
 }
 
-func (bs *BalanceSet) Unlock() {
-	for _, b := range *bs {
+func (bs BalanceSet) Unlock() {
+	for _, b := range bs {
 		if len(b) == 0 {
 			continue
 		}

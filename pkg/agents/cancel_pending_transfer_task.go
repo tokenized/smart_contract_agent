@@ -30,19 +30,19 @@ import (
 type CancelPendingTransferTask struct {
 	start time.Time
 
-	factory               AgentFactory
+	store                 Store
 	contractLockingScript bitcoin.Script
 	transferTxID          bitcoin.Hash32
 
 	lock sync.Mutex
 }
 
-func NewCancelPendingTransferTask(start time.Time, factory AgentFactory,
+func NewCancelPendingTransferTask(start time.Time, store Store,
 	contractLockingScript bitcoin.Script, transferTxID bitcoin.Hash32) *CancelPendingTransferTask {
 
 	return &CancelPendingTransferTask{
 		start:                 start,
-		factory:               factory,
+		store:                 store,
 		contractLockingScript: contractLockingScript,
 		transferTxID:          transferTxID,
 	}
@@ -74,14 +74,14 @@ func (t *CancelPendingTransferTask) Run(ctx context.Context,
 	t.lock.Lock()
 	defer t.lock.Unlock()
 
-	factory := t.factory
+	store := t.store
 	contractLockingScript := t.contractLockingScript
 	transferTxID := t.transferTxID
 
-	return CancelPendingTransfer(ctx, factory, contractLockingScript, transferTxID)
+	return CancelPendingTransfer(ctx, store, contractLockingScript, transferTxID)
 }
 
-func CancelPendingTransfer(ctx context.Context, factory AgentFactory,
+func CancelPendingTransfer(ctx context.Context, store Store,
 	contractLockingScript bitcoin.Script, transferTxID bitcoin.Hash32) (*expanded_tx.ExpandedTx, error) {
 
 	ctx = logger.ContextWithLogFields(ctx, logger.Stringer("trace", uuid.New()))
@@ -91,7 +91,7 @@ func CancelPendingTransfer(ctx context.Context, factory AgentFactory,
 		logger.Stringer("contract_locking_script", contractLockingScript),
 	}, "Cancelling pending transfer")
 
-	agent, err := factory.GetAgent(ctx, contractLockingScript)
+	agent, err := store.GetAgent(ctx, contractLockingScript)
 	if err != nil {
 		return nil, errors.Wrap(err, "get agent")
 	}
@@ -114,7 +114,7 @@ func (a *Agent) CancelPendingTransfer(ctx context.Context,
 	logger.Info(ctx, "Canceling pending transaction")
 
 	// Get transfer transaction and action.
-	transferTransaction, err := a.caches.Transactions.Get(ctx, transferTxID)
+	transferTransaction, err := a.transactions.Get(ctx, transferTxID)
 	if err != nil {
 		return nil, errors.Wrap(err, "get tx")
 	}
@@ -122,7 +122,7 @@ func (a *Agent) CancelPendingTransfer(ctx context.Context,
 	if transferTransaction == nil {
 		return nil, errors.New("Transaction not found")
 	}
-	defer a.caches.Transactions.Release(ctx, transferTxID)
+	defer a.transactions.Release(ctx, transferTxID)
 
 	var transfer *actions.Transfer
 	isTest := a.IsTest()
@@ -206,12 +206,12 @@ func (a *Agent) CancelPendingTransfer(ctx context.Context,
 		allBalances[index] = balances
 	}
 
-	lockerResponseChannel := a.balanceLocker.AddRequest(allBalances)
+	lockerResponseChannel := a.locker.AddRequest(allBalances)
 	lockerResponse := <-lockerResponseChannel
 	switch v := lockerResponse.(type) {
 	case uint64:
 	case error:
-		return nil, errors.Wrap(v, "balance locker")
+		return nil, errors.Wrap(v, "locker")
 	}
 
 	// Cancel pending transfers associated with this transfer txid.

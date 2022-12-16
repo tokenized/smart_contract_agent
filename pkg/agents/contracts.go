@@ -12,7 +12,8 @@ import (
 	"github.com/tokenized/pkg/txbuilder"
 	"github.com/tokenized/pkg/wire"
 	"github.com/tokenized/smart_contract_agent/internal/platform"
-	"github.com/tokenized/smart_contract_agent/internal/state"
+	"github.com/tokenized/smart_contract_agent/pkg/headers"
+	"github.com/tokenized/smart_contract_agent/pkg/transactions"
 	"github.com/tokenized/specification/dist/golang/actions"
 	"github.com/tokenized/specification/dist/golang/permissions"
 	"github.com/tokenized/specification/dist/golang/protocol"
@@ -20,7 +21,7 @@ import (
 	"github.com/pkg/errors"
 )
 
-func (a *Agent) processContractOffer(ctx context.Context, transaction *state.Transaction,
+func (a *Agent) processContractOffer(ctx context.Context, transaction *transactions.Transaction,
 	offer *actions.ContractOffer, outputIndex int) (*expanded_tx.ExpandedTx, error) {
 
 	agentLockingScript := a.LockingScript()
@@ -223,11 +224,11 @@ func (a *Agent) processContractOffer(ctx context.Context, transaction *state.Tra
 	contract.MarkModified()
 
 	formationTxID := *formationTx.MsgTx.TxHash()
-	formationTransaction, err := a.caches.Transactions.AddRaw(ctx, formationTx.MsgTx, nil)
+	formationTransaction, err := a.transactions.AddRaw(ctx, formationTx.MsgTx, nil)
 	if err != nil {
 		return nil, errors.Wrap(err, "add response tx")
 	}
-	defer a.caches.Transactions.Release(ctx, formationTxID)
+	defer a.transactions.Release(ctx, formationTxID)
 
 	// Set formation tx as processed since the contract is now formed.
 	formationTransaction.Lock()
@@ -255,7 +256,7 @@ func (a *Agent) processContractOffer(ctx context.Context, transaction *state.Tra
 	return etx, nil
 }
 
-func (a *Agent) processContractAmendment(ctx context.Context, transaction *state.Transaction,
+func (a *Agent) processContractAmendment(ctx context.Context, transaction *transactions.Transaction,
 	amendment *actions.ContractAmendment, outputIndex int) (*expanded_tx.ExpandedTx, error) {
 
 	if !amendment.ChangeAdministrationAddress && !amendment.ChangeOperatorAddress &&
@@ -324,8 +325,8 @@ func (a *Agent) processContractAmendment(ctx context.Context, transaction *state
 	proposalType := uint32(0)
 	votingSystem := uint32(0)
 
-	vote, err := fetchReferenceVote(ctx, a.caches, agentLockingScript, amendment.RefTxID,
-		a.IsTest())
+	vote, err := fetchReferenceVote(ctx, a.caches, a.transactions, agentLockingScript,
+		amendment.RefTxID, a.IsTest())
 	if err != nil {
 		return nil, errors.Wrap(err, "fetch vote")
 	}
@@ -662,11 +663,11 @@ func (a *Agent) processContractAmendment(ctx context.Context, transaction *state
 	contract.FormationTxID = &formationTxID
 	contract.MarkModified()
 
-	formationTransaction, err := a.caches.Transactions.AddRaw(ctx, formationTx.MsgTx, nil)
+	formationTransaction, err := a.transactions.AddRaw(ctx, formationTx.MsgTx, nil)
 	if err != nil {
 		return nil, errors.Wrap(err, "add response tx")
 	}
-	defer a.caches.Transactions.Release(ctx, formationTxID)
+	defer a.transactions.Release(ctx, formationTxID)
 
 	// Set formation tx as processed since the contract is now amended.
 	formationTransaction.Lock()
@@ -694,7 +695,7 @@ func (a *Agent) processContractAmendment(ctx context.Context, transaction *state
 	return etx, nil
 }
 
-func (a *Agent) processContractFormation(ctx context.Context, transaction *state.Transaction,
+func (a *Agent) processContractFormation(ctx context.Context, transaction *transactions.Transaction,
 	formation *actions.ContractFormation, outputIndex int) error {
 
 	// First input must be the agent's locking script
@@ -765,7 +766,7 @@ func (a *Agent) processContractFormation(ctx context.Context, transaction *state
 	return nil
 }
 
-func (a *Agent) processContractAddressChange(ctx context.Context, transaction *state.Transaction,
+func (a *Agent) processContractAddressChange(ctx context.Context, transaction *transactions.Transaction,
 	addressChange *actions.ContractAddressChange,
 	outputIndex int) (*expanded_tx.ExpandedTx, error) {
 
@@ -923,7 +924,7 @@ func (a *Agent) processContractAddressChange(ctx context.Context, transaction *s
 	newContract.FrozenUntil = contract.FrozenUntil
 
 	if newContract.Formation != nil && newContract.FormationTxID != nil {
-		if err := a.caches.Services.Update(ctx, newLockingScript, newContract.Formation,
+		if err := a.services.Update(ctx, newLockingScript, newContract.Formation,
 			*newContract.FormationTxID); err != nil {
 			return nil, errors.Wrap(err, "update services")
 		}
@@ -965,7 +966,7 @@ func (a *Agent) verifyAdminIdentityCertificate(ctx context.Context,
 	adminLockingScript bitcoin.Script, contractFormation *actions.ContractFormation,
 	certificate *actions.AdminIdentityCertificateField, now uint64) error {
 
-	headers := platform.NewHeadersCache(a.headers)
+	headers := headers.NewHeadersCache(a.headers)
 
 	if certificate.Expiration != 0 && certificate.Expiration < now {
 		return platform.NewRejectError(actions.RejectionsInvalidSignature, "expired")
@@ -983,7 +984,7 @@ func (a *Agent) verifyAdminIdentityCertificate(ctx context.Context,
 			fmt.Sprintf("EntityContract: locking script: %s", err))
 	}
 
-	services, err := a.caches.Services.Get(ctx, lockingScript)
+	services, err := a.services.Get(ctx, lockingScript)
 	if err != nil {
 		return errors.Wrap(err, "get service")
 	}
@@ -1002,7 +1003,7 @@ func (a *Agent) verifyAdminIdentityCertificate(ctx context.Context,
 		break
 	}
 
-	a.caches.Services.Release(ctx, lockingScript)
+	a.services.Release(ctx, lockingScript)
 
 	if publicKey == nil {
 		return platform.NewRejectError(actions.RejectionsMsgMalformed, "Identity Service Not Found")
@@ -1179,7 +1180,7 @@ func applyContractAmendments(contractFormation *actions.ContractFormation,
 // postTransactionToContractSubscriptions posts the transaction to any subscriptions for the
 // relevant locking scripts for the contract.
 func (a *Agent) postTransactionToContractSubscriptions(ctx context.Context,
-	transaction *state.Transaction) error {
+	transaction *transactions.Transaction) error {
 
 	// agentLockingScript := a.LockingScript()
 

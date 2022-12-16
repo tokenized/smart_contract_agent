@@ -12,6 +12,7 @@ import (
 	"github.com/tokenized/pkg/wire"
 	"github.com/tokenized/smart_contract_agent/internal/platform"
 	"github.com/tokenized/smart_contract_agent/internal/state"
+	"github.com/tokenized/smart_contract_agent/pkg/transactions"
 	"github.com/tokenized/specification/dist/golang/actions"
 	"github.com/tokenized/specification/dist/golang/instruments"
 	"github.com/tokenized/specification/dist/golang/permissions"
@@ -20,7 +21,7 @@ import (
 	"github.com/pkg/errors"
 )
 
-func (a *Agent) processInstrumentDefinition(ctx context.Context, transaction *state.Transaction,
+func (a *Agent) processInstrumentDefinition(ctx context.Context, transaction *transactions.Transaction,
 	definition *actions.InstrumentDefinition, outputIndex int) (*expanded_tx.ExpandedTx, error) {
 
 	agentLockingScript := a.LockingScript()
@@ -202,11 +203,11 @@ func (a *Agent) processInstrumentDefinition(ctx context.Context, transaction *st
 	}
 
 	creationTxID := *creationTx.MsgTx.TxHash()
-	creationTransaction, err := a.caches.Transactions.AddRaw(ctx, creationTx.MsgTx, nil)
+	creationTransaction, err := a.transactions.AddRaw(ctx, creationTx.MsgTx, nil)
 	if err != nil {
 		return nil, errors.Wrap(err, "add response tx")
 	}
-	defer a.caches.Transactions.Release(ctx, creationTxID)
+	defer a.transactions.Release(ctx, creationTxID)
 
 	// Set creation tx as processed since the instrument is now created.
 	creationTransaction.Lock()
@@ -234,7 +235,7 @@ func (a *Agent) processInstrumentDefinition(ctx context.Context, transaction *st
 	return etx, nil
 }
 
-func (a *Agent) processInstrumentModification(ctx context.Context, transaction *state.Transaction,
+func (a *Agent) processInstrumentModification(ctx context.Context, transaction *transactions.Transaction,
 	modification *actions.InstrumentModification,
 	outputIndex int) (*expanded_tx.ExpandedTx, error) {
 
@@ -338,7 +339,8 @@ func (a *Agent) processInstrumentModification(ctx context.Context, transaction *
 	votingSystem := uint32(0)
 
 	isTest := a.IsTest()
-	vote, err := fetchReferenceVote(ctx, a.caches, agentLockingScript, modification.RefTxID, isTest)
+	vote, err := fetchReferenceVote(ctx, a.caches, a.transactions, agentLockingScript,
+		modification.RefTxID, isTest)
 	if err != nil {
 		return nil, errors.Wrap(err, "fetch vote")
 	}
@@ -479,11 +481,11 @@ func (a *Agent) processInstrumentModification(ctx context.Context, transaction *
 	instrument.CreationTxID = &creationTxID
 	instrument.MarkModified()
 
-	creationTransaction, err := a.caches.Transactions.AddRaw(ctx, creationTx.MsgTx, nil)
+	creationTransaction, err := a.transactions.AddRaw(ctx, creationTx.MsgTx, nil)
 	if err != nil {
 		return nil, errors.Wrap(err, "add response tx")
 	}
-	defer a.caches.Transactions.Release(ctx, creationTxID)
+	defer a.transactions.Release(ctx, creationTxID)
 
 	// Set creation tx as processed since the instrument is now modified.
 	creationTransaction.Lock()
@@ -511,7 +513,7 @@ func (a *Agent) processInstrumentModification(ctx context.Context, transaction *
 	return etx, nil
 }
 
-func (a *Agent) processInstrumentCreation(ctx context.Context, transaction *state.Transaction,
+func (a *Agent) processInstrumentCreation(ctx context.Context, transaction *transactions.Transaction,
 	creation *actions.InstrumentCreation, outputIndex int) error {
 
 	// First input must be the agent's locking script
@@ -618,7 +620,7 @@ func (a *Agent) processInstrumentCreation(ctx context.Context, transaction *stat
 
 	if len(adminAddressBytes) == 0 {
 		// Get admin address from request transaction
-		adminLockingScript, err := getRequestFirstInputLockingScript(ctx, a.caches.Transactions,
+		adminLockingScript, err := getRequestFirstInputLockingScript(ctx, a.transactions,
 			requestTxID)
 		if err != nil {
 			return errors.Wrap(err, "get request tx locking script")
@@ -647,7 +649,7 @@ func (a *Agent) processInstrumentCreation(ctx context.Context, transaction *stat
 }
 
 func (a *Agent) updateAdminBalance(ctx context.Context, contractLockingScript bitcoin.Script,
-	adminAddress []byte, transaction *state.Transaction, creation *actions.InstrumentCreation,
+	adminAddress []byte, transaction *transactions.Transaction, creation *actions.InstrumentCreation,
 	txid bitcoin.Hash32, previousAuthorizedTokenQty uint64, now *uint64) error {
 
 	if previousAuthorizedTokenQty == creation.AuthorizedTokenQty {

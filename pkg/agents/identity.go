@@ -2,10 +2,12 @@ package agents
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/pkg/errors"
 	"github.com/tokenized/logger"
 	"github.com/tokenized/pkg/bitcoin"
+	"github.com/tokenized/smart_contract_agent/internal/platform"
 	"github.com/tokenized/specification/dist/golang/actions"
 )
 
@@ -76,7 +78,9 @@ func (a *Agent) GetIdentityOracles(ctx context.Context) ([]*IdentityOracle, erro
 			logger.WarnWithFields(ctx, []logger.Field{
 				logger.Stringer("contract_locking_script", contract.LockingScript),
 			}, "Invalid oracle entity contract address %d : %s", i, err)
-			continue
+
+			return nil, platform.NewRejectError(actions.RejectionsMsgMalformed,
+				fmt.Sprintf("invalid contract formation oracle entity contract address: %d", i))
 		}
 
 		lockingScript, err := ra.LockingScript()
@@ -84,16 +88,20 @@ func (a *Agent) GetIdentityOracles(ctx context.Context) ([]*IdentityOracle, erro
 			logger.WarnWithFields(ctx, []logger.Field{
 				logger.Stringer("contract_locking_script", contract.LockingScript),
 			}, "Failed to create oracle entity contract locking script %d : %s", i, err)
-			continue
+
+			return nil, platform.NewRejectError(actions.RejectionsMsgMalformed,
+				fmt.Sprintf("unsupported contract formation oracle entity contract locking script: %d", i))
 		}
 
-		services, err := a.caches.Services.Get(ctx, lockingScript)
+		services, err := a.services.Get(ctx, lockingScript)
 		if err != nil {
 			logger.WarnWithFields(ctx, []logger.Field{
 				logger.Stringer("contract_locking_script", contract.LockingScript),
 				logger.Stringer("service_locking_script", lockingScript),
 			}, "Failed to get oracle entity contract service %d : %s", i, err)
-			continue
+
+			return nil, platform.NewRejectError(actions.RejectionsMsgMalformed,
+				fmt.Sprintf("contract formation oracle entity contract not found: %d", i))
 		}
 
 		if services == nil {
@@ -101,14 +109,18 @@ func (a *Agent) GetIdentityOracles(ctx context.Context) ([]*IdentityOracle, erro
 				logger.Stringer("contract_locking_script", contract.LockingScript),
 				logger.Stringer("service_locking_script", lockingScript),
 			}, "Oracle entity contract service not found %d : %s", i, err)
-			continue
+
+			return nil, platform.NewRejectError(actions.RejectionsMsgMalformed,
+				fmt.Sprintf("contract formation oracle service not found: %d", i))
 		}
 
+		found := false
 		for _, service := range services.Services {
 			if service.Type != actions.ServiceTypeIdentityOracle {
 				continue
 			}
 
+			found = true
 			result = append(result, &IdentityOracle{
 				Index:     i,
 				PublicKey: service.PublicKey,
@@ -116,7 +128,12 @@ func (a *Agent) GetIdentityOracles(ctx context.Context) ([]*IdentityOracle, erro
 			break
 		}
 
-		a.caches.Services.Release(ctx, lockingScript)
+		if !found {
+			return nil, platform.NewRejectError(actions.RejectionsMsgMalformed,
+				fmt.Sprintf("contract formation identity oracle service not found: %d", i))
+		}
+
+		a.services.Release(ctx, lockingScript)
 	}
 
 	return result, nil

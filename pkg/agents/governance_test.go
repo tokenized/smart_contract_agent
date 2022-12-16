@@ -14,8 +14,10 @@ import (
 	"github.com/tokenized/pkg/peer_channels"
 	"github.com/tokenized/pkg/storage"
 	"github.com/tokenized/pkg/txbuilder"
-	"github.com/tokenized/smart_contract_agent/internal/platform"
 	"github.com/tokenized/smart_contract_agent/internal/state"
+	"github.com/tokenized/smart_contract_agent/pkg/locker"
+	"github.com/tokenized/smart_contract_agent/pkg/scheduler"
+	"github.com/tokenized/smart_contract_agent/pkg/transactions"
 	"github.com/tokenized/specification/dist/golang/actions"
 	"github.com/tokenized/specification/dist/golang/protocol"
 	"github.com/tokenized/threads"
@@ -27,12 +29,12 @@ func Test_Proposal_Valid(t *testing.T) {
 	ctx := logger.ContextWithLogger(context.Background(), true, true, "")
 	store := storage.NewMockStorage()
 	broadcaster := state.NewMockTxBroadcaster()
-	scheduler := platform.NewScheduler(broadcaster)
-	caches := state.StartTestCaches(ctx, t, store, cacher.DefaultConfig(), time.Second)
-	balanceLocker := state.NewInlineBalanceLocker()
+	scheduler := scheduler.NewScheduler(broadcaster)
+	caches := StartTestCaches(ctx, t, store, cacher.DefaultConfig(), time.Second)
+	locker := locker.NewInlineLocker()
 	_, feeLockingScript, _ := state.MockKey()
-	mockAgentFactory := NewMockAgentFactory(DefaultConfig(), feeLockingScript, caches.Caches,
-		balanceLocker, store, broadcaster, nil, nil, scheduler)
+	mockStore := NewMockStore(DefaultConfig(), feeLockingScript, caches.Caches, caches.Transactions,
+		caches.Services, locker, store, broadcaster, nil, nil, scheduler)
 
 	schedulerInterrupt := make(chan interface{})
 	go func() {
@@ -60,17 +62,17 @@ func Test_Proposal_Valid(t *testing.T) {
 	}
 
 	contractKey, contractLockingScript, adminKey, adminLockingScript, contract := state.MockContractWithVoteSystems(ctx,
-		caches, votingSystems)
+		&caches.TestCaches, votingSystems)
 
-	mockAgentFactory.AddKey(contractKey)
+	mockStore.AddKey(contractKey)
 
-	instrument := state.MockInstrumentOnly(ctx, caches, contract)
+	instrument := state.MockInstrumentOnly(ctx, &caches.TestCaches, contract)
 
-	balances := state.MockBalances(ctx, caches, contract, instrument, 1000)
+	balances := state.MockBalances(ctx, &caches.TestCaches, contract, instrument, 1000)
 
 	agent, err := NewAgent(ctx, contractKey, contractLockingScript, DefaultConfig(),
-		feeLockingScript, caches.Caches, balanceLocker, store, broadcaster, nil, nil, scheduler,
-		mockAgentFactory, peer_channels.NewFactory())
+		feeLockingScript, caches.Caches, caches.Transactions, caches.Services, locker, store,
+		broadcaster, nil, nil, scheduler, mockStore, peer_channels.NewFactory())
 	if err != nil {
 		t.Fatalf("Failed to create agent : %s", err)
 	}
@@ -146,19 +148,20 @@ func Test_Proposal_Valid(t *testing.T) {
 
 	t.Logf("Created tx : %s", tx.String(bitcoin.MainNet))
 
-	addTransaction := &state.Transaction{
+	addTransaction := &transactions.Transaction{
 		Tx:           tx.MsgTx,
 		SpentOutputs: spentOutputs,
 	}
 
-	transaction, err := caches.Caches.Transactions.Add(ctx, addTransaction)
+	transaction, err := caches.Transactions.Add(ctx, addTransaction)
 	if err != nil {
 		t.Fatalf("Failed to add transaction : %s", err)
 	}
 
 	if err := agent.Process(ctx, transaction, []Action{{
-		OutputIndex: proposalScriptOutputIndex,
-		Action:      proposal,
+		AgentLockingScripts: []bitcoin.Script{contractLockingScript},
+		OutputIndex:         proposalScriptOutputIndex,
+		Action:              proposal,
 	}}); err != nil {
 		t.Fatalf("Failed to process transaction : %s", err)
 	}
@@ -214,7 +217,7 @@ func Test_Proposal_Valid(t *testing.T) {
 
 	caches.Caches.Ballots.ReleaseMulti(ctx, contractLockingScript, voteTxID, ballots)
 
-	caches.Caches.Transactions.Release(ctx, transaction.GetTxID())
+	caches.Transactions.Release(ctx, transaction.GetTxID())
 
 	// Wait for scheduled task to finalize vote.
 	time.Sleep(time.Millisecond * 250)
@@ -280,9 +283,9 @@ func Test_Ballots_Valid(t *testing.T) {
 	store := storage.NewMockStorage()
 	broadcaster := state.NewMockTxBroadcaster()
 
-	caches := state.StartTestCaches(ctx, t, store, cacher.DefaultConfig(), time.Second)
+	caches := StartTestCaches(ctx, t, store, cacher.DefaultConfig(), time.Second)
 
-	balanceLocker := state.NewInlineBalanceLocker()
+	locker := locker.NewInlineLocker()
 
 	votingSystems := []*actions.VotingSystemField{
 		{
@@ -296,27 +299,27 @@ func Test_Ballots_Valid(t *testing.T) {
 	}
 
 	contractKey, contractLockingScript, _, _, contract := state.MockContractWithVoteSystems(ctx,
-		caches, votingSystems)
+		&caches.TestCaches, votingSystems)
 
-	instrument := state.MockInstrumentOnly(ctx, caches, contract)
+	instrument := state.MockInstrumentOnly(ctx, &caches.TestCaches, contract)
 
 	balanceCount := 1000
-	balances := state.MockBalances(ctx, caches, contract, instrument, balanceCount)
+	balances := state.MockBalances(ctx, &caches.TestCaches, contract, instrument, balanceCount)
 	balancesToVote := balances
 
 	_, feeLockingScript, _ := state.MockKey()
 	agent, err := NewAgent(ctx, contractKey, contractLockingScript, DefaultConfig(),
-		feeLockingScript, caches.Caches, balanceLocker, store, broadcaster, nil, nil, nil, nil,
-		peer_channels.NewFactory())
+		feeLockingScript, caches.Caches, caches.Transactions, caches.Services, locker, store,
+		broadcaster, nil, nil, nil, nil, peer_channels.NewFactory())
 	if err != nil {
 		t.Fatalf("Failed to create agent : %s", err)
 	}
 
 	now := uint64(time.Now().UnixNano())
-	vote := state.MockProposal(ctx, caches, contract, 0)
+	vote := MockProposal(ctx, caches, contract, 0)
 	vote.Lock()
 	voteTxID := *vote.VoteTxID
-	vote.Prepare(ctx, caches.Caches, caches.BalanceLocker, contract, votingSystems[0], &now)
+	vote.Prepare(ctx, caches.Caches, caches.Locker, contract, votingSystems[0], &now)
 	tokenQuantity := vote.TokenQuantity
 	vote.Unlock()
 
@@ -385,19 +388,20 @@ func Test_Ballots_Valid(t *testing.T) {
 		t.Logf("Ballot cast tx : %s", tx.String(bitcoin.MainNet))
 		txid := *tx.MsgTx.TxHash()
 
-		addTransaction := &state.Transaction{
+		addTransaction := &transactions.Transaction{
 			Tx:           tx.MsgTx,
 			SpentOutputs: spentOutputs,
 		}
 
-		transaction, err := caches.Caches.Transactions.Add(ctx, addTransaction)
+		transaction, err := caches.Transactions.Add(ctx, addTransaction)
 		if err != nil {
 			t.Fatalf("Failed to add transaction : %s", err)
 		}
 
 		if err := agent.Process(ctx, transaction, []Action{{
-			OutputIndex: ballotCastScriptOutputIndex,
-			Action:      ballotCast,
+			AgentLockingScripts: []bitcoin.Script{contractLockingScript},
+			OutputIndex:         ballotCastScriptOutputIndex,
+			Action:              ballotCast,
 		}}); err != nil {
 			t.Fatalf("Failed to process transaction : %s", err)
 		}
@@ -439,7 +443,7 @@ func Test_Ballots_Valid(t *testing.T) {
 		js, _ := json.MarshalIndent(ballotCounted, "", "  ")
 		t.Logf("BallotCounted : %s", js)
 
-		caches.Caches.Transactions.Release(ctx, txid)
+		caches.Transactions.Release(ctx, txid)
 
 		votedQuantity += balance.Quantity
 		if votedQuantity > tokenQuantity/2 {

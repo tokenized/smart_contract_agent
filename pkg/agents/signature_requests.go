@@ -12,6 +12,7 @@ import (
 	"github.com/tokenized/pkg/wire"
 	"github.com/tokenized/smart_contract_agent/internal/platform"
 	"github.com/tokenized/smart_contract_agent/internal/state"
+	"github.com/tokenized/smart_contract_agent/pkg/transactions"
 	"github.com/tokenized/specification/dist/golang/actions"
 	"github.com/tokenized/specification/dist/golang/messages"
 	"github.com/tokenized/specification/dist/golang/protocol"
@@ -19,7 +20,7 @@ import (
 	"github.com/pkg/errors"
 )
 
-func (a *Agent) processSignatureRequest(ctx context.Context, transaction *state.Transaction,
+func (a *Agent) processSignatureRequest(ctx context.Context, transaction *transactions.Transaction,
 	outputIndex int, signatureRequest *messages.SignatureRequest,
 	senderLockingScript, senderUnlockingScript bitcoin.Script) (*expanded_tx.ExpandedTx, error) {
 
@@ -76,7 +77,7 @@ func (a *Agent) processSignatureRequest(ctx context.Context, transaction *state.
 		logger.Stringer("transfer_txid", transferTxID),
 	}, "TransferTxID")
 
-	transferTransaction, err := a.caches.Transactions.Get(ctx, transferTxID)
+	transferTransaction, err := a.transactions.Get(ctx, transferTxID)
 	if err != nil {
 		return nil, errors.Wrap(err, "get transfer tx")
 	}
@@ -84,7 +85,7 @@ func (a *Agent) processSignatureRequest(ctx context.Context, transaction *state.
 	if transferTransaction == nil {
 		return nil, platform.NewRejectError(actions.RejectionsMsgMalformed, "unknown transfer tx")
 	}
-	defer a.caches.Transactions.Release(ctx, transferTxID)
+	defer a.transactions.Release(ctx, transferTxID)
 
 	transferTransaction.Lock()
 	transferTx := transferTransaction.GetMsgTx()
@@ -188,14 +189,14 @@ func (a *Agent) processSignatureRequest(ctx context.Context, transaction *state.
 			balances)
 	}
 
-	lockerResponseChannel := a.balanceLocker.AddRequest(allBalances)
+	lockerResponseChannel := a.locker.AddRequest(allBalances)
 	lockerResponse := <-lockerResponseChannel
 	var now uint64
 	switch v := lockerResponse.(type) {
 	case uint64:
 		now = v
 	case error:
-		return nil, errors.Wrap(v, "balance locker")
+		return nil, errors.Wrap(v, "locker")
 	}
 	defer allBalances.Unlock()
 
@@ -366,7 +367,7 @@ func (a *Agent) processSignatureRequest(ctx context.Context, transaction *state.
 	return etx, nil
 }
 
-func (a *Agent) verifyBitcoinSettlement(ctx context.Context, transferTransaction *state.Transaction,
+func (a *Agent) verifyBitcoinSettlement(ctx context.Context, transferTransaction *transactions.Transaction,
 	transfer *actions.Transfer, settlementTx *txbuilder.TxBuilder,
 	instrumentSettlement *actions.InstrumentSettlementField) error {
 
@@ -495,7 +496,7 @@ func (a *Agent) verifyInstrumentSettlement(ctx context.Context, agentLockingScri
 	return nil
 }
 
-func (a *Agent) createSignatureRequest(ctx context.Context, currentTransaction *state.Transaction,
+func (a *Agent) createSignatureRequest(ctx context.Context, currentTransaction *transactions.Transaction,
 	currentOutputIndex int, transferContracts *TransferContracts, settlementTx *txbuilder.TxBuilder,
 	now uint64) (*expanded_tx.ExpandedTx, error) {
 
@@ -579,11 +580,11 @@ func (a *Agent) createSignatureRequest(ctx context.Context, currentTransaction *
 	}
 
 	messageTxID := *messageTx.MsgTx.TxHash()
-	messageTransaction, err := a.caches.Transactions.AddRaw(ctx, messageTx.MsgTx, nil)
+	messageTransaction, err := a.transactions.AddRaw(ctx, messageTx.MsgTx, nil)
 	if err != nil {
 		return nil, errors.Wrap(err, "add response tx")
 	}
-	defer a.caches.Transactions.Release(ctx, messageTxID)
+	defer a.transactions.Release(ctx, messageTxID)
 
 	messageTransaction.Lock()
 	messageTransaction.SetProcessed(a.ContractHash(), messageScriptOutputIndex)

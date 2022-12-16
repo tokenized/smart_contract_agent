@@ -15,6 +15,8 @@ import (
 	"github.com/tokenized/pkg/storage"
 	"github.com/tokenized/pkg/txbuilder"
 	"github.com/tokenized/smart_contract_agent/internal/state"
+	"github.com/tokenized/smart_contract_agent/pkg/locker"
+	"github.com/tokenized/smart_contract_agent/pkg/transactions"
 	"github.com/tokenized/specification/dist/golang/actions"
 	"github.com/tokenized/specification/dist/golang/protocol"
 )
@@ -24,22 +26,22 @@ func Test_Freeze_Balances_Valid(t *testing.T) {
 	store := storage.NewMockStorage()
 	broadcaster := state.NewMockTxBroadcaster()
 
-	caches := state.StartTestCaches(ctx, t, store, cacher.DefaultConfig(), time.Second)
+	caches := StartTestCaches(ctx, t, store, cacher.DefaultConfig(), time.Second)
 
-	balanceLocker := state.NewInlineBalanceLocker()
+	locker := locker.NewInlineLocker()
 
 	contractKey, contractLockingScript, adminKey, adminLockingScript, contract, instrument := state.MockInstrument(ctx,
-		caches)
+		&caches.TestCaches)
 	_, feeLockingScript, _ := state.MockKey()
 
 	agent, err := NewAgent(ctx, contractKey, contractLockingScript, DefaultConfig(),
-		feeLockingScript, caches.Caches, balanceLocker, store, broadcaster, nil, nil, nil, nil,
+		feeLockingScript, caches.Caches, caches.Transactions, caches.Services, locker, store, broadcaster, nil, nil, nil, nil,
 		peer_channels.NewFactory())
 	if err != nil {
 		t.Fatalf("Failed to create agent : %s", err)
 	}
 
-	balances := state.MockBalances(ctx, caches, contract, instrument, 500)
+	balances := state.MockBalances(ctx, &caches.TestCaches, contract, instrument, 500)
 
 	var freezeBalances []*state.MockBalance
 	var freezeQuantities []uint64
@@ -146,25 +148,26 @@ func Test_Freeze_Balances_Valid(t *testing.T) {
 
 	t.Logf("Created tx : %s", tx.String(bitcoin.MainNet))
 
-	addTransaction := &state.Transaction{
+	addTransaction := &transactions.Transaction{
 		Tx:           tx.MsgTx,
 		SpentOutputs: spentOutputs,
 	}
 
-	transaction, err := caches.Caches.Transactions.Add(ctx, addTransaction)
+	transaction, err := caches.Transactions.Add(ctx, addTransaction)
 	if err != nil {
 		t.Fatalf("Failed to add transaction : %s", err)
 	}
 
 	now := uint64(time.Now().UnixNano())
 	if err := agent.Process(ctx, transaction, []Action{{
-		OutputIndex: freezeOrderScriptOutputIndex,
-		Action:      freezeOrder,
+		AgentLockingScripts: []bitcoin.Script{contractLockingScript},
+		OutputIndex:         freezeOrderScriptOutputIndex,
+		Action:              freezeOrder,
 	}}); err != nil {
 		t.Fatalf("Failed to process transaction : %s", err)
 	}
 
-	caches.Caches.Transactions.Release(ctx, transaction.GetTxID())
+	caches.Transactions.Release(ctx, transaction.GetTxID())
 
 	responseTx := broadcaster.GetLastTx()
 	if responseTx == nil {
@@ -334,25 +337,26 @@ func Test_Freeze_Balances_Valid(t *testing.T) {
 
 	t.Logf("Created tx : %s", tx.String(bitcoin.MainNet))
 
-	addTransaction = &state.Transaction{
+	addTransaction = &transactions.Transaction{
 		Tx:           tx.MsgTx,
 		SpentOutputs: spentOutputs,
 	}
 
-	transaction, err = caches.Caches.Transactions.Add(ctx, addTransaction)
+	transaction, err = caches.Transactions.Add(ctx, addTransaction)
 	if err != nil {
 		t.Fatalf("Failed to add transaction : %s", err)
 	}
 
 	now = uint64(time.Now().UnixNano())
 	if err := agent.Process(ctx, transaction, []Action{{
-		OutputIndex: thawOrderScriptOutputIndex,
-		Action:      thawOrder,
+		AgentLockingScripts: []bitcoin.Script{contractLockingScript},
+		OutputIndex:         thawOrderScriptOutputIndex,
+		Action:              thawOrder,
 	}}); err != nil {
 		t.Fatalf("Failed to process transaction : %s", err)
 	}
 
-	caches.Caches.Transactions.Release(ctx, transaction.GetTxID())
+	caches.Transactions.Release(ctx, transaction.GetTxID())
 
 	responseTx = broadcaster.GetLastTx()
 	if responseTx == nil {
@@ -417,17 +421,17 @@ func Test_Freeze_Contract_Valid(t *testing.T) {
 	store := storage.NewMockStorage()
 	broadcaster := state.NewMockTxBroadcaster()
 
-	caches := state.StartTestCaches(ctx, t, store, cacher.DefaultConfig(), time.Second)
+	caches := StartTestCaches(ctx, t, store, cacher.DefaultConfig(), time.Second)
 
-	balanceLocker := state.NewInlineBalanceLocker()
+	locker := locker.NewInlineLocker()
 
 	contractKey, contractLockingScript, adminKey, adminLockingScript, contract, instrument := state.MockInstrument(ctx,
-		caches)
+		&caches.TestCaches)
 	_, feeLockingScript, _ := state.MockKey()
 
 	agent, err := NewAgent(ctx, contractKey, contractLockingScript, DefaultConfig(),
-		feeLockingScript, caches.Caches, balanceLocker, store, broadcaster, nil, nil, nil, nil,
-		peer_channels.NewFactory())
+		feeLockingScript, caches.Caches, caches.Transactions, caches.Services, locker, store,
+		broadcaster, nil, nil, nil, nil, peer_channels.NewFactory())
 	if err != nil {
 		t.Fatalf("Failed to create agent : %s", err)
 	}
@@ -514,25 +518,26 @@ func Test_Freeze_Contract_Valid(t *testing.T) {
 
 	t.Logf("Created tx : %s", tx.String(bitcoin.MainNet))
 
-	addTransaction := &state.Transaction{
+	addTransaction := &transactions.Transaction{
 		Tx:           tx.MsgTx,
 		SpentOutputs: spentOutputs,
 	}
 
-	transaction, err := caches.Caches.Transactions.Add(ctx, addTransaction)
+	transaction, err := caches.Transactions.Add(ctx, addTransaction)
 	if err != nil {
 		t.Fatalf("Failed to add transaction : %s", err)
 	}
 
 	now := uint64(time.Now().UnixNano())
 	if err := agent.Process(ctx, transaction, []Action{{
-		OutputIndex: freezeOrderScriptOutputIndex,
-		Action:      freezeOrder,
+		AgentLockingScripts: []bitcoin.Script{contractLockingScript},
+		OutputIndex:         freezeOrderScriptOutputIndex,
+		Action:              freezeOrder,
 	}}); err != nil {
 		t.Fatalf("Failed to process transaction : %s", err)
 	}
 
-	caches.Caches.Transactions.Release(ctx, transaction.GetTxID())
+	caches.Transactions.Release(ctx, transaction.GetTxID())
 
 	responseTx := broadcaster.GetLastTx()
 	if responseTx == nil {
@@ -663,25 +668,26 @@ func Test_Freeze_Contract_Valid(t *testing.T) {
 
 	t.Logf("Created tx : %s", tx.String(bitcoin.MainNet))
 
-	addTransaction = &state.Transaction{
+	addTransaction = &transactions.Transaction{
 		Tx:           tx.MsgTx,
 		SpentOutputs: spentOutputs,
 	}
 
-	transaction, err = caches.Caches.Transactions.Add(ctx, addTransaction)
+	transaction, err = caches.Transactions.Add(ctx, addTransaction)
 	if err != nil {
 		t.Fatalf("Failed to add transaction : %s", err)
 	}
 
 	now = uint64(time.Now().UnixNano())
 	if err := agent.Process(ctx, transaction, []Action{{
-		OutputIndex: thawOrderScriptOutputIndex,
-		Action:      thawOrder,
+		AgentLockingScripts: []bitcoin.Script{contractLockingScript},
+		OutputIndex:         thawOrderScriptOutputIndex,
+		Action:              thawOrder,
 	}}); err != nil {
 		t.Fatalf("Failed to process transaction : %s", err)
 	}
 
-	caches.Caches.Transactions.Release(ctx, transaction.GetTxID())
+	caches.Transactions.Release(ctx, transaction.GetTxID())
 
 	responseTx = broadcaster.GetLastTx()
 	if responseTx == nil {
@@ -732,12 +738,12 @@ func Test_Freeze_Instrument_Valid(t *testing.T) {
 	store := storage.NewMockStorage()
 	broadcaster := state.NewMockTxBroadcaster()
 
-	caches := state.StartTestCaches(ctx, t, store, cacher.DefaultConfig(), time.Second)
+	caches := StartTestCaches(ctx, t, store, cacher.DefaultConfig(), time.Second)
 
-	balanceLocker := state.NewInlineBalanceLocker()
+	locker := locker.NewInlineLocker()
 
 	contractKey, contractLockingScript, adminKey, adminLockingScript, _, instrument := state.MockInstrument(ctx,
-		caches)
+		&caches.TestCaches)
 	_, feeLockingScript, _ := state.MockKey()
 
 	instrumentID, _ := protocol.InstrumentIDForRaw(string(instrument.InstrumentType[:]),
@@ -745,7 +751,7 @@ func Test_Freeze_Instrument_Valid(t *testing.T) {
 	t.Logf("Mocked instrument : %s", instrumentID)
 
 	agent, err := NewAgent(ctx, contractKey, contractLockingScript, DefaultConfig(),
-		feeLockingScript, caches.Caches, balanceLocker, store, broadcaster, nil, nil, nil, nil,
+		feeLockingScript, caches.Caches, caches.Transactions, caches.Services, locker, store, broadcaster, nil, nil, nil, nil,
 		peer_channels.NewFactory())
 	if err != nil {
 		t.Fatalf("Failed to create agent : %s", err)
@@ -833,25 +839,26 @@ func Test_Freeze_Instrument_Valid(t *testing.T) {
 
 	t.Logf("Created tx : %s", tx.String(bitcoin.MainNet))
 
-	addTransaction := &state.Transaction{
+	addTransaction := &transactions.Transaction{
 		Tx:           tx.MsgTx,
 		SpentOutputs: spentOutputs,
 	}
 
-	transaction, err := caches.Caches.Transactions.Add(ctx, addTransaction)
+	transaction, err := caches.Transactions.Add(ctx, addTransaction)
 	if err != nil {
 		t.Fatalf("Failed to add transaction : %s", err)
 	}
 
 	now := uint64(time.Now().UnixNano())
 	if err := agent.Process(ctx, transaction, []Action{{
-		OutputIndex: freezeOrderScriptOutputIndex,
-		Action:      freezeOrder,
+		AgentLockingScripts: []bitcoin.Script{contractLockingScript},
+		OutputIndex:         freezeOrderScriptOutputIndex,
+		Action:              freezeOrder,
 	}}); err != nil {
 		t.Fatalf("Failed to process transaction : %s", err)
 	}
 
-	caches.Caches.Transactions.Release(ctx, transaction.GetTxID())
+	caches.Transactions.Release(ctx, transaction.GetTxID())
 
 	responseTx := broadcaster.GetLastTx()
 	if responseTx == nil {
@@ -982,25 +989,26 @@ func Test_Freeze_Instrument_Valid(t *testing.T) {
 
 	t.Logf("Created tx : %s", tx.String(bitcoin.MainNet))
 
-	addTransaction = &state.Transaction{
+	addTransaction = &transactions.Transaction{
 		Tx:           tx.MsgTx,
 		SpentOutputs: spentOutputs,
 	}
 
-	transaction, err = caches.Caches.Transactions.Add(ctx, addTransaction)
+	transaction, err = caches.Transactions.Add(ctx, addTransaction)
 	if err != nil {
 		t.Fatalf("Failed to add transaction : %s", err)
 	}
 
 	now = uint64(time.Now().UnixNano())
 	if err := agent.Process(ctx, transaction, []Action{{
-		OutputIndex: thawOrderScriptOutputIndex,
-		Action:      thawOrder,
+		AgentLockingScripts: []bitcoin.Script{contractLockingScript},
+		OutputIndex:         thawOrderScriptOutputIndex,
+		Action:              thawOrder,
 	}}); err != nil {
 		t.Fatalf("Failed to process transaction : %s", err)
 	}
 
-	caches.Caches.Transactions.Release(ctx, transaction.GetTxID())
+	caches.Transactions.Release(ctx, transaction.GetTxID())
 
 	responseTx = broadcaster.GetLastTx()
 	if responseTx == nil {

@@ -8,7 +8,7 @@ import (
 	"github.com/tokenized/pkg/expanded_tx"
 	"github.com/tokenized/pkg/txbuilder"
 	"github.com/tokenized/pkg/wire"
-	"github.com/tokenized/smart_contract_agent/internal/state"
+	"github.com/tokenized/smart_contract_agent/pkg/transactions"
 	"github.com/tokenized/specification/dist/golang/actions"
 	"github.com/tokenized/specification/dist/golang/protocol"
 
@@ -80,7 +80,7 @@ func findBitcoinOutput(tx *wire.MsgTx, lockingScript bitcoin.Script, value uint6
 func (a *Agent) addResponseTxID(ctx context.Context,
 	requestTxID, responseTxID bitcoin.Hash32) (bool, error) {
 
-	requestTransaction, err := a.caches.Transactions.Get(ctx, requestTxID)
+	requestTransaction, err := a.transactions.Get(ctx, requestTxID)
 	if err != nil {
 		return false, errors.Wrap(err, "get tx")
 	}
@@ -88,7 +88,7 @@ func (a *Agent) addResponseTxID(ctx context.Context,
 	if requestTransaction == nil {
 		return false, errors.New("Request transaction not found")
 	}
-	defer a.caches.Transactions.Release(ctx, requestTxID)
+	defer a.transactions.Release(ctx, requestTxID)
 
 	requestTransaction.Lock()
 
@@ -206,7 +206,7 @@ func buildExpandedTx(tx *wire.MsgTx, ancestors []*wire.MsgTx) (*expanded_tx.Expa
 	return etx, nil
 }
 
-func getRequestFirstInputLockingScript(ctx context.Context, transactions *state.TransactionCache,
+func getRequestFirstInputLockingScript(ctx context.Context, transactions *transactions.TransactionCache,
 	requestTxID bitcoin.Hash32) (bitcoin.Script, error) {
 
 	requestTransaction, err := transactions.Get(ctx, requestTxID)

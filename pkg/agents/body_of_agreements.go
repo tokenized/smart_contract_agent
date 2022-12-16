@@ -11,7 +11,7 @@ import (
 	"github.com/tokenized/pkg/txbuilder"
 	"github.com/tokenized/pkg/wire"
 	"github.com/tokenized/smart_contract_agent/internal/platform"
-	"github.com/tokenized/smart_contract_agent/internal/state"
+	"github.com/tokenized/smart_contract_agent/pkg/transactions"
 	"github.com/tokenized/specification/dist/golang/actions"
 	"github.com/tokenized/specification/dist/golang/permissions"
 	"github.com/tokenized/specification/dist/golang/protocol"
@@ -19,7 +19,7 @@ import (
 	"github.com/pkg/errors"
 )
 
-func (a *Agent) processBodyOfAgreementOffer(ctx context.Context, transaction *state.Transaction,
+func (a *Agent) processBodyOfAgreementOffer(ctx context.Context, transaction *transactions.Transaction,
 	offer *actions.BodyOfAgreementOffer, outputIndex int) (*expanded_tx.ExpandedTx, error) {
 
 	// First output must be the agent's locking script
@@ -142,11 +142,11 @@ func (a *Agent) processBodyOfAgreementOffer(ctx context.Context, transaction *st
 	contract.MarkModified()
 
 	formationTxID := *formationTx.MsgTx.TxHash()
-	formationTransaction, err := a.caches.Transactions.AddRaw(ctx, formationTx.MsgTx, nil)
+	formationTransaction, err := a.transactions.AddRaw(ctx, formationTx.MsgTx, nil)
 	if err != nil {
 		return nil, errors.Wrap(err, "add response tx")
 	}
-	defer a.caches.Transactions.Release(ctx, formationTxID)
+	defer a.transactions.Release(ctx, formationTxID)
 
 	// Set formation tx as processed since the body of agreement is now formed.
 	formationTransaction.Lock()
@@ -174,7 +174,7 @@ func (a *Agent) processBodyOfAgreementOffer(ctx context.Context, transaction *st
 	return etx, nil
 }
 
-func (a *Agent) processBodyOfAgreementAmendment(ctx context.Context, transaction *state.Transaction,
+func (a *Agent) processBodyOfAgreementAmendment(ctx context.Context, transaction *transactions.Transaction,
 	amendment *actions.BodyOfAgreementAmendment, outputIndex int) (*expanded_tx.ExpandedTx, error) {
 
 	agentLockingScript := a.LockingScript()
@@ -242,8 +242,8 @@ func (a *Agent) processBodyOfAgreementAmendment(ctx context.Context, transaction
 	proposalType := uint32(0)
 	votingSystem := uint32(0)
 
-	vote, err := fetchReferenceVote(ctx, a.caches, agentLockingScript, amendment.RefTxID,
-		a.IsTest())
+	vote, err := fetchReferenceVote(ctx, a.caches, a.transactions, agentLockingScript,
+		amendment.RefTxID, a.IsTest())
 	if err != nil {
 		return nil, errors.Wrap(err, "fetch vote")
 	}
@@ -379,11 +379,11 @@ func (a *Agent) processBodyOfAgreementAmendment(ctx context.Context, transaction
 	contract.MarkModified()
 
 	formationTxID := *formationTx.MsgTx.TxHash()
-	formationTransaction, err := a.caches.Transactions.AddRaw(ctx, formationTx.MsgTx, nil)
+	formationTransaction, err := a.transactions.AddRaw(ctx, formationTx.MsgTx, nil)
 	if err != nil {
 		return nil, errors.Wrap(err, "add response tx")
 	}
-	defer a.caches.Transactions.Release(ctx, formationTxID)
+	defer a.transactions.Release(ctx, formationTxID)
 
 	// Set formation tx as processed since the body of agreement is now amended.
 	formationTransaction.Lock()
@@ -411,7 +411,7 @@ func (a *Agent) processBodyOfAgreementAmendment(ctx context.Context, transaction
 	return etx, nil
 }
 
-func (a *Agent) processBodyOfAgreementFormation(ctx context.Context, transaction *state.Transaction,
+func (a *Agent) processBodyOfAgreementFormation(ctx context.Context, transaction *transactions.Transaction,
 	formation *actions.BodyOfAgreementFormation, outputIndex int) error {
 
 	// First input must be the agent's locking script

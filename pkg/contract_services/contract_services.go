@@ -1,4 +1,4 @@
-package state
+package contract_services
 
 import (
 	"context"
@@ -12,6 +12,7 @@ import (
 	"github.com/tokenized/logger"
 	"github.com/tokenized/pkg/bitcoin"
 	"github.com/tokenized/pkg/bsor"
+	"github.com/tokenized/smart_contract_agent/internal/state"
 	"github.com/tokenized/specification/dist/golang/actions"
 
 	"github.com/pkg/errors"
@@ -20,6 +21,10 @@ import (
 const (
 	contractServicesVersion = uint8(0)
 	contractServicesPath    = "services"
+)
+
+var (
+	endian = binary.LittleEndian
 )
 
 type ContractServicesCache struct {
@@ -70,7 +75,7 @@ func NewContractServicesCache(cache *cacher.Cache) (*ContractServicesCache, erro
 func (c *ContractServicesCache) Update(ctx context.Context, contractLockingScript bitcoin.Script,
 	formation *actions.ContractFormation, txid bitcoin.Hash32) error {
 
-	contractHash := CalculateContractHash(contractLockingScript)
+	contractHash := state.CalculateContractHash(contractLockingScript)
 
 	path := ContractServicesPath(contractHash)
 
@@ -147,7 +152,7 @@ func (c *ContractServicesCache) Update(ctx context.Context, contractLockingScrip
 func (c *ContractServicesCache) Get(ctx context.Context,
 	contractLockingScript bitcoin.Script) (*ContractServices, error) {
 
-	contractHash := CalculateContractHash(contractLockingScript)
+	contractHash := state.CalculateContractHash(contractLockingScript)
 
 	item, err := c.cacher.Get(ctx, c.typ, ContractServicesPath(contractHash))
 	if err != nil {
@@ -162,10 +167,10 @@ func (c *ContractServicesCache) Get(ctx context.Context,
 }
 
 func (c *ContractServicesCache) Release(ctx context.Context, contractLockingScript bitcoin.Script) {
-	c.cacher.Release(ctx, ContractServicesPath(CalculateContractHash(contractLockingScript)))
+	c.cacher.Release(ctx, ContractServicesPath(state.CalculateContractHash(contractLockingScript)))
 }
 
-func ContractServicesPath(contractHash ContractHash) string {
+func ContractServicesPath(contractHash state.ContractHash) string {
 	return fmt.Sprintf("%s/%s", contractServicesPath, contractHash)
 }
 

@@ -23,19 +23,19 @@ import (
 type FinalizeVoteTask struct {
 	start time.Time
 
-	factory               AgentFactory
+	store                 Store
 	contractLockingScript bitcoin.Script
 	voteTxID              bitcoin.Hash32
 
 	lock sync.Mutex
 }
 
-func NewFinalizeVoteTask(start time.Time, factory AgentFactory,
+func NewFinalizeVoteTask(start time.Time, store Store,
 	contractLockingScript bitcoin.Script, voteTxID bitcoin.Hash32) *FinalizeVoteTask {
 
 	return &FinalizeVoteTask{
 		start:                 start,
-		factory:               factory,
+		store:                 store,
 		contractLockingScript: contractLockingScript,
 		voteTxID:              voteTxID,
 	}
@@ -67,14 +67,14 @@ func (t *FinalizeVoteTask) Run(ctx context.Context,
 	t.lock.Lock()
 	defer t.lock.Unlock()
 
-	factory := t.factory
+	store := t.store
 	contractLockingScript := t.contractLockingScript
 	voteTxID := t.voteTxID
 
-	return FinalizeVote(ctx, factory, contractLockingScript, voteTxID)
+	return FinalizeVote(ctx, store, contractLockingScript, voteTxID)
 }
 
-func FinalizeVote(ctx context.Context, factory AgentFactory, contractLockingScript bitcoin.Script,
+func FinalizeVote(ctx context.Context, store Store, contractLockingScript bitcoin.Script,
 	voteTxID bitcoin.Hash32) (*expanded_tx.ExpandedTx, error) {
 
 	ctx = logger.ContextWithLogFields(ctx, logger.Stringer("trace", uuid.New()))
@@ -84,7 +84,7 @@ func FinalizeVote(ctx context.Context, factory AgentFactory, contractLockingScri
 		logger.Stringer("contract_locking_script", contractLockingScript),
 	}, "Finalizing vote")
 
-	agent, err := factory.GetAgent(ctx, contractLockingScript)
+	agent, err := store.GetAgent(ctx, contractLockingScript)
 	if err != nil {
 		return nil, errors.Wrap(err, "get agent")
 	}
@@ -135,7 +135,7 @@ func (a *Agent) FinalizeVote(ctx context.Context,
 
 	proposalTxID := *vote.ProposalTxID
 
-	proposalTransaction, err := a.caches.Transactions.Get(ctx, proposalTxID)
+	proposalTransaction, err := a.transactions.Get(ctx, proposalTxID)
 	if err != nil {
 		return nil, errors.Wrap(err, "get proposal tx")
 	}
@@ -143,7 +143,7 @@ func (a *Agent) FinalizeVote(ctx context.Context,
 	if proposalTransaction == nil {
 		return nil, errors.New("Proposal transaction not found")
 	}
-	defer a.caches.Transactions.Release(ctx, proposalTxID)
+	defer a.transactions.Release(ctx, proposalTxID)
 
 	proposalTransaction.Lock()
 
@@ -232,11 +232,11 @@ func (a *Agent) FinalizeVote(ctx context.Context,
 	vote.Result = voteResult
 	vote.ResultTxID = &voteResultTxID
 
-	voteResultTransaction, err := a.caches.Transactions.AddRaw(ctx, voteResultTx.MsgTx, nil)
+	voteResultTransaction, err := a.transactions.AddRaw(ctx, voteResultTx.MsgTx, nil)
 	if err != nil {
 		return nil, errors.Wrap(err, "add response tx")
 	}
-	defer a.caches.Transactions.Release(ctx, voteResultTxID)
+	defer a.transactions.Release(ctx, voteResultTxID)
 
 	// Set vote result tx as processed since the contract is now formed.
 	voteResultTransaction.Lock()
