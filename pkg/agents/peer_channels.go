@@ -45,20 +45,13 @@ func (a *Agent) ProcessPeerChannelMessage(ctx context.Context, msg peer_channels
 			logger.Stringer("request_txid", txid),
 		}, "Received peer channel transaction is missing ancestors : %s", err)
 
-		if request.ReplyTo != nil && request.ReplyTo.PeerChannel != nil {
-			if err := a.sendPeerChannelReject(ctx, request.ReplyTo.PeerChannel, request.Tx,
-				channels.StatusReject, channelsExpandedTx.ProtocolID,
-				channelsExpandedTx.ResponseCodeMissingAncestors, err.Error()); err != nil {
-				logger.WarnWithFields(ctx, []logger.Field{
-					logger.Stringer("request_txid", txid),
-					logger.String("peer_channel", request.ReplyTo.PeerChannel.URL),
-				}, "Failed to send peer channel reject response : %s", err)
-			} else {
-				logger.InfoWithFields(ctx, []logger.Field{
-					logger.Stringer("request_txid", txid),
-					logger.String("peer_channel", request.ReplyTo.PeerChannel.URL),
-				}, "Posted reject response tx to peer channel")
-			}
+		if err := a.sendPeerChannelReject(ctx, request.ReplyTo, request.Tx, channels.StatusReject,
+			channelsExpandedTx.ProtocolID, channelsExpandedTx.ResponseCodeMissingAncestors,
+			err.Error()); err != nil {
+			logger.WarnWithFields(ctx, []logger.Field{
+				logger.Stringer("request_txid", txid),
+				logger.String("peer_channel", request.ReplyTo.PeerChannel.URL),
+			}, "Failed to send peer channel reject response : %s", err)
 		}
 
 		return nil
@@ -79,20 +72,13 @@ func (a *Agent) ProcessPeerChannelMessage(ctx context.Context, msg peer_channels
 	if len(requestOutputs) == 0 {
 		logger.Warn(ctx, "Transaction is not relevant")
 
-		if request.ReplyTo != nil && request.ReplyTo.PeerChannel != nil {
-			if err := a.sendPeerChannelReject(ctx, request.ReplyTo.PeerChannel, request.Tx,
-				channels.StatusReject, client.ProtocolID, client.ResponseCodeNotRelevant,
-				""); err != nil {
-				logger.WarnWithFields(ctx, []logger.Field{
-					logger.Stringer("request_txid", txid),
-					logger.String("peer_channel", request.ReplyTo.PeerChannel.URL),
-				}, "Failed to send peer channel reject response : %s", err)
-			} else {
-				logger.InfoWithFields(ctx, []logger.Field{
-					logger.Stringer("request_txid", txid),
-					logger.String("peer_channel", request.ReplyTo.PeerChannel.URL),
-				}, "Posted reject response tx to peer channel")
-			}
+		if err := a.sendPeerChannelReject(ctx, request.ReplyTo, request.Tx,
+			channels.StatusReject, client.ProtocolID, client.ResponseCodeNotRelevant,
+			""); err != nil {
+			logger.WarnWithFields(ctx, []logger.Field{
+				logger.Stringer("request_txid", txid),
+				logger.String("peer_channel", request.ReplyTo.PeerChannel.URL),
+			}, "Failed to send peer channel reject response : %s", err)
 		}
 
 		return nil
@@ -178,20 +164,13 @@ func (a *Agent) ProcessPeerChannelMessage(ctx context.Context, msg peer_channels
 
 		if err := a.BroadcastTx(ctx, request.Tx, nil); err != nil {
 			if _, ok := errors.Cause(err).(spyNodeClient.RejectError); ok {
-				if request.ReplyTo != nil && request.ReplyTo.PeerChannel != nil {
-					if err := a.sendPeerChannelReject(ctx, request.ReplyTo.PeerChannel, request.Tx,
-						channels.StatusReject, channelsExpandedTx.ProtocolID,
-						channelsExpandedTx.ResponseCodeTxRejected, err.Error()); err != nil {
-						logger.WarnWithFields(ctx, []logger.Field{
-							logger.Stringer("request_txid", txid),
-							logger.String("peer_channel", request.ReplyTo.PeerChannel.URL),
-						}, "Failed to send peer channel reject response : %s", err)
-					} else {
-						logger.InfoWithFields(ctx, []logger.Field{
-							logger.Stringer("request_txid", txid),
-							logger.String("peer_channel", request.ReplyTo.PeerChannel.URL),
-						}, "Posted reject response tx to peer channel")
-					}
+				if err := a.sendPeerChannelReject(ctx, request.ReplyTo, request.Tx,
+					channels.StatusReject, channelsExpandedTx.ProtocolID,
+					channelsExpandedTx.ResponseCodeTxRejected, err.Error()); err != nil {
+					logger.WarnWithFields(ctx, []logger.Field{
+						logger.Stringer("request_txid", txid),
+						logger.String("peer_channel", request.ReplyTo.PeerChannel.URL),
+					}, "Failed to send peer channel reject response : %s", err)
 				}
 
 				return nil
@@ -303,6 +282,12 @@ func (a *Agent) Respond(ctx context.Context, requestTxID bitcoin.Hash32,
 func (a *Agent) sendPeerChannelResponseTx(ctx context.Context,
 	peerChannel *peer_channels.PeerChannel, etx *expanded_tx.ExpandedTx) error {
 
+	return SendPeerChannelResponseTx(ctx, a.peerChannelsFactory, peerChannel, etx)
+}
+
+func SendPeerChannelResponseTx(ctx context.Context, peerChannelsFactory *peer_channels.Factory,
+	peerChannel *peer_channels.PeerChannel, etx *expanded_tx.ExpandedTx) error {
+
 	if peerChannel == nil {
 		return nil
 	}
@@ -312,7 +297,7 @@ func (a *Agent) sendPeerChannelResponseTx(ctx context.Context,
 		return errors.Wrap(err, "url")
 	}
 
-	peerChannelsClient, err := a.peerChannelsFactory.NewClient(baseURL)
+	peerChannelsClient, err := peerChannelsFactory.NewClient(baseURL)
 	if err != nil {
 		return errors.Wrapf(err, "peer channel client: %s", baseURL)
 	}
@@ -330,20 +315,34 @@ func (a *Agent) sendPeerChannelResponseTx(ctx context.Context,
 	return nil
 }
 
-func (a *Agent) sendPeerChannelReject(ctx context.Context, peerChannel *peer_channels.PeerChannel,
+func (a *Agent) sendPeerChannelReject(ctx context.Context, replyTo *channels.ReplyTo,
 	etx *expanded_tx.ExpandedTx, status channels.Status, rejectProtocolID envelope.ProtocolID,
 	rejectCode uint32, message string) error {
 
-	if peerChannel == nil {
+	if replyTo == nil || replyTo.PeerChannel == nil {
 		return nil
 	}
 
-	baseURL, channelID, err := peer_channels.ParseChannelURL(peerChannel.URL)
+	key := a.Key()
+	return SendPeerChannelReject(ctx, a.peerChannelsFactory, replyTo, &key, etx, status,
+		rejectProtocolID, rejectCode, message)
+}
+
+func SendPeerChannelReject(ctx context.Context, peerChannelsFactory *peer_channels.Factory,
+	replyTo *channels.ReplyTo, key *bitcoin.Key, etx *expanded_tx.ExpandedTx,
+	status channels.Status, rejectProtocolID envelope.ProtocolID, rejectCode uint32,
+	message string) error {
+
+	if replyTo == nil || replyTo.PeerChannel == nil {
+		return nil
+	}
+
+	baseURL, channelID, err := peer_channels.ParseChannelURL(replyTo.PeerChannel.URL)
 	if err != nil {
 		return errors.Wrap(err, "url")
 	}
 
-	peerChannelsClient, err := a.peerChannelsFactory.NewClient(baseURL)
+	peerChannelsClient, err := peerChannelsFactory.NewClient(baseURL)
 	if err != nil {
 		return errors.Wrapf(err, "peer channel client: %s", baseURL)
 	}
@@ -355,16 +354,20 @@ func (a *Agent) sendPeerChannelReject(ctx context.Context, peerChannel *peer_cha
 		Note:           message,
 	}
 
-	key := a.Key()
-	script, err := client.WrapTxIDResponse(etx.TxID(), response, &key)
+	script, err := client.WrapTxIDResponse(etx.TxID(), response, key)
 	if err != nil {
 		return errors.Wrap(err, "wrap")
 	}
 
-	if err := peerChannelsClient.WriteMessage(ctx, channelID, peerChannel.Token,
+	if err := peerChannelsClient.WriteMessage(ctx, channelID, replyTo.PeerChannel.Token,
 		peer_channels.ContentTypeBinary, bytes.NewReader(script)); err != nil {
 		return errors.Wrap(err, "write message")
 	}
+
+	logger.InfoWithFields(ctx, []logger.Field{
+		logger.Stringer("request_txid", etx.TxID()),
+		logger.String("peer_channel", replyTo.PeerChannel.URL),
+	}, "Posted reject response tx to peer channel")
 
 	return nil
 }

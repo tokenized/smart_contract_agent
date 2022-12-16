@@ -44,11 +44,17 @@ func (a Action) IsRelevant(agentLockingScript bitcoin.Script) bool {
 	return false
 }
 
-func CompileActions(ctx context.Context, transaction *transactions.Transaction,
+func compileActions(ctx context.Context, transaction *transactions.Transaction,
 	isTest bool) ([]Action, error) {
 
 	transaction.Lock()
 	defer transaction.Unlock()
+
+	return CompileActions(ctx, transaction, isTest)
+}
+
+func CompileActions(ctx context.Context, transaction expanded_tx.TransactionWithOutputs,
+	isTest bool) ([]Action, error) {
 
 	outputCount := transaction.OutputCount()
 
@@ -58,12 +64,20 @@ func CompileActions(ctx context.Context, transaction *transactions.Transaction,
 
 		action, err := protocol.Deserialize(output.LockingScript, isTest)
 		if err != nil {
-			continue
+			if errors.Cause(err) == protocol.ErrNotTokenized {
+				continue
+			}
+
+			return nil, errors.Wrapf(errors.Wrap(ErrInvalidAction, err.Error()), "output %d", index)
+		}
+
+		if err := action.Validate(); err != nil {
+			return nil, errors.Wrapf(errors.Wrap(ErrInvalidAction, err.Error()), "output %d", index)
 		}
 
 		agentLockingScripts, err := ReleventAgentLockingScripts(transaction, action)
 		if err != nil {
-			continue
+			return nil, errors.Wrapf(err, "output %d", index)
 		}
 
 		if len(agentLockingScripts) == 0 {
