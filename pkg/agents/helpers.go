@@ -103,7 +103,7 @@ func (a *Agent) addResponseTxID(ctx context.Context,
 			continue
 		}
 
-		if isRequest(action) {
+		if IsRequest(action) {
 			requestOutputIndex = i
 			break
 		}
@@ -133,7 +133,7 @@ func (a *Agent) addResponseTxID(ctx context.Context,
 	return result, nil
 }
 
-func isRequest(action actions.Action) bool {
+func IsRequest(action actions.Action) bool {
 	switch action.(type) {
 	case *actions.ContractOffer, *actions.ContractAmendment, *actions.ContractAddressChange:
 		return true
@@ -163,7 +163,7 @@ func isRequest(action actions.Action) bool {
 
 func containsRequest(actions []Action) bool {
 	for _, action := range actions {
-		if isRequest(action.Action) {
+		if IsRequest(action.Action) {
 			return true
 		}
 	}

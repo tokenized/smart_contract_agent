@@ -57,7 +57,7 @@ func StartTestCaches(ctx context.Context, t *testing.T, store storage.StreamStor
 }
 
 type MockStore struct {
-	keys []*bitcoin.Key
+	data []*AgentData
 
 	config           Config
 	feeLockingScript bitcoin.Script
@@ -92,11 +92,11 @@ func NewMockStore(config Config, feeLockingScript bitcoin.Script, caches *state.
 	}
 }
 
-func (f *MockStore) AddKey(key bitcoin.Key) {
+func (f *MockStore) Add(data AgentData) {
 	f.lock.Lock()
 	defer f.lock.Unlock()
 
-	f.keys = append(f.keys, &key)
+	f.data = append(f.data, &data)
 }
 
 func (f *MockStore) GetAgent(ctx context.Context,
@@ -104,26 +104,20 @@ func (f *MockStore) GetAgent(ctx context.Context,
 	f.lock.Lock()
 	defer f.lock.Unlock()
 
-	var key *bitcoin.Key
-	for _, k := range f.keys {
-		ls, err := k.LockingScript()
-		if err != nil {
-			continue
-		}
-
-		if ls.Equal(lockingScript) {
-			key = k
+	var data *AgentData
+	for _, d := range f.data {
+		if d.LockingScript.Equal(lockingScript) {
+			data = d
 			break
 		}
 	}
 
-	if key == nil {
+	if data == nil {
 		return nil, nil
 	}
 
-	agent, err := NewAgent(ctx, *key, lockingScript, f.config, f.feeLockingScript, f.caches,
-		f.transactions, f.services, f.locker, f.store, f.broadcaster, f.fetcher, f.headers,
-		f.scheduler, f, peer_channels.NewFactory())
+	agent, err := NewAgent(ctx, *data, f.config, f.caches, f.transactions, f.services, f.locker,
+		f.store, f.broadcaster, f.fetcher, f.headers, f.scheduler, f, peer_channels.NewFactory())
 	if err != nil {
 		return nil, errors.Wrap(err, "new agent")
 	}

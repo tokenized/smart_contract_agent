@@ -46,9 +46,14 @@ func Test_Process(t *testing.T) {
 		t.Fatalf("Failed to add contract : %s", err)
 	}
 
-	agent, err := NewAgent(ctx, contractKey, contractLockingScript, DefaultConfig(),
-		feeLockingScript, caches.Caches, caches.Transactions, caches.Services, locker, store, broadcaster, nil, nil, nil, nil,
-		peer_channels.NewFactory())
+	agentData := AgentData{
+		Key:              contractKey,
+		LockingScript:    contractLockingScript,
+		FeeLockingScript: feeLockingScript,
+	}
+
+	agent, err := NewAgent(ctx, agentData, DefaultConfig(), caches.Caches, caches.Transactions,
+		caches.Services, locker, store, broadcaster, nil, nil, nil, nil, peer_channels.NewFactory())
 	if err != nil {
 		t.Fatalf("Failed to create agent : %s", err)
 	}

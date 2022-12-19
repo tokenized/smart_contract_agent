@@ -49,14 +49,23 @@ func DefaultConfig() Config {
 	}
 }
 
+type AgentData struct {
+	Key           bitcoin.Key    `envconfig:"KEY" json:"key" masked:"true"`
+	LockingScript bitcoin.Script `envconfig:"LOCKING_SCRIPT" json:"locking_script"`
+
+	ContractFee      uint64         `envconfig:"CONTRACT_FEE" json:"contract_fee"`
+	FeeLockingScript bitcoin.Script `envconfig:"FEE_LOCKING_SCRIPT" json:"fee_locking_script"`
+
+	PeerChannel *peer_channels.PeerChannel `envconfig:"PEER_CHANNEL" json:"peer_channel" masked:"true"`
+}
+
 type Agent struct {
-	key    bitcoin.Key
+	data     AgentData
+	dataLock sync.Mutex
+
 	config Config
 
 	contract *state.Contract
-
-	lockingScript    bitcoin.Script
-	feeLockingScript bitcoin.Script
 
 	store        storage.CopyList
 	caches       *state.Caches
@@ -96,15 +105,14 @@ type Store interface {
 	GetAgent(ctx context.Context, lockingScript bitcoin.Script) (*Agent, error)
 }
 
-func NewAgent(ctx context.Context, key bitcoin.Key, lockingScript bitcoin.Script, config Config,
-	feeLockingScript bitcoin.Script, caches *state.Caches,
+func NewAgent(ctx context.Context, data AgentData, config Config, caches *state.Caches,
 	transactions *transactions.TransactionCache, services *contract_services.ContractServicesCache,
 	locker locker.Locker, store storage.CopyList, broadcaster Broadcaster, fetcher Fetcher,
 	headers BlockHeaders, scheduler *scheduler.Scheduler, agentStore Store,
 	peerChannelsFactory *peer_channels.Factory) (*Agent, error) {
 
 	newContract := &state.Contract{
-		LockingScript: lockingScript,
+		LockingScript: data.LockingScript,
 	}
 
 	contract, err := caches.Contracts.Add(ctx, newContract)
@@ -113,11 +121,9 @@ func NewAgent(ctx context.Context, key bitcoin.Key, lockingScript bitcoin.Script
 	}
 
 	result := &Agent{
-		key:                   key,
+		data:                  data,
 		config:                config,
 		contract:              contract,
-		lockingScript:         lockingScript,
-		feeLockingScript:      feeLockingScript,
 		caches:                caches,
 		transactions:          transactions,
 		services:              services,
@@ -147,29 +153,40 @@ func (a *Agent) Release(ctx context.Context) {
 	a.caches.Contracts.Release(ctx, a.LockingScript())
 }
 
-func (a *Agent) Contract() *state.Contract {
-	return a.contract
-}
+func (a *Agent) Key() bitcoin.Key {
+	a.dataLock.Lock()
+	defer a.dataLock.Unlock()
 
-func (a *Agent) ContractHash() state.ContractHash {
-	a.lock.Lock()
-	defer a.lock.Unlock()
-
-	return state.CalculateContractHash(a.lockingScript)
+	return a.data.Key
 }
 
 func (a *Agent) LockingScript() bitcoin.Script {
-	a.lock.Lock()
-	defer a.lock.Unlock()
+	a.dataLock.Lock()
+	defer a.dataLock.Unlock()
 
-	return a.lockingScript
+	return a.data.LockingScript
+}
+
+func (a *Agent) ContractHash() state.ContractHash {
+	return state.CalculateContractHash(a.LockingScript())
 }
 
 func (a *Agent) ContractFee() uint64 {
-	a.contract.Lock()
-	defer a.contract.Unlock()
+	a.dataLock.Lock()
+	defer a.dataLock.Unlock()
 
-	return a.contract.Formation.ContractFee
+	return a.data.ContractFee
+}
+
+func (a *Agent) FeeLockingScript() bitcoin.Script {
+	a.dataLock.Lock()
+	defer a.dataLock.Unlock()
+
+	return a.data.FeeLockingScript
+}
+
+func (a *Agent) Contract() *state.Contract {
+	return a.contract
 }
 
 func (a *Agent) AdminLockingScript() bitcoin.Script {
@@ -191,20 +208,6 @@ func (a *Agent) InRecoveryMode() bool {
 	defer a.lock.Unlock()
 
 	return a.config.RecoveryMode
-}
-
-func (a *Agent) FeeLockingScript() bitcoin.Script {
-	a.lock.Lock()
-	defer a.lock.Unlock()
-
-	return a.feeLockingScript
-}
-
-func (a *Agent) Key() bitcoin.Key {
-	a.lock.Lock()
-	defer a.lock.Unlock()
-
-	return a.key
 }
 
 func (a *Agent) Now() uint64 {

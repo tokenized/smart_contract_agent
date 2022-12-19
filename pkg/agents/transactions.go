@@ -71,10 +71,6 @@ func CompileActions(ctx context.Context, transaction expanded_tx.TransactionWith
 			return nil, errors.Wrapf(errors.Wrap(ErrInvalidAction, err.Error()), "output %d", index)
 		}
 
-		if err := action.Validate(); err != nil {
-			return nil, errors.Wrapf(errors.Wrap(ErrInvalidAction, err.Error()), "output %d", index)
-		}
-
 		agentLockingScripts, err := ReleventAgentLockingScripts(transaction, action)
 		if err != nil {
 			return nil, errors.Wrapf(err, "output %d", index)
@@ -308,7 +304,7 @@ func (a *Agent) Process(ctx context.Context, transaction *transactions.Transacti
 
 		relevantActions = append(relevantActions, action)
 
-		if isRequest(action.Action) {
+		if IsRequest(action.Action) {
 			requestActions = append(requestActions, action)
 		} else {
 			responseActions = append(responseActions, action)
@@ -357,7 +353,7 @@ func (a *Agent) Process(ctx context.Context, transaction *transactions.Transacti
 	}
 
 	for i, action := range relevantActions {
-		if isRequest(action.Action) {
+		if IsRequest(action.Action) {
 			if feeRate < minFeeRate {
 				etx, err := a.createRejection(ctx, transaction, action.OutputIndex,
 					platform.NewRejectError(actions.RejectionsInsufficientTxFeeFunding,
@@ -397,7 +393,7 @@ func (a *Agent) ProcessUnsafe(ctx context.Context, transaction *transactions.Tra
 	}, "Processing unsafe transaction")
 
 	for i, action := range actionList {
-		if isRequest(action.Action) {
+		if IsRequest(action.Action) {
 			processed := transaction.ContractProcessed(a.ContractHash(), action.OutputIndex)
 			if len(processed) > 0 {
 				logger.InfoWithFields(ctx, []logger.Field{
@@ -456,7 +452,7 @@ func (a *Agent) processAction(ctx context.Context, transaction *transactions.Tra
 		logger.String("action_name", action.TypeName()),
 	}, "Processing action")
 
-	isRequest := isRequest(action)
+	isRequest := IsRequest(action)
 
 	if err := action.Validate(); err != nil {
 		if isRequest {
@@ -619,7 +615,7 @@ func relevantRequestOutputs(ctx context.Context, etx *expanded_tx.ExpandedTx,
 			continue
 		}
 
-		if !isRequest(action) {
+		if !IsRequest(action) {
 			continue
 		}
 

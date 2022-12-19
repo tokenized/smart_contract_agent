@@ -29,13 +29,11 @@ const (
 
 // Service feeds spynode blockchain data through an agent and posts the responses.
 type Service struct {
-	key           bitcoin.Key
-	lockingScript bitcoin.Script
+	agentData agents.AgentData
 
 	agent *agents.Agent
 
-	config           agents.Config
-	feeLockingScript bitcoin.Script
+	config agents.Config
 
 	spyNodeClient spynode.Client
 	caches        *state.Caches
@@ -55,18 +53,16 @@ type Service struct {
 	lock sync.Mutex
 }
 
-func NewService(key bitcoin.Key, lockingScript bitcoin.Script, config agents.Config,
-	feeLockingScript bitcoin.Script, spyNodeClient spynode.Client, caches *state.Caches,
-	transactions *transactions.TransactionCache, services *contract_services.ContractServicesCache,
-	locker locker.Locker, store storage.StreamStorage, broadcaster agents.Broadcaster,
-	fetcher agents.Fetcher, headers agents.BlockHeaders, scheduler *scheduler.Scheduler,
+func NewService(agentData agents.AgentData, config agents.Config, spyNodeClient spynode.Client,
+	caches *state.Caches, transactions *transactions.TransactionCache,
+	services *contract_services.ContractServicesCache, locker locker.Locker,
+	store storage.StreamStorage, broadcaster agents.Broadcaster, fetcher agents.Fetcher,
+	headers agents.BlockHeaders, scheduler *scheduler.Scheduler,
 	peerChannelsFactory *peer_channels.Factory) *Service {
 
 	return &Service{
-		key:                  key,
-		lockingScript:        lockingScript,
+		agentData:            agentData,
 		config:               config,
-		feeLockingScript:     feeLockingScript,
 		spyNodeClient:        spyNodeClient,
 		caches:               caches,
 		transactions:         transactions,
@@ -99,9 +95,9 @@ func (s *Service) Load(ctx context.Context) error {
 		}
 	}
 
-	agent, err := agents.NewAgent(ctx, s.key, s.lockingScript, s.config, s.feeLockingScript,
-		s.caches, s.transactions, s.services, s.locker, s.store, s.broadcaster, s.fetcher,
-		s.headers, s.scheduler, s, s.peerChannelsFactory)
+	agent, err := agents.NewAgent(ctx, s.agentData, s.config, s.caches, s.transactions, s.services,
+		s.locker, s.store, s.broadcaster, s.fetcher, s.headers, s.scheduler, s,
+		s.peerChannelsFactory)
 	if err != nil {
 		return errors.Wrap(err, "new agent")
 	}
@@ -155,7 +151,7 @@ func (s *Service) GetAgent(ctx context.Context,
 	s.lock.Lock()
 	defer s.lock.Unlock()
 
-	if !s.lockingScript.Equal(lockingScript) {
+	if !s.agentData.LockingScript.Equal(lockingScript) {
 		return nil, nil
 	}
 

@@ -64,15 +64,22 @@ func Test_Proposal_Valid(t *testing.T) {
 	contractKey, contractLockingScript, adminKey, adminLockingScript, contract := state.MockContractWithVoteSystems(ctx,
 		&caches.TestCaches, votingSystems)
 
-	mockStore.AddKey(contractKey)
+	agentData := AgentData{
+		Key:              contractKey,
+		LockingScript:    contractLockingScript,
+		ContractFee:      contract.Formation.ContractFee,
+		FeeLockingScript: feeLockingScript,
+	}
+
+	mockStore.Add(agentData)
 
 	instrument := state.MockInstrumentOnly(ctx, &caches.TestCaches, contract)
 
 	balances := state.MockBalances(ctx, &caches.TestCaches, contract, instrument, 1000)
 
-	agent, err := NewAgent(ctx, contractKey, contractLockingScript, DefaultConfig(),
-		feeLockingScript, caches.Caches, caches.Transactions, caches.Services, locker, store,
-		broadcaster, nil, nil, scheduler, mockStore, peer_channels.NewFactory())
+	agent, err := NewAgent(ctx, agentData, DefaultConfig(), caches.Caches, caches.Transactions,
+		caches.Services, locker, store, broadcaster, nil, nil, scheduler, mockStore,
+		peer_channels.NewFactory())
 	if err != nil {
 		t.Fatalf("Failed to create agent : %s", err)
 	}
@@ -300,6 +307,14 @@ func Test_Ballots_Valid(t *testing.T) {
 
 	contractKey, contractLockingScript, _, _, contract := state.MockContractWithVoteSystems(ctx,
 		&caches.TestCaches, votingSystems)
+	_, feeLockingScript, _ := state.MockKey()
+
+	agentData := AgentData{
+		Key:              contractKey,
+		LockingScript:    contractLockingScript,
+		ContractFee:      contract.Formation.ContractFee,
+		FeeLockingScript: feeLockingScript,
+	}
 
 	instrument := state.MockInstrumentOnly(ctx, &caches.TestCaches, contract)
 
@@ -307,10 +322,8 @@ func Test_Ballots_Valid(t *testing.T) {
 	balances := state.MockBalances(ctx, &caches.TestCaches, contract, instrument, balanceCount)
 	balancesToVote := balances
 
-	_, feeLockingScript, _ := state.MockKey()
-	agent, err := NewAgent(ctx, contractKey, contractLockingScript, DefaultConfig(),
-		feeLockingScript, caches.Caches, caches.Transactions, caches.Services, locker, store,
-		broadcaster, nil, nil, nil, nil, peer_channels.NewFactory())
+	agent, err := NewAgent(ctx, agentData, DefaultConfig(), caches.Caches, caches.Transactions,
+		caches.Services, locker, store, broadcaster, nil, nil, nil, nil, peer_channels.NewFactory())
 	if err != nil {
 		t.Fatalf("Failed to create agent : %s", err)
 	}

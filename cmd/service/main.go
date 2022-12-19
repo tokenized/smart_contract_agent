@@ -34,7 +34,7 @@ var (
 )
 
 type Config struct {
-	AgentKey            bitcoin.Key                `envconfig:"AGENT_KEY" json:"agent_key" masked:"true"`
+	AgentData           agents.AgentData           `json:"agent_data"`
 	Agents              agents.Config              `json:"agents"`
 	FeeAddress          bitcoin.Address            `envconfig:"FEE_ADDRESS" json:"fee_address"`
 	IncomingPeerChannel *peer_channels.PeerChannel `envconfig:"INCOMING_PEER_CHANNEL" json:"incoming_peer_channel"`
@@ -75,11 +75,6 @@ func main() {
 		logger.JSON("config", maskedConfig),
 	}, "Config")
 
-	feeLockingScript, err := bitcoin.NewRawAddressFromAddress(cfg.FeeAddress).LockingScript()
-	if err != nil {
-		logger.Fatal(ctx, "Invalid fee address : %s", err)
-	}
-
 	store, err := storage.CreateStreamStorage(cfg.Storage.Bucket, cfg.Storage.Root,
 		cfg.Storage.MaxRetries, cfg.Storage.RetryDelay)
 	if err != nil {
@@ -119,14 +114,9 @@ func main() {
 
 	locker := locker.NewThreadedLocker(1000)
 
-	lockingScript, err := cfg.AgentKey.LockingScript()
-	if err != nil {
-		logger.Fatal(ctx, "Failed to create agent locking script : %s", err)
-	}
-
-	service := service.NewService(cfg.AgentKey, lockingScript, cfg.Agents, feeLockingScript,
-		spyNode, caches, transactions, services, locker, store, broadcaster, spyNode,
-		headers.NewHeaders(spyNode), scheduler, peerChannelsFactory)
+	service := service.NewService(cfg.AgentData, cfg.Agents, spyNode, caches, transactions,
+		services, locker, store, broadcaster, spyNode, headers.NewHeaders(spyNode), scheduler,
+		peerChannelsFactory)
 	spyNode.RegisterHandler(service)
 
 	var spyNodeWait, cacheWait, lockerWait, schedulerWait, peerChannelWait sync.WaitGroup

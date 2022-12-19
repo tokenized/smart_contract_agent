@@ -105,7 +105,9 @@ func (s *Service) HandleTxUpdate(ctx context.Context, txUpdate *spynodeClient.Tx
 func (s *Service) handleTx(ctx context.Context, transaction *transactions.Transaction) error {
 	txid := transaction.GetTxID()
 	isTest := s.agent.IsTest()
+	transaction.Lock()
 	actionList, err := agents.CompileActions(ctx, transaction, isTest)
+	transaction.Unlock()
 	if err != nil {
 		if errors.Cause(err) == agents.ErrInvalidAction {
 			logger.WarnWithFields(ctx, []logger.Field{

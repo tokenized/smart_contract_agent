@@ -34,9 +34,15 @@ func Test_Freeze_Balances_Valid(t *testing.T) {
 		&caches.TestCaches)
 	_, feeLockingScript, _ := state.MockKey()
 
-	agent, err := NewAgent(ctx, contractKey, contractLockingScript, DefaultConfig(),
-		feeLockingScript, caches.Caches, caches.Transactions, caches.Services, locker, store, broadcaster, nil, nil, nil, nil,
-		peer_channels.NewFactory())
+	agentData := AgentData{
+		Key:              contractKey,
+		LockingScript:    contractLockingScript,
+		ContractFee:      contract.Formation.ContractFee,
+		FeeLockingScript: feeLockingScript,
+	}
+
+	agent, err := NewAgent(ctx, agentData, DefaultConfig(), caches.Caches, caches.Transactions,
+		caches.Services, locker, store, broadcaster, nil, nil, nil, nil, peer_channels.NewFactory())
 	if err != nil {
 		t.Fatalf("Failed to create agent : %s", err)
 	}
@@ -429,9 +435,15 @@ func Test_Freeze_Contract_Valid(t *testing.T) {
 		&caches.TestCaches)
 	_, feeLockingScript, _ := state.MockKey()
 
-	agent, err := NewAgent(ctx, contractKey, contractLockingScript, DefaultConfig(),
-		feeLockingScript, caches.Caches, caches.Transactions, caches.Services, locker, store,
-		broadcaster, nil, nil, nil, nil, peer_channels.NewFactory())
+	agentData := AgentData{
+		Key:              contractKey,
+		LockingScript:    contractLockingScript,
+		ContractFee:      contract.Formation.ContractFee,
+		FeeLockingScript: feeLockingScript,
+	}
+
+	agent, err := NewAgent(ctx, agentData, DefaultConfig(), caches.Caches, caches.Transactions,
+		caches.Services, locker, store, broadcaster, nil, nil, nil, nil, peer_channels.NewFactory())
 	if err != nil {
 		t.Fatalf("Failed to create agent : %s", err)
 	}
@@ -742,7 +754,7 @@ func Test_Freeze_Instrument_Valid(t *testing.T) {
 
 	locker := locker.NewInlineLocker()
 
-	contractKey, contractLockingScript, adminKey, adminLockingScript, _, instrument := state.MockInstrument(ctx,
+	contractKey, contractLockingScript, adminKey, adminLockingScript, contract, instrument := state.MockInstrument(ctx,
 		&caches.TestCaches)
 	_, feeLockingScript, _ := state.MockKey()
 
@@ -750,9 +762,15 @@ func Test_Freeze_Instrument_Valid(t *testing.T) {
 		instrument.InstrumentCode[:])
 	t.Logf("Mocked instrument : %s", instrumentID)
 
-	agent, err := NewAgent(ctx, contractKey, contractLockingScript, DefaultConfig(),
-		feeLockingScript, caches.Caches, caches.Transactions, caches.Services, locker, store, broadcaster, nil, nil, nil, nil,
-		peer_channels.NewFactory())
+	agentData := AgentData{
+		Key:              contractKey,
+		LockingScript:    contractLockingScript,
+		ContractFee:      contract.Formation.ContractFee,
+		FeeLockingScript: feeLockingScript,
+	}
+
+	agent, err := NewAgent(ctx, agentData, DefaultConfig(), caches.Caches, caches.Transactions,
+		caches.Services, locker, store, broadcaster, nil, nil, nil, nil, peer_channels.NewFactory())
 	if err != nil {
 		t.Fatalf("Failed to create agent : %s", err)
 	}

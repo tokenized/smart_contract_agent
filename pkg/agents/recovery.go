@@ -19,10 +19,13 @@ func (a *Agent) addRecoveryRequests(ctx context.Context, txid bitcoin.Hash32,
 		return false, nil // no requests
 	}
 
-	a.lock.Lock()
-	defer a.lock.Unlock()
+	lockingScript := a.LockingScript()
 
-	if !a.config.RecoveryMode {
+	a.lock.Lock()
+	recoveryMode := a.config.RecoveryMode
+	a.lock.Unlock()
+
+	if !recoveryMode {
 		return false, nil
 	}
 
@@ -39,11 +42,11 @@ func (a *Agent) addRecoveryRequests(ctx context.Context, txid bitcoin.Hash32,
 		Transactions: []*state.RecoveryTransaction{recoveryTx},
 	}
 
-	recoveryTxs, err := a.caches.RecoveryTransactions.Add(ctx, a.lockingScript, newRecoveryTxs)
+	recoveryTxs, err := a.caches.RecoveryTransactions.Add(ctx, lockingScript, newRecoveryTxs)
 	if err != nil {
 		return false, errors.Wrap(err, "get recovery txs")
 	}
-	defer a.caches.RecoveryTransactions.Release(ctx, a.lockingScript)
+	defer a.caches.RecoveryTransactions.Release(ctx, lockingScript)
 
 	if recoveryTxs != newRecoveryTxs {
 		recoveryTxs.Lock()
@@ -56,14 +59,18 @@ func (a *Agent) addRecoveryRequests(ctx context.Context, txid bitcoin.Hash32,
 
 func (a *Agent) removeRecoveryRequest(ctx context.Context, txid bitcoin.Hash32,
 	outputIndex int) (bool, error) {
-	a.lock.Lock()
-	defer a.lock.Unlock()
 
-	if !a.config.RecoveryMode {
+	lockingScript := a.LockingScript()
+
+	a.lock.Lock()
+	recoveryMode := a.config.RecoveryMode
+	a.lock.Unlock()
+
+	if !recoveryMode {
 		return false, nil
 	}
 
-	recoveryTxs, err := a.caches.RecoveryTransactions.Get(ctx, a.lockingScript)
+	recoveryTxs, err := a.caches.RecoveryTransactions.Get(ctx, lockingScript)
 	if err != nil {
 		return false, errors.Wrap(err, "get recovery txs")
 	}
@@ -71,7 +78,7 @@ func (a *Agent) removeRecoveryRequest(ctx context.Context, txid bitcoin.Hash32,
 	if recoveryTxs == nil {
 		return false, nil
 	}
-	defer a.caches.RecoveryTransactions.Release(ctx, a.lockingScript)
+	defer a.caches.RecoveryTransactions.Release(ctx, lockingScript)
 
 	recoveryTxs.Lock()
 	result := recoveryTxs.RemoveOutput(txid, outputIndex)
@@ -147,7 +154,7 @@ func (a *Agent) processRecoveryRequest(ctx context.Context,
 	defer a.transactions.Release(ctx, request.TxID)
 
 	isTest := a.IsTest()
-	actionList, err := CompileActions(ctx, transaction, isTest)
+	actionList, err := compileActions(ctx, transaction, isTest)
 	if err != nil {
 		return errors.Wrap(err, "compile actions")
 	}

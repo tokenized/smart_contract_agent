@@ -38,12 +38,18 @@ func Test_BodyOfAgreement_Offer_Valid(t *testing.T) {
 		&caches.TestCaches)
 	_, feeLockingScript, _ := state.MockKey()
 
+	agentData := AgentData{
+		Key:              contractKey,
+		LockingScript:    contractLockingScript,
+		ContractFee:      contract.Formation.ContractFee,
+		FeeLockingScript: feeLockingScript,
+	}
+
 	contract.Formation.BodyOfAgreementType = actions.ContractBodyOfAgreementTypeFull
 	contract.MarkModified()
 
-	agent, err := NewAgent(ctx, contractKey, contractLockingScript, DefaultConfig(),
-		feeLockingScript, caches.Caches, caches.Transactions, caches.Services, locker, store,
-		broadcaster, nil, nil, nil, nil, peer_channels.NewFactory())
+	agent, err := NewAgent(ctx, agentData, DefaultConfig(), caches.Caches, caches.Transactions,
+		caches.Services, locker, store, broadcaster, nil, nil, nil, nil, peer_channels.NewFactory())
 	if err != nil {
 		t.Fatalf("Failed to create agent : %s", err)
 	}
@@ -193,12 +199,18 @@ func Test_BodyOfAgreement_Offer_UnreferencedTerm(t *testing.T) {
 		&caches.TestCaches)
 	_, feeLockingScript, _ := state.MockKey()
 
+	agentData := AgentData{
+		Key:              contractKey,
+		LockingScript:    contractLockingScript,
+		ContractFee:      contract.Formation.ContractFee,
+		FeeLockingScript: feeLockingScript,
+	}
+
 	contract.Formation.BodyOfAgreementType = actions.ContractBodyOfAgreementTypeFull
 	contract.MarkModified()
 
-	agent, err := NewAgent(ctx, contractKey, contractLockingScript, DefaultConfig(),
-		feeLockingScript, caches.Caches, caches.Transactions, caches.Services, locker, store,
-		broadcaster, nil, nil, nil, nil, peer_channels.NewFactory())
+	agent, err := NewAgent(ctx, agentData, DefaultConfig(), caches.Caches, caches.Transactions,
+		caches.Services, locker, store, broadcaster, nil, nil, nil, nil, peer_channels.NewFactory())
 	if err != nil {
 		t.Fatalf("Failed to create agent : %s", err)
 	}
@@ -385,9 +397,15 @@ func Test_BodyOfAgreement_Amendment_Basic(t *testing.T) {
 	contract.MarkModified()
 	contract.Unlock()
 
-	agent, err := NewAgent(ctx, contractKey, contractLockingScript, DefaultConfig(),
-		feeLockingScript, caches.Caches, caches.Transactions, caches.Services, locker, store, broadcaster, nil, nil, nil, nil,
-		peer_channels.NewFactory())
+	agentData := AgentData{
+		Key:              contractKey,
+		LockingScript:    contractLockingScript,
+		ContractFee:      contract.Formation.ContractFee,
+		FeeLockingScript: feeLockingScript,
+	}
+
+	agent, err := NewAgent(ctx, agentData, DefaultConfig(), caches.Caches, caches.Transactions,
+		caches.Services, locker, store, broadcaster, nil, nil, nil, nil, peer_channels.NewFactory())
 	if err != nil {
 		t.Fatalf("Failed to create agent : %s", err)
 	}
@@ -575,9 +593,15 @@ func Test_BodyOfAgreement_Amendment_Child(t *testing.T) {
 	contract.MarkModified()
 	contract.Unlock()
 
-	agent, err := NewAgent(ctx, contractKey, contractLockingScript, DefaultConfig(),
-		feeLockingScript, caches.Caches, caches.Transactions, caches.Services, locker, store, broadcaster, nil, nil, nil, nil,
-		peer_channels.NewFactory())
+	agentData := AgentData{
+		Key:              contractKey,
+		LockingScript:    contractLockingScript,
+		ContractFee:      contract.Formation.ContractFee,
+		FeeLockingScript: feeLockingScript,
+	}
+
+	agent, err := NewAgent(ctx, agentData, DefaultConfig(), caches.Caches, caches.Transactions,
+		caches.Services, locker, store, broadcaster, nil, nil, nil, nil, peer_channels.NewFactory())
 	if err != nil {
 		t.Fatalf("Failed to create agent : %s", err)
 	}
@@ -792,9 +816,15 @@ func Test_BodyOfAgreement_Amendment_Proposal(t *testing.T) {
 	contract.MarkModified()
 	contract.Unlock()
 
-	agent, err := NewAgent(ctx, contractKey, contractLockingScript, DefaultConfig(),
-		feeLockingScript, caches.Caches, caches.Transactions, caches.Services, locker, store, broadcaster, nil, nil, nil, nil,
-		peer_channels.NewFactory())
+	agentData := AgentData{
+		Key:              contractKey,
+		LockingScript:    contractLockingScript,
+		ContractFee:      contract.Formation.ContractFee,
+		FeeLockingScript: feeLockingScript,
+	}
+
+	agent, err := NewAgent(ctx, agentData, DefaultConfig(), caches.Caches, caches.Transactions,
+		caches.Services, locker, store, broadcaster, nil, nil, nil, nil, peer_channels.NewFactory())
 	if err != nil {
 		t.Fatalf("Failed to create agent : %s", err)
 	}

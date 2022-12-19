@@ -33,9 +33,8 @@ var (
 )
 
 type Config struct {
-	AgentKey   bitcoin.Key     `envconfig:"AGENT_KEY" json:"agent_key" masked:"true"`
-	Agents     agents.Config   `json:"agents"`
-	FeeAddress bitcoin.Address `envconfig:"FEE_ADDRESS" json:"fee_address"`
+	AgentData agents.AgentData `json:"agent_data"`
+	Agents    agents.Config    `json:"agents"`
 
 	WhatsOnChainAPIKey string          `envconfig:"WOC_API_KEY" json:"api_key" masked:"true"`
 	Network            bitcoin.Network `default:"mainnet" json:"network" envconfig:"NETWORK"`
@@ -71,11 +70,6 @@ func main() {
 		logger.JSON("config", maskedConfig),
 	}, "Config")
 
-	feeLockingScript, err := bitcoin.NewRawAddressFromAddress(cfg.FeeAddress).LockingScript()
-	if err != nil {
-		logger.Fatal(ctx, "Invalid fee address : %s", err)
-	}
-
 	woc := whatsonchain.NewService(cfg.WhatsOnChainAPIKey, cfg.Network)
 
 	store, err := storage.CreateStreamStorage(cfg.Storage.Bucket, cfg.Storage.Root,
@@ -108,14 +102,8 @@ func main() {
 
 	peerChannelsFactory := peer_channels.NewFactory()
 
-	lockingScript, err := cfg.AgentKey.LockingScript()
-	if err != nil {
-		logger.Fatal(ctx, "Failed to create agent locking script : %s", err)
-	}
-
-	agent, err := agents.NewAgent(ctx, cfg.AgentKey, lockingScript, cfg.Agents, feeLockingScript,
-		caches, transactions, services, locker, store, broadcaster, woc, woc, nil, agentStore,
-		peerChannelsFactory)
+	agent, err := agents.NewAgent(ctx, cfg.AgentData, cfg.Agents, caches, transactions, services,
+		locker, store, broadcaster, woc, woc, nil, agentStore, peerChannelsFactory)
 	if err != nil {
 		logger.Fatal(ctx, "Failed to create agent : %s", err)
 	}
@@ -251,7 +239,9 @@ func loadTx(ctx context.Context, agent *agents.Agent, transactions *transactions
 		return errors.Wrapf(err, "get inputs: %s", txid)
 	}
 
+	transaction.Lock()
 	actionList, err := agents.CompileActions(ctx, transaction, agent.IsTest())
+	transaction.Unlock()
 	if err != nil {
 		return errors.Wrapf(err, "compile actions: %s", txid)
 	}

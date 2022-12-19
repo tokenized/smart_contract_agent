@@ -4,7 +4,6 @@ import (
 	"context"
 
 	"github.com/tokenized/cacher"
-	"github.com/tokenized/pkg/bitcoin"
 	"github.com/tokenized/pkg/peer_channels"
 	"github.com/tokenized/pkg/storage"
 	"github.com/tokenized/smart_contract_agent/internal/state"
@@ -58,9 +57,7 @@ func NewFactory(config Config, store storage.CopyList, cache *cacher.Cache,
 	}, nil
 }
 
-func (f *Factory) NewAgent(ctx context.Context, key bitcoin.Key, lockingScript bitcoin.Script,
-	feeLockingScript bitcoin.Script) (*Agent, error) {
-	return NewAgent(ctx, key, lockingScript, f.config, feeLockingScript, f.caches, f.transactions,
-		f.services, f.locker, f.store, f.broadcaster, f.fetcher, f.headers, f.scheduler,
-		f.agentStore, f.peerChannelsFactory)
+func (f *Factory) NewAgent(ctx context.Context, data AgentData) (*Agent, error) {
+	return NewAgent(ctx, data, f.config, f.caches, f.transactions, f.services, f.locker, f.store,
+		f.broadcaster, f.fetcher, f.headers, f.scheduler, f.agentStore, f.peerChannelsFactory)
 }

@@ -37,13 +37,19 @@ func Test_Transfers_Basic(t *testing.T) {
 	caches := StartTestCaches(ctx, t, store, cacher.DefaultConfig(), time.Second)
 	locker := locker.NewInlineLocker()
 
-	contractKey, contractLockingScript, adminKey, adminLockingScript, _, instrument := state.MockInstrument(ctx,
+	contractKey, contractLockingScript, adminKey, adminLockingScript, contract, instrument := state.MockInstrument(ctx,
 		&caches.TestCaches)
 	_, feeLockingScript, _ := state.MockKey()
 
-	agent, err := NewAgent(ctx, contractKey, contractLockingScript, DefaultConfig(),
-		feeLockingScript, caches.Caches, caches.Transactions, caches.Services, locker, store,
-		broadcaster, nil, nil, nil, nil, peer_channels.NewFactory())
+	agentData := AgentData{
+		Key:              contractKey,
+		LockingScript:    contractLockingScript,
+		ContractFee:      contract.Formation.ContractFee,
+		FeeLockingScript: feeLockingScript,
+	}
+
+	agent, err := NewAgent(ctx, agentData, DefaultConfig(), caches.Caches, caches.Transactions,
+		caches.Services, locker, store, broadcaster, nil, nil, nil, nil, peer_channels.NewFactory())
 	if err != nil {
 		t.Fatalf("Failed to create agent : %s", err)
 	}
@@ -389,13 +395,19 @@ func Test_Transfers_InsufficientQuantity(t *testing.T) {
 	caches := StartTestCaches(ctx, t, store, cacher.DefaultConfig(), time.Second)
 	locker := locker.NewInlineLocker()
 
-	contractKey, contractLockingScript, _, _, _, instrument := state.MockInstrument(ctx,
+	contractKey, contractLockingScript, _, _, contract, instrument := state.MockInstrument(ctx,
 		&caches.TestCaches)
 	_, feeLockingScript, _ := state.MockKey()
 
-	agent, err := NewAgent(ctx, contractKey, contractLockingScript, DefaultConfig(),
-		feeLockingScript, caches.Caches, caches.Transactions, caches.Services, locker, store,
-		broadcaster, nil, nil, nil, nil, peer_channels.NewFactory())
+	agentData := AgentData{
+		Key:              contractKey,
+		LockingScript:    contractLockingScript,
+		ContractFee:      contract.Formation.ContractFee,
+		FeeLockingScript: feeLockingScript,
+	}
+
+	agent, err := NewAgent(ctx, agentData, DefaultConfig(), caches.Caches, caches.Transactions,
+		caches.Services, locker, store, broadcaster, nil, nil, nil, nil, peer_channels.NewFactory())
 	if err != nil {
 		t.Fatalf("Failed to create agent : %s", err)
 	}
@@ -575,13 +587,19 @@ func Test_Transfers_IdentityOracle_MissingSignature(t *testing.T) {
 	caches := StartTestCaches(ctx, t, store, cacher.DefaultConfig(), time.Second)
 	locker := locker.NewInlineLocker()
 
-	contractKey, contractLockingScript, adminKey, adminLockingScript, _, instrument, _ := MockInstrumentWithOracle(ctx,
+	contractKey, contractLockingScript, adminKey, adminLockingScript, contract, instrument, _ := MockInstrumentWithOracle(ctx,
 		caches)
 	_, feeLockingScript, _ := state.MockKey()
 
-	agent, err := NewAgent(ctx, contractKey, contractLockingScript, DefaultConfig(),
-		feeLockingScript, caches.Caches, caches.Transactions, caches.Services, locker, store,
-		broadcaster, nil, nil, nil, nil, peer_channels.NewFactory())
+	agentData := AgentData{
+		Key:              contractKey,
+		LockingScript:    contractLockingScript,
+		ContractFee:      contract.Formation.ContractFee,
+		FeeLockingScript: feeLockingScript,
+	}
+
+	agent, err := NewAgent(ctx, agentData, DefaultConfig(), caches.Caches, caches.Transactions,
+		caches.Services, locker, store, broadcaster, nil, nil, nil, nil, peer_channels.NewFactory())
 	if err != nil {
 		t.Fatalf("Failed to create agent : %s", err)
 	}
@@ -752,9 +770,16 @@ func Test_Transfers_IdentityOracle_Valid(t *testing.T) {
 	caches := StartTestCaches(ctx, t, store, cacher.DefaultConfig(), time.Second)
 	locker := locker.NewInlineLocker()
 
-	contractKey, contractLockingScript, adminKey, adminLockingScript, _, instrument, identityKey := MockInstrumentWithOracle(ctx,
+	contractKey, contractLockingScript, adminKey, adminLockingScript, contract, instrument, identityKey := MockInstrumentWithOracle(ctx,
 		caches)
 	_, feeLockingScript, _ := state.MockKey()
+
+	agentData := AgentData{
+		Key:              contractKey,
+		LockingScript:    contractLockingScript,
+		ContractFee:      contract.Formation.ContractFee,
+		FeeLockingScript: feeLockingScript,
+	}
 
 	contractAddress, err := bitcoin.RawAddressFromLockingScript(contractLockingScript)
 	if err != nil {
@@ -768,9 +793,9 @@ func Test_Transfers_IdentityOracle_Valid(t *testing.T) {
 	rand.Read(headerHash[:])
 	headers.AddHash(headerHeight, headerHash)
 
-	agent, err := NewAgent(ctx, contractKey, contractLockingScript, DefaultConfig(),
-		feeLockingScript, caches.Caches, caches.Transactions, caches.Services, locker, store,
-		broadcaster, nil, headers, nil, nil, peer_channels.NewFactory())
+	agent, err := NewAgent(ctx, agentData, DefaultConfig(), caches.Caches, caches.Transactions,
+		caches.Services, locker, store, broadcaster, nil, headers, nil, nil,
+		peer_channels.NewFactory())
 	if err != nil {
 		t.Fatalf("Failed to create agent : %s", err)
 	}
@@ -947,9 +972,16 @@ func Test_Transfers_IdentityOracle_BadSignature(t *testing.T) {
 	caches := StartTestCaches(ctx, t, store, cacher.DefaultConfig(), time.Second)
 	locker := locker.NewInlineLocker()
 
-	contractKey, contractLockingScript, adminKey, adminLockingScript, _, instrument, _ := MockInstrumentWithOracle(ctx,
+	contractKey, contractLockingScript, adminKey, adminLockingScript, contract, instrument, _ := MockInstrumentWithOracle(ctx,
 		caches)
 	_, feeLockingScript, _ := state.MockKey()
+
+	agentData := AgentData{
+		Key:              contractKey,
+		LockingScript:    contractLockingScript,
+		ContractFee:      contract.Formation.ContractFee,
+		FeeLockingScript: feeLockingScript,
+	}
 
 	badIdentityKey, _, _ := state.MockKey()
 
@@ -965,9 +997,9 @@ func Test_Transfers_IdentityOracle_BadSignature(t *testing.T) {
 	rand.Read(headerHash[:])
 	headers.AddHash(headerHeight, headerHash)
 
-	agent, err := NewAgent(ctx, contractKey, contractLockingScript, DefaultConfig(),
-		feeLockingScript, caches.Caches, caches.Transactions, caches.Services, locker, store,
-		broadcaster, nil, headers, nil, nil, peer_channels.NewFactory())
+	agent, err := NewAgent(ctx, agentData, DefaultConfig(), caches.Caches, caches.Transactions,
+		caches.Services, locker, store, broadcaster, nil, headers, nil, nil,
+		peer_channels.NewFactory())
 	if err != nil {
 		t.Fatalf("Failed to create agent : %s", err)
 	}
@@ -1157,24 +1189,36 @@ func Test_Transfers_Multi_Basic(t *testing.T) {
 	caches := StartTestCaches(ctx, t, store, cacher.DefaultConfig(), time.Second)
 	locker := locker.NewInlineLocker()
 
-	contractKey1, contractLockingScript1, adminKey1, adminLockingScript1, _, instrument1 := state.MockInstrument(ctx,
+	contractKey1, contractLockingScript1, adminKey1, adminLockingScript1, contract1, instrument1 := state.MockInstrument(ctx,
 		&caches.TestCaches)
 	_, feeLockingScript1, _ := state.MockKey()
 
-	agent1, err := NewAgent(ctx, contractKey1, contractLockingScript1, DefaultConfig(),
-		feeLockingScript1, caches.Caches, caches.Transactions, caches.Services, locker, store,
-		broadcaster1, nil, nil, nil, nil, peerChannelsFactory)
+	agentData1 := AgentData{
+		Key:              contractKey1,
+		LockingScript:    contractLockingScript1,
+		ContractFee:      contract1.Formation.ContractFee,
+		FeeLockingScript: feeLockingScript1,
+	}
+
+	agent1, err := NewAgent(ctx, agentData1, DefaultConfig(), caches.Caches, caches.Transactions,
+		caches.Services, locker, store, broadcaster1, nil, nil, nil, nil, peerChannelsFactory)
 	if err != nil {
 		t.Fatalf("Failed to create agent : %s", err)
 	}
 
-	contractKey2, contractLockingScript2, adminKey2, adminLockingScript2, _, instrument2 := state.MockInstrument(ctx,
+	contractKey2, contractLockingScript2, adminKey2, adminLockingScript2, contract2, instrument2 := state.MockInstrument(ctx,
 		&caches.TestCaches)
 	_, feeLockingScript2, _ := state.MockKey()
 
-	agent2, err := NewAgent(ctx, contractKey2, contractLockingScript2, DefaultConfig(),
-		feeLockingScript2, caches.Caches, caches.Transactions, caches.Services, locker, store,
-		broadcaster2, nil, nil, nil, nil, peerChannelsFactory)
+	agentData2 := AgentData{
+		Key:              contractKey2,
+		LockingScript:    contractLockingScript2,
+		ContractFee:      contract2.Formation.ContractFee,
+		FeeLockingScript: feeLockingScript2,
+	}
+
+	agent2, err := NewAgent(ctx, agentData2, DefaultConfig(), caches.Caches, caches.Transactions,
+		caches.Services, locker, store, broadcaster2, nil, nil, nil, nil, peerChannelsFactory)
 	if err != nil {
 		t.Fatalf("Failed to create agent : %s", err)
 	}
@@ -1612,29 +1656,43 @@ func Test_Transfers_Multi_Expire(t *testing.T) {
 		}
 	}()
 
-	contractKey1, contractLockingScript1, adminKey1, adminLockingScript1, _, instrument1 := state.MockInstrument(ctx,
+	contractKey1, contractLockingScript1, adminKey1, adminLockingScript1, contract1, instrument1 := state.MockInstrument(ctx,
 		&caches.TestCaches)
 
-	agent1, err := NewAgent(ctx, contractKey1, contractLockingScript1, config,
-		feeLockingScript, caches.Caches, caches.Transactions, caches.Services, locker, store,
-		broadcaster1, nil, nil, scheduler, mockStore, peerChannelsFactory)
+	agentData1 := AgentData{
+		Key:              contractKey1,
+		LockingScript:    contractLockingScript1,
+		ContractFee:      contract1.Formation.ContractFee,
+		FeeLockingScript: feeLockingScript,
+	}
+
+	agent1, err := NewAgent(ctx, agentData1, config, caches.Caches, caches.Transactions,
+		caches.Services, locker, store, broadcaster1, nil, nil, scheduler, mockStore,
+		peerChannelsFactory)
 	if err != nil {
 		t.Fatalf("Failed to create agent : %s", err)
 	}
 
-	mockStore.AddKey(contractKey1)
+	mockStore.Add(agentData1)
 
-	contractKey2, contractLockingScript2, adminKey2, adminLockingScript2, _, instrument2 := state.MockInstrument(ctx,
+	contractKey2, contractLockingScript2, adminKey2, adminLockingScript2, contract2, instrument2 := state.MockInstrument(ctx,
 		&caches.TestCaches)
 
-	agent2, err := NewAgent(ctx, contractKey2, contractLockingScript2, config,
-		feeLockingScript, caches.Caches, caches.Transactions, caches.Services, locker, store,
-		broadcaster2, nil, nil, scheduler, mockStore, peerChannelsFactory)
+	agentData2 := AgentData{
+		Key:              contractKey2,
+		LockingScript:    contractLockingScript2,
+		ContractFee:      contract2.Formation.ContractFee,
+		FeeLockingScript: feeLockingScript,
+	}
+
+	agent2, err := NewAgent(ctx, agentData2, config, caches.Caches, caches.Transactions,
+		caches.Services, locker, store, broadcaster2, nil, nil, scheduler, mockStore,
+		peerChannelsFactory)
 	if err != nil {
 		t.Fatalf("Failed to create agent : %s", err)
 	}
 
-	mockStore.AddKey(contractKey2)
+	mockStore.Add(agentData2)
 
 	var receiver1Keys, receiver2Keys []bitcoin.Key
 	var receiver1LockingScripts, receiver2LockingScripts []bitcoin.Script
@@ -2052,24 +2110,36 @@ func Test_Transfers_Multi_Reject_First(t *testing.T) {
 	caches := StartTestCaches(ctx, t, store, cacher.DefaultConfig(), time.Second)
 	locker := locker.NewInlineLocker()
 
-	contractKey1, contractLockingScript1, adminKey1, adminLockingScript1, _, instrument1 := state.MockInstrument(ctx,
+	contractKey1, contractLockingScript1, adminKey1, adminLockingScript1, contract1, instrument1 := state.MockInstrument(ctx,
 		&caches.TestCaches)
 	_, feeLockingScript1, _ := state.MockKey()
 
-	agent1, err := NewAgent(ctx, contractKey1, contractLockingScript1, DefaultConfig(),
-		feeLockingScript1, caches.Caches, caches.Transactions, caches.Services, locker, store,
-		broadcaster1, nil, nil, nil, nil, peerChannelsFactory)
+	agentData1 := AgentData{
+		Key:              contractKey1,
+		LockingScript:    contractLockingScript1,
+		ContractFee:      contract1.Formation.ContractFee,
+		FeeLockingScript: feeLockingScript1,
+	}
+
+	agent1, err := NewAgent(ctx, agentData1, DefaultConfig(), caches.Caches, caches.Transactions,
+		caches.Services, locker, store, broadcaster1, nil, nil, nil, nil, peerChannelsFactory)
 	if err != nil {
 		t.Fatalf("Failed to create agent : %s", err)
 	}
 
-	contractKey2, contractLockingScript2, adminKey2, adminLockingScript2, _, instrument2 := state.MockInstrument(ctx,
+	contractKey2, contractLockingScript2, adminKey2, adminLockingScript2, contract2, instrument2 := state.MockInstrument(ctx,
 		&caches.TestCaches)
 	_, feeLockingScript2, _ := state.MockKey()
 
-	agent2, err := NewAgent(ctx, contractKey2, contractLockingScript2, DefaultConfig(),
-		feeLockingScript2, caches.Caches, caches.Transactions, caches.Services, locker, store,
-		broadcaster2, nil, nil, nil, nil, peerChannelsFactory)
+	agentData2 := AgentData{
+		Key:              contractKey2,
+		LockingScript:    contractLockingScript2,
+		ContractFee:      contract2.Formation.ContractFee,
+		FeeLockingScript: feeLockingScript2,
+	}
+
+	agent2, err := NewAgent(ctx, agentData2, DefaultConfig(), caches.Caches, caches.Transactions,
+		caches.Services, locker, store, broadcaster2, nil, nil, nil, nil, peerChannelsFactory)
 	if err != nil {
 		t.Fatalf("Failed to create agent : %s", err)
 	}
@@ -2298,24 +2368,36 @@ func Test_Transfers_Multi_Reject_Second(t *testing.T) {
 	caches := StartTestCaches(ctx, t, store, cacher.DefaultConfig(), time.Second)
 	locker := locker.NewInlineLocker()
 
-	contractKey1, contractLockingScript1, adminKey1, adminLockingScript1, _, instrument1 := state.MockInstrument(ctx,
+	contractKey1, contractLockingScript1, adminKey1, adminLockingScript1, contract1, instrument1 := state.MockInstrument(ctx,
 		&caches.TestCaches)
 	_, feeLockingScript1, _ := state.MockKey()
 
-	agent1, err := NewAgent(ctx, contractKey1, contractLockingScript1, DefaultConfig(),
-		feeLockingScript1, caches.Caches, caches.Transactions, caches.Services, locker, store,
-		broadcaster1, nil, nil, nil, nil, peerChannelsFactory)
+	agentData1 := AgentData{
+		Key:              contractKey1,
+		LockingScript:    contractLockingScript1,
+		ContractFee:      contract1.Formation.ContractFee,
+		FeeLockingScript: feeLockingScript1,
+	}
+
+	agent1, err := NewAgent(ctx, agentData1, DefaultConfig(), caches.Caches, caches.Transactions,
+		caches.Services, locker, store, broadcaster1, nil, nil, nil, nil, peerChannelsFactory)
 	if err != nil {
 		t.Fatalf("Failed to create agent : %s", err)
 	}
 
-	contractKey2, contractLockingScript2, adminKey2, adminLockingScript2, _, instrument2 := state.MockInstrument(ctx,
+	contractKey2, contractLockingScript2, adminKey2, adminLockingScript2, contract2, instrument2 := state.MockInstrument(ctx,
 		&caches.TestCaches)
 	_, feeLockingScript2, _ := state.MockKey()
 
-	agent2, err := NewAgent(ctx, contractKey2, contractLockingScript2, DefaultConfig(),
-		feeLockingScript2, caches.Caches, caches.Transactions, caches.Services, locker, store,
-		broadcaster2, nil, nil, nil, nil, peerChannelsFactory)
+	agentData2 := AgentData{
+		Key:              contractKey2,
+		LockingScript:    contractLockingScript2,
+		ContractFee:      contract2.Formation.ContractFee,
+		FeeLockingScript: feeLockingScript2,
+	}
+
+	agent2, err := NewAgent(ctx, agentData2, DefaultConfig(), caches.Caches, caches.Transactions,
+		caches.Services, locker, store, broadcaster2, nil, nil, nil, nil, peerChannelsFactory)
 	if err != nil {
 		t.Fatalf("Failed to create agent : %s", err)
 	}
