@@ -129,6 +129,12 @@ func (a *Agent) processContractOffer(ctx context.Context, transaction *transacti
 		}
 	}
 
+	contractFee := a.ContractFee()
+	if offer.ContractFee != contractFee {
+		return nil, platform.NewRejectError(actions.RejectionsContractNotPermitted,
+			fmt.Sprintf("ContractFee: must be %d, got %d", contractFee, offer.ContractFee))
+	}
+
 	if _, err := permissions.PermissionsFromBytes(offer.ContractPermissions,
 		len(offer.VotingSystems)); err != nil {
 		return nil, platform.NewRejectError(actions.RejectionsMsgMalformed,
@@ -171,6 +177,10 @@ func (a *Agent) processContractOffer(ctx context.Context, transaction *transacti
 	formation.Timestamp = now
 	formation.ContractRevision = 0
 
+	if requestPeerChannel := a.RequestPeerChannel(); requestPeerChannel != nil {
+		formation.RequestPeerChannel = requestPeerChannel.String()
+	}
+
 	if err := formation.Validate(); err != nil {
 		return nil, platform.NewRejectError(actions.RejectionsMsgMalformed, err.Error())
 	}
@@ -197,7 +207,6 @@ func (a *Agent) processContractOffer(ctx context.Context, transaction *transacti
 	}
 
 	// Add the contract fee.
-	contractFee := offer.ContractFee
 	if contractFee > 0 {
 		if err := formationTx.AddOutput(a.FeeLockingScript(), contractFee, true,
 			false); err != nil {
@@ -590,6 +599,12 @@ func (a *Agent) processContractAmendment(ctx context.Context, transaction *trans
 		}
 	}
 
+	contractFee := a.ContractFee()
+	if formation.ContractFee != contractFee {
+		return nil, platform.NewRejectError(actions.RejectionsContractNotPermitted,
+			fmt.Sprintf("ContractFee: must be %d, got %d", contractFee, formation.ContractFee))
+	}
+
 	// Check admin identity oracle signatures
 	if err := a.verifyAdminIdentityCertificates(ctx, adminLockingScript, formation,
 		now); err != nil {
@@ -635,7 +650,6 @@ func (a *Agent) processContractAmendment(ctx context.Context, transaction *trans
 	}
 
 	// Add the contract fee.
-	contractFee := contract.Formation.ContractFee
 	if contractFee > 0 {
 		if err := formationTx.AddOutput(a.FeeLockingScript(), contractFee, true,
 			false); err != nil {

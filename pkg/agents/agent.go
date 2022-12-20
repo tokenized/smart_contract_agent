@@ -2,6 +2,9 @@ package agents
 
 import (
 	"context"
+	"encoding/binary"
+	"fmt"
+	"io"
 	"sync"
 	"time"
 
@@ -9,6 +12,7 @@ import (
 	channelsExpandedTx "github.com/tokenized/channels/expanded_tx"
 	"github.com/tokenized/config"
 	"github.com/tokenized/pkg/bitcoin"
+	"github.com/tokenized/pkg/bsor"
 	"github.com/tokenized/pkg/expanded_tx"
 	"github.com/tokenized/pkg/peer_channels"
 	"github.com/tokenized/pkg/storage"
@@ -27,6 +31,9 @@ var (
 	ErrNotRelevant = errors.New("Not Relevant")
 
 	ErrNotImplemented = errors.New("Not Implemented")
+
+	agentDataVersion = uint8(0)
+	endian           = binary.LittleEndian
 )
 
 type Config struct {
@@ -50,13 +57,13 @@ func DefaultConfig() Config {
 }
 
 type AgentData struct {
-	Key           bitcoin.Key    `envconfig:"KEY" json:"key" masked:"true"`
-	LockingScript bitcoin.Script `envconfig:"LOCKING_SCRIPT" json:"locking_script"`
+	Key           bitcoin.Key    `bsor:"1" envconfig:"KEY" json:"key" masked:"true"`
+	LockingScript bitcoin.Script `bsor:"2" envconfig:"LOCKING_SCRIPT" json:"locking_script"`
 
-	ContractFee      uint64         `envconfig:"CONTRACT_FEE" json:"contract_fee"`
-	FeeLockingScript bitcoin.Script `envconfig:"FEE_LOCKING_SCRIPT" json:"fee_locking_script"`
+	ContractFee      uint64         `bsor:"3" envconfig:"CONTRACT_FEE" json:"contract_fee"`
+	FeeLockingScript bitcoin.Script `bsor:"4" envconfig:"FEE_LOCKING_SCRIPT" json:"fee_locking_script"`
 
-	PeerChannel *peer_channels.PeerChannel `envconfig:"PEER_CHANNEL" json:"peer_channel" masked:"true"`
+	RequestPeerChannel *peer_channels.PeerChannel `bsor:"5" envconfig:"REQUEST_PEER_CHANNEL" json:"request_peer_channel" masked:"true"`
 }
 
 type Agent struct {
@@ -185,6 +192,20 @@ func (a *Agent) FeeLockingScript() bitcoin.Script {
 	return a.data.FeeLockingScript
 }
 
+func (a *Agent) SetFeeLockingScript(lockingScript bitcoin.Script) {
+	a.dataLock.Lock()
+	defer a.dataLock.Unlock()
+
+	a.data.FeeLockingScript = lockingScript
+}
+
+func (a *Agent) RequestPeerChannel() *peer_channels.PeerChannel {
+	a.dataLock.Lock()
+	defer a.dataLock.Unlock()
+
+	return a.data.RequestPeerChannel
+}
+
 func (a *Agent) Contract() *state.Contract {
 	return a.contract
 }
@@ -306,4 +327,52 @@ func (a *Agent) ActionIsSupported(action actions.Action) bool {
 	default:
 		return false
 	}
+}
+
+func (a *AgentData) Serialize(w io.Writer) error {
+	bs, err := bsor.MarshalBinary(a)
+	if err != nil {
+		return errors.Wrap(err, "marshal")
+	}
+
+	if err := binary.Write(w, endian, agentDataVersion); err != nil {
+		return errors.Wrap(err, "version")
+	}
+
+	if err := binary.Write(w, endian, uint32(len(bs))); err != nil {
+		return errors.Wrap(err, "size")
+	}
+
+	if _, err := w.Write(bs); err != nil {
+		return errors.Wrap(err, "write")
+	}
+
+	return nil
+}
+
+func (a *AgentData) Deserialize(r io.Reader) error {
+	var version uint8
+	if err := binary.Read(r, endian, &version); err != nil {
+		return errors.Wrap(err, "version")
+	}
+
+	if version != 0 {
+		return fmt.Errorf("Unsupported version : %d", version)
+	}
+
+	var size uint32
+	if err := binary.Read(r, endian, &size); err != nil {
+		return errors.Wrap(err, "size")
+	}
+
+	bs := make([]byte, size)
+	if _, err := io.ReadFull(r, bs); err != nil {
+		return errors.Wrap(err, "read")
+	}
+
+	if _, err := bsor.UnmarshalBinary(bs, a); err != nil {
+		return errors.Wrap(err, "unmarshal")
+	}
+
+	return nil
 }

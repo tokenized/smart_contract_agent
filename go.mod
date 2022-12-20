@@ -11,8 +11,8 @@ require (
 	github.com/tokenized/config v0.2.2-0.20220902160347-43a4340c357e
 	github.com/tokenized/envelope v1.0.1-0.20220902162954-c431b788f500
 	github.com/tokenized/logger v0.1.2-0.20221123201255-3047489d4997
-	github.com/tokenized/pkg v0.4.1-0.20221209144920-16fe3742db4c
-	github.com/tokenized/specification v1.1.2-0.20221209145144-23040548090e
+	github.com/tokenized/pkg v0.4.1-0.20221220034817-ed5f5e1f59be
+	github.com/tokenized/specification v1.1.2-0.20221220035048-9706511f5b95
 	github.com/tokenized/spynode v0.2.2-0.20221130210815-5c680ff76a56
 	github.com/tokenized/threads v0.1.1-0.20221115220050-91bea32c8aa2
 )

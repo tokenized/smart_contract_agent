@@ -475,7 +475,7 @@ func Test_Transfers_InsufficientQuantity(t *testing.T) {
 	}
 
 	// Add contract output
-	if err := tx.AddOutput(contractLockingScript, 100, false, false); err != nil {
+	if err := tx.AddOutput(contractLockingScript, 150, false, false); err != nil {
 		t.Fatalf("Failed to add contract output : %s", err)
 	}
 
@@ -496,13 +496,13 @@ func Test_Transfers_InsufficientQuantity(t *testing.T) {
 	// Add funding
 	key, lockingScript, _ := state.MockKey()
 	keys = append(keys, key)
-	outpoint := state.MockOutPoint(lockingScript, 200)
+	outpoint := state.MockOutPoint(lockingScript, 250)
 	spentOutputs = append(spentOutputs, &expanded_tx.Output{
 		LockingScript: lockingScript,
-		Value:         200,
+		Value:         250,
 	})
 
-	if err := tx.AddInput(*outpoint, lockingScript, 200); err != nil {
+	if err := tx.AddInput(*outpoint, lockingScript, 250); err != nil {
 		t.Fatalf("Failed to add input : %s", err)
 	}
 
