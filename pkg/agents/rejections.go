@@ -364,6 +364,13 @@ func (a *Agent) createRejection(ctx context.Context, transaction *transactions.T
 		}
 	}
 
+	contractFee := a.ContractFee()
+	if contractFee > 0 {
+		if err := rejectTx.AddOutput(a.FeeLockingScript(), contractFee, false, false); err != nil {
+			return nil, errors.Wrap(err, "add contract fee")
+		}
+	}
+
 	// Add rejection action
 	rejection := &actions.Rejection{
 		Timestamp: a.Now(),
