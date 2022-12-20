@@ -27,7 +27,7 @@ type Response struct {
 }
 
 func WrapRequest(etx *expanded_tx.ExpandedTx,
-	replyPeerChannel *peer_channels.PeerChannel) (bitcoin.Script, error) {
+	replyPeerChannel *peer_channels.Channel) (bitcoin.Script, error) {
 
 	cetx := channelsExpandedTx.ExpandedTxMessage(*etx)
 

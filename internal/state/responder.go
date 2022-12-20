@@ -27,7 +27,7 @@ type ResponderCache struct {
 }
 
 type Responder struct {
-	PeerChannels peer_channels.PeerChannels `bsor:"1" json:"peer_channels"`
+	PeerChannels peer_channels.Channels `bsor:"1" json:"peer_channels"`
 
 	isModified bool
 	sync.Mutex `bsor:"-"`
@@ -92,7 +92,7 @@ func RespondersPath(lockingScript bitcoin.Script, txid bitcoin.Hash32) string {
 	return fmt.Sprintf("%s/%s/%s", CalculateContractHash(lockingScript), respondersPath, txid)
 }
 
-func (r *Responder) AddPeerChannel(peerChannel *peer_channels.PeerChannel) {
+func (r *Responder) AddPeerChannel(peerChannel *peer_channels.Channel) {
 	s := peerChannel.String()
 	for _, pc := range r.PeerChannels {
 		if pc.String() == s {
@@ -104,7 +104,7 @@ func (r *Responder) AddPeerChannel(peerChannel *peer_channels.PeerChannel) {
 	r.isModified = true
 }
 
-func (r *Responder) RemovePeerChannels(peerChannels peer_channels.PeerChannels) {
+func (r *Responder) RemovePeerChannels(peerChannels peer_channels.Channels) {
 	for _, peerChannel := range peerChannels {
 		s := peerChannel.String()
 		for i, pc := range r.PeerChannels {
@@ -135,7 +135,7 @@ func (r *Responder) CacheCopy() cacher.CacheValue {
 
 func (r *Responder) Copy() *Responder {
 	result := &Responder{
-		PeerChannels: make(peer_channels.PeerChannels, len(r.PeerChannels)),
+		PeerChannels: make(peer_channels.Channels, len(r.PeerChannels)),
 	}
 
 	for i, peerChannel := range r.PeerChannels {

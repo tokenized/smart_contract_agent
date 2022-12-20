@@ -63,7 +63,7 @@ type AgentData struct {
 	ContractFee      uint64         `bsor:"3" envconfig:"CONTRACT_FEE" json:"contract_fee"`
 	FeeLockingScript bitcoin.Script `bsor:"4" envconfig:"FEE_LOCKING_SCRIPT" json:"fee_locking_script"`
 
-	RequestPeerChannel *peer_channels.PeerChannel `bsor:"5" envconfig:"REQUEST_PEER_CHANNEL" json:"request_peer_channel" masked:"true"`
+	RequestPeerChannel *peer_channels.Channel `bsor:"5" envconfig:"REQUEST_PEER_CHANNEL" json:"request_peer_channel" masked:"true"`
 }
 
 type Agent struct {
@@ -199,7 +199,7 @@ func (a *Agent) SetFeeLockingScript(lockingScript bitcoin.Script) {
 	a.data.FeeLockingScript = lockingScript
 }
 
-func (a *Agent) RequestPeerChannel() *peer_channels.PeerChannel {
+func (a *Agent) RequestPeerChannel() *peer_channels.Channel {
 	a.dataLock.Lock()
 	defer a.dataLock.Unlock()
 

@@ -34,10 +34,10 @@ var (
 )
 
 type Config struct {
-	AgentData           agents.AgentData           `json:"agent_data"`
-	Agents              agents.Config              `json:"agents"`
-	FeeAddress          bitcoin.Address            `envconfig:"FEE_ADDRESS" json:"fee_address"`
-	IncomingPeerChannel *peer_channels.PeerChannel `envconfig:"INCOMING_PEER_CHANNEL" json:"incoming_peer_channel"`
+	AgentData                   agents.AgentData `json:"agent_data"`
+	Agents                      agents.Config    `json:"agents"`
+	FeeAddress                  bitcoin.Address  `envconfig:"FEE_ADDRESS" json:"fee_address"`
+	RequestPeerChannelReadToken *string          `envconfig:"REQUEST_PEER_CHANNEL_READ_TOKEN" json:"request_peer_channel_read_token"`
 
 	Storage storage.Config       `json:"storage"`
 	Cache   cacher.Config        `json:"cache"`
@@ -138,7 +138,8 @@ func main() {
 
 	peerChannelThread, peerChannelComplete := threads.NewInterruptableThreadComplete("Peer Channel Listen",
 		func(ctx context.Context, interrupt <-chan interface{}) error {
-			return service.PeerChannelListen(ctx, interrupt, cfg.IncomingPeerChannel)
+			return service.PeerChannelListen(ctx, interrupt, cfg.AgentData.RequestPeerChannel,
+				cfg.RequestPeerChannelReadToken)
 		}, &peerChannelWait)
 
 	cacheThread.Start(ctx)

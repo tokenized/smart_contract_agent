@@ -46,9 +46,8 @@ func Test_Responder_Response(t *testing.T) {
 		t.Fatalf("Failed to create peer channel : %s", err)
 	}
 
-	peerChannelURL := peer_channels.ChannelURL(peer_channels.MockClientURL, peerChannelData.ID)
-	writePeerChannel, err := peer_channels.NewPeerChannel(peerChannelURL,
-		peerChannelData.WriteToken)
+	writePeerChannel, err := peer_channels.NewChannel(peer_channels.MockClientURL,
+		peerChannelData.ID, peerChannelData.WriteToken)
 	if err != nil {
 		t.Fatalf("Failed new peer channel : %s", err)
 	}
@@ -240,9 +239,8 @@ func Test_Responder_Request(t *testing.T) {
 		t.Fatalf("Failed to create peer channel : %s", err)
 	}
 
-	peerChannelURL := peer_channels.ChannelURL(peer_channels.MockClientURL, peerChannelData.ID)
-	writePeerChannel, err := peer_channels.NewPeerChannel(peerChannelURL,
-		peerChannelData.WriteToken)
+	writePeerChannel, err := peer_channels.NewChannel(peer_channels.MockClientURL,
+		peerChannelData.ID, peerChannelData.WriteToken)
 	if err != nil {
 		t.Fatalf("Failed new peer channel : %s", err)
 	}
@@ -453,9 +451,8 @@ func Test_Responder_AlreadyProcessed(t *testing.T) {
 		t.Fatalf("Failed to create peer channel : %s", err)
 	}
 
-	peerChannelURL := peer_channels.ChannelURL(peer_channels.MockClientURL, peerChannelData.ID)
-	writePeerChannel, err := peer_channels.NewPeerChannel(peerChannelURL,
-		peerChannelData.WriteToken)
+	writePeerChannel, err := peer_channels.NewChannel(peer_channels.MockClientURL,
+		peerChannelData.ID, peerChannelData.WriteToken)
 	if err != nil {
 		t.Fatalf("Failed new peer channel : %s", err)
 	}
@@ -662,9 +659,8 @@ func Test_Responder_Reject(t *testing.T) {
 		t.Fatalf("Failed to create peer channel : %s", err)
 	}
 
-	peerChannelURL := peer_channels.ChannelURL(peer_channels.MockClientURL, peerChannelData.ID)
-	writePeerChannel, err := peer_channels.NewPeerChannel(peerChannelURL,
-		peerChannelData.WriteToken)
+	writePeerChannel, err := peer_channels.NewChannel(peer_channels.MockClientURL,
+		peerChannelData.ID, peerChannelData.WriteToken)
 	if err != nil {
 		t.Fatalf("Failed new peer channel : %s", err)
 	}

@@ -30,12 +30,12 @@ var SendRequest = &cobra.Command{
 	RunE: func(c *cobra.Command, args []string) error {
 		ctx := logger.ContextWithLogger(context.Background(), true, true, "")
 
-		agentPeerChannel, err := peer_channels.NewPeerChannelFromString(args[0])
+		agentPeerChannel, err := peer_channels.ParseChannel(args[0])
 		if err != nil {
 			return errors.Wrap(err, "agent peer channel")
 		}
 
-		responsePeerChannel, err := peer_channels.NewPeerChannelFromString(args[1])
+		responsePeerChannel, err := peer_channels.ParseChannel(args[1])
 		if err != nil {
 			return errors.Wrap(err, "response peer channel")
 		}
@@ -100,17 +100,12 @@ func decodeExpandedTx(arg string) (*expanded_tx.ExpandedTx, error) {
 }
 
 func sendRequest(ctx context.Context, peerChannelsFactory *peer_channels.Factory,
-	requestPeerChannel, responsePeerChannel *peer_channels.PeerChannel,
+	requestPeerChannel, responsePeerChannel *peer_channels.Channel,
 	etx *expanded_tx.ExpandedTx) error {
 
-	baseURL, channelID, err := peer_channels.ParseChannelURL(requestPeerChannel.URL)
+	peerChannelsClient, err := peerChannelsFactory.NewClient(requestPeerChannel.BaseURL)
 	if err != nil {
-		return errors.Wrap(err, "url")
-	}
-
-	peerChannelsClient, err := peerChannelsFactory.NewClient(baseURL)
-	if err != nil {
-		return errors.Wrapf(err, "peer channel client: %s", baseURL)
+		return errors.Wrapf(err, "peer channel client: %s", requestPeerChannel.BaseURL)
 	}
 
 	script, err := client.WrapRequest(etx, responsePeerChannel)
@@ -118,8 +113,9 @@ func sendRequest(ctx context.Context, peerChannelsFactory *peer_channels.Factory
 		return errors.Wrap(err, "wrap")
 	}
 
-	if err := peerChannelsClient.WriteMessage(ctx, channelID, requestPeerChannel.Token,
-		peer_channels.ContentTypeBinary, bytes.NewReader(script)); err != nil {
+	if err := peerChannelsClient.WriteMessage(ctx, requestPeerChannel.ChannelID,
+		requestPeerChannel.Token, peer_channels.ContentTypeBinary,
+		bytes.NewReader(script)); err != nil {
 		return errors.Wrap(err, "write message")
 	}
 
@@ -127,16 +123,11 @@ func sendRequest(ctx context.Context, peerChannelsFactory *peer_channels.Factory
 }
 
 func waitForResponse(ctx context.Context, peerChannelsFactory *peer_channels.Factory,
-	peerChannel *peer_channels.PeerChannel, readToken string, txid bitcoin.Hash32) error {
+	peerChannel *peer_channels.Channel, readToken string, txid bitcoin.Hash32) error {
 
-	baseURL, _, err := peer_channels.ParseChannelURL(peerChannel.URL)
+	peerChannelsClient, err := peerChannelsFactory.NewClient(peerChannel.BaseURL)
 	if err != nil {
-		return errors.Wrap(err, "url")
-	}
-
-	peerChannelsClient, err := peerChannelsFactory.NewClient(baseURL)
-	if err != nil {
-		return errors.Wrapf(err, "peer channel client: %s", baseURL)
+		return errors.Wrapf(err, "peer channel client: %s", peerChannel.BaseURL)
 	}
 
 	incoming := make(chan peer_channels.Message, 10)
