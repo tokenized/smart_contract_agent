@@ -202,7 +202,7 @@ func Test_Responder_Response(t *testing.T) {
 		t.Fatalf("Failed to get envelope protocol : %s", err)
 	}
 
-	msg, err := protocol.Parse(payload)
+	msg, _, err := protocol.Parse(payload)
 	if err != nil {
 		t.Fatalf("Failed to parse protocol : %s", err)
 	}
@@ -363,6 +363,8 @@ func Test_Responder_Request(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to serialize message : %s", err)
 	}
+
+	t.Logf("Request : %s", script)
 
 	peerChannelsMessage := peer_channels.Message{
 		Sequence:    1,

@@ -1,12 +1,9 @@
 package client
 
 import (
-	"bytes"
-
 	"github.com/tokenized/channels"
 	channelsExpandedTx "github.com/tokenized/channels/expanded_tx"
 	channelsWallet "github.com/tokenized/channels/wallet"
-	envelopeV1 "github.com/tokenized/envelope/pkg/golang/envelope/v1"
 	"github.com/tokenized/pkg/bitcoin"
 	"github.com/tokenized/pkg/expanded_tx"
 	"github.com/tokenized/pkg/peer_channels"
@@ -31,59 +28,44 @@ func WrapRequest(etx *expanded_tx.ExpandedTx,
 
 	cetx := channelsExpandedTx.ExpandedTxMessage(*etx)
 
-	payload, err := cetx.Write()
-	if err != nil {
-		return nil, errors.Wrap(err, "write")
-	}
-
+	var replyTo *channels.ReplyTo
 	if replyPeerChannel != nil {
-		replyTo := &channels.ReplyTo{
+		replyTo = &channels.ReplyTo{
 			PeerChannel: replyPeerChannel,
 		}
-
-		payload, err = replyTo.Wrap(payload)
-		if err != nil {
-			return nil, errors.Wrap(err, "reply to")
-		}
 	}
 
-	return envelopeV1.Wrap(payload).Script()
+	return channels.Wrap(&cetx, replyTo)
 }
 
 func UnwrapRequest(script bitcoin.Script) (*Request, error) {
+	protocols := channels.NewProtocols(channelsExpandedTx.NewProtocol(),
+		channels.NewReplyToProtocol())
+
+	msg, wrappers, err := protocols.Parse(script)
+	if err != nil {
+		return nil, errors.Wrap(err, "parse")
+	}
+
+	if len(wrappers) > 1 {
+		return nil, errors.Wrap(channels.ErrUnsupportedProtocol, "more than one wrapper")
+	}
+
 	result := &Request{}
-
-	payload, err := envelopeV1.Parse(bytes.NewReader(script))
-	if err != nil {
-		return nil, errors.Wrap(err, "envelope")
-	}
-
-	replyTo, payload, err := channels.ParseReplyTo(payload)
-	if err != nil {
-		return nil, errors.Wrap(err, "reply to")
-	}
-	result.ReplyTo = replyTo
-
-	if len(payload.ProtocolIDs) == 0 {
-		return nil, errors.Wrap(channels.ErrUnsupportedProtocol, "no data protocol")
-	}
-
-	if len(payload.ProtocolIDs) > 1 {
-		return nil, errors.Wrap(channels.ErrUnsupportedProtocol, "more than one data protocol")
-	}
-
-	msg, err := channelsExpandedTx.Parse(payload)
-	if err != nil {
-		return nil, errors.Wrap(err, "etx")
-	}
-
-	if msg != nil {
-		if cetx, ok := msg.(*channelsExpandedTx.ExpandedTxMessage); ok {
-			etx := expanded_tx.ExpandedTx(*cetx)
-			result.Tx = &etx
+	if len(wrappers) == 1 {
+		if rt, ok := wrappers[0].(*channels.ReplyTo); ok {
+			result.ReplyTo = rt
 		} else {
-			return nil, channels.ErrUnsupportedProtocol
+			return nil, errors.Wrapf(channels.ErrUnsupportedProtocol, "%s",
+				wrappers[0].ProtocolID())
 		}
+	}
+
+	if cetx, ok := msg.(*channelsExpandedTx.ExpandedTxMessage); ok {
+		etx := expanded_tx.ExpandedTx(*cetx)
+		result.Tx = &etx
+	} else {
+		return nil, errors.Wrapf(channels.ErrUnsupportedProtocol, "%s", msg.ProtocolID())
 	}
 
 	return result, nil
@@ -106,75 +88,58 @@ func WrapTxIDResponse(txid bitcoin.Hash32, response *channels.Response,
 		}
 	}
 
+	var signature *channels.Signature
 	if key != nil {
 		hash := channelsWallet.RandomHash()
-		payload, err = channels.WrapSignature(payload, *key, &hash, false)
-		if err != nil {
-			return nil, errors.Wrap(err, "signature")
-		}
+		signature = channels.NewSignature(*key, &hash, false)
 	}
 
-	return envelopeV1.Wrap(payload).Script()
+	return channels.Wrap(&ctxid, response, signature)
 }
 
 func WrapExpandedTxResponse(etx *expanded_tx.ExpandedTx) (bitcoin.Script, error) {
 	cetx := channelsExpandedTx.ExpandedTxMessage(*etx)
-
-	payload, err := cetx.Write()
-	if err != nil {
-		return nil, errors.Wrap(err, "write")
-	}
-
-	return envelopeV1.Wrap(payload).Script()
+	return channels.Wrap(&cetx)
 }
 
 func UnwrapResponse(script bitcoin.Script) (*Response, error) {
+	protocols := channels.NewProtocols(channelsExpandedTx.NewProtocol(), channels.NewTxIDProtocol(),
+		channels.NewResponseProtocol(), channels.NewSignedProtocol())
+
+	msg, wrappers, err := protocols.Parse(script)
+	if err != nil {
+		return nil, errors.Wrap(err, "parse")
+	}
+
 	result := &Response{}
 
-	payload, err := envelopeV1.Parse(bytes.NewReader(script))
-	if err != nil {
-		return nil, errors.Wrap(err, "envelope")
-	}
-
-	signature, payload, err := channels.ParseSigned(payload)
-	if err != nil {
-		return nil, errors.Wrap(err, "sign")
-	}
-	result.Signature = signature
-
-	response, payload, err := channels.ParseResponse(payload)
-	if err != nil {
-		return nil, errors.Wrap(err, "response")
-	}
-	result.Response = response
-
-	if len(payload.ProtocolIDs) == 0 {
-		return nil, errors.Wrap(channels.ErrUnsupportedProtocol, "no data protocol")
-	}
-
-	if len(payload.ProtocolIDs) > 1 {
-		return nil, errors.Wrap(channels.ErrUnsupportedProtocol, "more than one data protocol")
-	}
-
-	txid, payload, err := channels.ParseTxID(payload)
-	if err != nil {
-		return nil, errors.Wrap(err, "etx")
-	}
-	result.TxID = txid
-
-	expandedTx, err := channelsExpandedTx.Parse(payload)
-	if err != nil {
-		return nil, errors.Wrap(err, "etx")
-	}
-
-	if expandedTx != nil {
-		if cetx, ok := expandedTx.(*channelsExpandedTx.ExpandedTxMessage); ok {
-			etx := expanded_tx.ExpandedTx(*cetx)
-			result.Tx = &etx
-			return result, nil
-		} else {
-			return nil, channels.ErrUnsupportedProtocol
+	if len(wrappers) > 0 {
+		if sig, ok := wrappers[0].(*channels.Signature); ok {
+			result.Signature = sig
+			wrappers = wrappers[1:]
 		}
+	}
+
+	if len(wrappers) > 0 {
+		if res, ok := wrappers[0].(*channels.Response); ok {
+			result.Response = res
+			wrappers = wrappers[1:]
+		}
+	}
+
+	if len(wrappers) > 0 {
+		return nil, errors.Wrapf(channels.ErrUnsupportedProtocol, "%s",
+			wrappers[0].ProtocolID())
+	}
+
+	if ctxid, ok := msg.(*channels.TxID); ok {
+		txid := bitcoin.Hash32(*ctxid)
+		result.TxID = &txid
+	} else if cetx, ok := msg.(*channelsExpandedTx.ExpandedTxMessage); ok {
+		etx := expanded_tx.ExpandedTx(*cetx)
+		result.Tx = &etx
+	} else {
+		return nil, errors.Wrapf(channels.ErrUnsupportedProtocol, "%s", msg.ProtocolID())
 	}
 
 	return result, nil

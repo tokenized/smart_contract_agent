@@ -82,7 +82,7 @@ func decodeExpandedTx(arg string) (*expanded_tx.ExpandedTx, error) {
 		return nil, errors.Wrap(channels.ErrUnsupportedProtocol, "more than one data protocol")
 	}
 
-	msg, err := channelsExpandedTx.Parse(payload)
+	msg, _, err := channelsExpandedTx.Parse(payload)
 	if err != nil {
 		return nil, errors.Wrap(err, "etx")
 	}
