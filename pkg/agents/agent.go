@@ -8,8 +8,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/tokenized/channels"
-	channelsExpandedTx "github.com/tokenized/channels/expanded_tx"
 	"github.com/tokenized/config"
 	"github.com/tokenized/pkg/bitcoin"
 	"github.com/tokenized/pkg/bsor"
@@ -89,8 +87,7 @@ type Agent struct {
 	scheduler  *scheduler.Scheduler
 	agentStore Store
 
-	peerChannelsFactory   *peer_channels.Factory
-	peerChannelsProtocols *channels.Protocols
+	peerChannelsFactory *peer_channels.Factory
 
 	lock sync.Mutex
 }
@@ -128,21 +125,20 @@ func NewAgent(ctx context.Context, data AgentData, config Config, caches *state.
 	}
 
 	result := &Agent{
-		data:                  data,
-		config:                config,
-		contract:              contract,
-		caches:                caches,
-		transactions:          transactions,
-		services:              services,
-		locker:                locker,
-		store:                 store,
-		broadcaster:           broadcaster,
-		fetcher:               fetcher,
-		headers:               headers,
-		scheduler:             scheduler,
-		agentStore:            agentStore,
-		peerChannelsFactory:   peerChannelsFactory,
-		peerChannelsProtocols: channels.NewProtocols(channelsExpandedTx.NewProtocol()),
+		data:                data,
+		config:              config,
+		contract:            contract,
+		caches:              caches,
+		transactions:        transactions,
+		services:            services,
+		locker:              locker,
+		store:               store,
+		broadcaster:         broadcaster,
+		fetcher:             fetcher,
+		headers:             headers,
+		scheduler:           scheduler,
+		agentStore:          agentStore,
+		peerChannelsFactory: peerChannelsFactory,
 	}
 
 	return result, nil
