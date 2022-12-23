@@ -45,10 +45,10 @@ type Processed struct {
 }
 
 type Transaction struct {
-	Tx           *wire.MsgTx                 `bsor:"1" json:"tx"`
-	State        wallet.TxState              `bsor:"2" json:"state,omitempty"`
-	MerkleProofs []*merkle_proof.MerkleProof `bsor:"3" json:"merkle_proofs,omitempty"`
-	SpentOutputs []*expanded_tx.Output       `bsor:"4" json:"spent_outputs,omitempty"` // outputs being spent by inputs in Tx
+	Tx           *wire.MsgTx               `bsor:"1" json:"tx"`
+	State        wallet.TxState            `bsor:"2" json:"state,omitempty"`
+	MerkleProofs merkle_proof.MerkleProofs `bsor:"3" json:"merkle_proofs,omitempty"`
+	SpentOutputs expanded_tx.Outputs       `bsor:"4" json:"spent_outputs,omitempty"` // outputs being spent by inputs in Tx
 
 	Processed []*Processed `bsor:"6" json:"processed,omitempty"`
 
@@ -163,11 +163,11 @@ func (c *TransactionCache) AddRawWithOutputs(ctx context.Context, tx *wire.MsgTx
 }
 
 func (c *TransactionCache) AddRaw(ctx context.Context, tx *wire.MsgTx,
-	merkleProofs []*merkle_proof.MerkleProof) (*Transaction, error) {
+	merkleProofs merkle_proof.MerkleProofs) (*Transaction, error) {
 
 	itx := &Transaction{
-		Tx:           tx,
-		MerkleProofs: merkleProofs,
+		Tx:           tx.Copy(),
+		MerkleProofs: merkleProofs.Copy(),
 	}
 
 	item, err := c.cacher.Add(ctx, c.typ, TransactionPath(itx.GetTxID()), itx)
@@ -233,9 +233,9 @@ func (c *TransactionCache) ExpandedTx(ctx context.Context,
 	}
 
 	return &expanded_tx.ExpandedTx{
-		Tx:           transaction.Tx,
-		Ancestors:    transaction.Ancestors,
-		SpentOutputs: transaction.SpentOutputs,
+		Tx:           transaction.Tx.Copy(),
+		Ancestors:    transaction.Ancestors.Copy(),
+		SpentOutputs: transaction.SpentOutputs.Copy(),
 	}, nil
 }
 
@@ -253,9 +253,9 @@ func (c *TransactionCache) GetExpandedTx(ctx context.Context,
 
 	defer c.Release(ctx, txid)
 	return &expanded_tx.ExpandedTx{
-		Tx:           transaction.Tx,
-		Ancestors:    transaction.Ancestors,
-		SpentOutputs: transaction.SpentOutputs,
+		Tx:           transaction.Tx.Copy(),
+		Ancestors:    transaction.Ancestors.Copy(),
+		SpentOutputs: transaction.SpentOutputs.Copy(),
 	}, nil
 }
 
@@ -300,8 +300,8 @@ func (c *TransactionCache) populateAncestors(ctx context.Context, transaction *T
 
 		inputTx.Lock()
 		atx = &expanded_tx.AncestorTx{
-			Tx:           inputTx.Tx,
-			MerkleProofs: inputTx.MerkleProofs,
+			Tx:           inputTx.Tx.Copy(),
+			MerkleProofs: inputTx.MerkleProofs.Copy(),
 		}
 		inputTx.Unlock()
 
@@ -420,39 +420,20 @@ func (tx *Transaction) IsModified() bool {
 func (t *Transaction) CacheCopy() cacher.CacheValue {
 	result := &Transaction{
 		State:        t.State,
-		MerkleProofs: make([]*merkle_proof.MerkleProof, len(t.MerkleProofs)),
-		SpentOutputs: make([]*expanded_tx.Output, len(t.SpentOutputs)),
+		MerkleProofs: t.MerkleProofs.Copy(),
+		SpentOutputs: t.SpentOutputs.Copy(),
 		Processed:    make([]*Processed, len(t.Processed)),
-		Ancestors:    make(expanded_tx.AncestorTxs, len(t.Ancestors)),
+		Ancestors:    t.Ancestors.Copy(),
 	}
 
 	if t.Tx != nil {
 		result.Tx = t.Tx.Copy()
 	}
 
-	for i, merkleProof := range t.MerkleProofs {
-		mp := *merkleProof
-		result.MerkleProofs[i] = &mp
-	}
-
-	for i, spentOutput := range t.SpentOutputs {
-		so := *spentOutput
-		result.SpentOutputs[i] = &so
-	}
-
 	for i, response := range t.Processed {
 		r := response.Copy()
 		result.Processed[i] = &r
 	}
-
-	for i, ancestor := range t.Ancestors {
-		a := *ancestor
-		result.Ancestors[i] = &a
-	}
-
-	// for i, ip := range t.isProcessing {
-	// 	copy(result.isProcessing[i][:], ip[:])
-	// }
 
 	return result
 }

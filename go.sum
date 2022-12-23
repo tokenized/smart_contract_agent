@@ -130,8 +130,9 @@ github.com/tokenized/pkg v0.4.1-0.20220902162108-2e13eadf8696/go.mod h1:uUb7b1xH
 github.com/tokenized/pkg v0.4.1-0.20221027145548-3955be44bb3d/go.mod h1:uUb7b1xHv6KfTB+b+FzAlUNJ/al+K7cEAT2wT2Ltglo=
 github.com/tokenized/pkg v0.4.1-0.20221111193511-06a224463802/go.mod h1:uUb7b1xHv6KfTB+b+FzAlUNJ/al+K7cEAT2wT2Ltglo=
 github.com/tokenized/pkg v0.4.1-0.20221220034817-ed5f5e1f59be/go.mod h1:uUb7b1xHv6KfTB+b+FzAlUNJ/al+K7cEAT2wT2Ltglo=
-github.com/tokenized/pkg v0.4.1-0.20221220203801-70a5d9fe2a8a h1:1JUPJR0gF01jr6hsAfhaxN2DARzeqwUwmZCVwesJvFM=
 github.com/tokenized/pkg v0.4.1-0.20221220203801-70a5d9fe2a8a/go.mod h1:uUb7b1xHv6KfTB+b+FzAlUNJ/al+K7cEAT2wT2Ltglo=
+github.com/tokenized/pkg v0.4.1-0.20221223162213-08355e178598 h1:UOFAceC1tCtUaanxqDrWzBNoyJYPsm9X7bR+CsUs8+s=
+github.com/tokenized/pkg v0.4.1-0.20221223162213-08355e178598/go.mod h1:uUb7b1xHv6KfTB+b+FzAlUNJ/al+K7cEAT2wT2Ltglo=
 github.com/tokenized/specification v1.1.2-0.20220902163651-058d13f0a70f/go.mod h1:oGIczii95Lb/C8kVkHEC0eAaIXhAzhM6HOAr33d4kkc=
 github.com/tokenized/specification v1.1.2-0.20221220035048-9706511f5b95 h1:YIiPASewlMJgsf1Per0DfUkhGz4DnMhlkpah4mAMc1Q=
 github.com/tokenized/specification v1.1.2-0.20221220035048-9706511f5b95/go.mod h1:iX808CL1BXRPEF1ebdy12/IQYL4xhJ1R3uqDfWmRc28=
