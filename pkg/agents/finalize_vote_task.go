@@ -154,12 +154,12 @@ func (a *Agent) FinalizeVote(ctx context.Context,
 	}
 	proposalOutputValue := contractOutput.Value
 
-	isTest := a.IsTest()
+	config := a.Config()
 	proposalOutputCount := proposalTransaction.OutputCount()
 	outputIndex := 0
 	for i := 0; i < proposalOutputCount; i++ {
 		output := proposalTransaction.Output(i)
-		action, err := protocol.Deserialize(output.LockingScript, isTest)
+		action, err := protocol.Deserialize(output.LockingScript, config.IsTest)
 		if err != nil {
 			continue
 		}
@@ -187,7 +187,7 @@ func (a *Agent) FinalizeVote(ctx context.Context,
 		return nil, platform.NewRejectError(actions.RejectionsMsgMalformed, err.Error())
 	}
 
-	voteResultTx := txbuilder.NewTxBuilder(a.FeeRate(), a.DustFeeRate())
+	voteResultTx := txbuilder.NewTxBuilder(config.FeeRate, config.DustFeeRate)
 
 	if err := voteResultTx.AddInput(wire.OutPoint{Hash: proposalTxID, Index: 1}, agentLockingScript,
 		proposalOutputValue); err != nil {
@@ -198,7 +198,7 @@ func (a *Agent) FinalizeVote(ctx context.Context,
 		return nil, errors.Wrap(err, "add contract output")
 	}
 
-	voteResultScript, err := protocol.Serialize(voteResult, a.IsTest())
+	voteResultScript, err := protocol.Serialize(voteResult, config.IsTest)
 	if err != nil {
 		return nil, errors.Wrap(err, "serialize vote result")
 	}

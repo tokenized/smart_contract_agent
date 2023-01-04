@@ -69,6 +69,7 @@ func Test_Proposal_Valid(t *testing.T) {
 		LockingScript:    contractLockingScript,
 		ContractFee:      contract.Formation.ContractFee,
 		FeeLockingScript: feeLockingScript,
+		IsActive:         true,
 	}
 
 	mockStore.Add(agentData)
@@ -314,6 +315,7 @@ func Test_Ballots_Valid(t *testing.T) {
 		LockingScript:    contractLockingScript,
 		ContractFee:      contract.Formation.ContractFee,
 		FeeLockingScript: feeLockingScript,
+		IsActive:         true,
 	}
 
 	instrument := state.MockInstrumentOnly(ctx, &caches.TestCaches, contract)

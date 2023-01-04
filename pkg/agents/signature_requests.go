@@ -37,11 +37,11 @@ func (a *Agent) processSignatureRequest(ctx context.Context, transaction *transa
 	}
 
 	// Parse settlement action.
-	isTest := a.IsTest()
+	config := a.Config()
 	settlementScriptOutputIndex := 0
 	var settlement *actions.Settlement
 	for i, txout := range tx.TxOut {
-		action, err := protocol.Deserialize(txout.LockingScript, isTest)
+		action, err := protocol.Deserialize(txout.LockingScript, config.IsTest)
 		if err != nil {
 			continue
 		}
@@ -92,7 +92,7 @@ func (a *Agent) processSignatureRequest(ctx context.Context, transaction *transa
 	transferOutputIndex := 0
 	var transfer *actions.Transfer
 	for i, txout := range transferTx.TxOut {
-		action, err := protocol.Deserialize(txout.LockingScript, isTest)
+		action, err := protocol.Deserialize(txout.LockingScript, config.IsTest)
 		if err != nil {
 			continue
 		}
@@ -151,7 +151,7 @@ func (a *Agent) processSignatureRequest(ctx context.Context, transaction *transa
 		return nil, platform.NewDefaultRejectError(err)
 	}
 
-	settlementTx, err := txbuilder.NewTxBuilderFromWire(a.FeeRate(), a.DustFeeRate(), tx,
+	settlementTx, err := txbuilder.NewTxBuilderFromWire(config.FeeRate, config.DustFeeRate, tx,
 		[]*wire.MsgTx{transferTx})
 	if err != nil {
 		return nil, errors.Wrap(err, "build settlement tx")
@@ -521,7 +521,8 @@ func (a *Agent) createSignatureRequest(ctx context.Context, currentTransaction *
 		return nil, fmt.Errorf("Wrong locking script for funding output")
 	}
 
-	messageTx := txbuilder.NewTxBuilder(a.FeeRate(), a.DustFeeRate())
+	config := a.Config()
+	messageTx := txbuilder.NewTxBuilder(config.FeeRate, config.DustFeeRate)
 
 	if err := messageTx.AddInput(wire.OutPoint{Hash: currentTxID, Index: uint32(fundingIndex)},
 		agentLockingScript, fundingOutput.Value); err != nil {
@@ -554,7 +555,7 @@ func (a *Agent) createSignatureRequest(ctx context.Context, currentTransaction *
 		MessagePayload:  payloadBuffer.Bytes(),
 	}
 
-	messageScript, err := protocol.Serialize(message, a.IsTest())
+	messageScript, err := protocol.Serialize(message, config.IsTest)
 	if err != nil {
 		return nil, errors.Wrap(err, "serialize message")
 	}

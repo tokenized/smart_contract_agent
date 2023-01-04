@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/tokenized/config"
@@ -62,13 +63,17 @@ type AgentData struct {
 	FeeLockingScript bitcoin.Script `bsor:"4" envconfig:"FEE_LOCKING_SCRIPT" json:"fee_locking_script"`
 
 	RequestPeerChannel *peer_channels.Channel `bsor:"5" envconfig:"REQUEST_PEER_CHANNEL" json:"request_peer_channel" masked:"true"`
+
+	AdminLockingScript bitcoin.Script `bsor:"6" envconfig:"ADMIN_LOCKING_SCRIPT" json:"admin_locking_script"`
+
+	IsActive bool `bsor:"7" envconfig:"IS_ACTIVE" json:"is_active"`
 }
 
 type Agent struct {
 	data     AgentData
 	dataLock sync.Mutex
 
-	config Config
+	config atomic.Value
 
 	contract *state.Contract
 
@@ -126,7 +131,6 @@ func NewAgent(ctx context.Context, data AgentData, config Config, caches *state.
 
 	result := &Agent{
 		data:                data,
-		config:              config,
 		contract:            contract,
 		caches:              caches,
 		transactions:        transactions,
@@ -140,6 +144,8 @@ func NewAgent(ctx context.Context, data AgentData, config Config, caches *state.
 		agentStore:          agentStore,
 		peerChannelsFactory: peerChannelsFactory,
 	}
+
+	result.config.Store(config)
 
 	return result, nil
 }
@@ -160,14 +166,14 @@ func (a *Agent) Key() bitcoin.Key {
 	a.dataLock.Lock()
 	defer a.dataLock.Unlock()
 
-	return a.data.Key
+	return a.data.Key.Copy()
 }
 
 func (a *Agent) LockingScript() bitcoin.Script {
 	a.dataLock.Lock()
 	defer a.dataLock.Unlock()
 
-	return a.data.LockingScript
+	return a.data.LockingScript.Copy()
 }
 
 func (a *Agent) ContractHash() state.ContractHash {
@@ -185,32 +191,51 @@ func (a *Agent) FeeLockingScript() bitcoin.Script {
 	a.dataLock.Lock()
 	defer a.dataLock.Unlock()
 
-	return a.data.FeeLockingScript
+	return a.data.FeeLockingScript.Copy()
 }
 
 func (a *Agent) SetFeeLockingScript(lockingScript bitcoin.Script) {
 	a.dataLock.Lock()
 	defer a.dataLock.Unlock()
 
-	a.data.FeeLockingScript = lockingScript
+	a.data.FeeLockingScript = lockingScript.Copy()
 }
 
 func (a *Agent) RequestPeerChannel() *peer_channels.Channel {
 	a.dataLock.Lock()
 	defer a.dataLock.Unlock()
 
-	return a.data.RequestPeerChannel
+	if a.data.RequestPeerChannel == nil {
+		return nil
+	}
+
+	c := a.data.RequestPeerChannel.Copy()
+	return &c
+}
+
+func (a *Agent) AdminLockingScript() bitcoin.Script {
+	a.dataLock.Lock()
+	defer a.dataLock.Unlock()
+
+	return a.data.AdminLockingScript.Copy()
+}
+
+func (a *Agent) SetAdminLockingScript(lockingScript bitcoin.Script) {
+	a.dataLock.Lock()
+	defer a.dataLock.Unlock()
+
+	a.data.AdminLockingScript = lockingScript.Copy()
+}
+
+func (a *Agent) IsActive() bool {
+	a.dataLock.Lock()
+	defer a.dataLock.Unlock()
+
+	return a.data.IsActive
 }
 
 func (a *Agent) Contract() *state.Contract {
 	return a.contract
-}
-
-func (a *Agent) AdminLockingScript() bitcoin.Script {
-	a.contract.Lock()
-	defer a.contract.Unlock()
-
-	return a.contract.AdminLockingScript()
 }
 
 func (a *Agent) CheckContractIsAvailable(now uint64) error {
@@ -220,11 +245,12 @@ func (a *Agent) CheckContractIsAvailable(now uint64) error {
 	return a.contract.CheckIsAvailable(now)
 }
 
-func (a *Agent) InRecoveryMode() bool {
-	a.lock.Lock()
-	defer a.lock.Unlock()
+func (a *Agent) Config() Config {
+	return a.config.Load().(Config)
+}
 
-	return a.config.RecoveryMode
+func (a *Agent) SetConfig(config Config) {
+	a.config.Store(config)
 }
 
 func (a *Agent) Now() uint64 {
@@ -255,41 +281,6 @@ func (a *Agent) FetchTx(ctx context.Context, txid bitcoin.Hash32) (*wire.MsgTx, 
 	}
 
 	return fetcher.GetTx(ctx, txid)
-}
-
-func (a *Agent) IsTest() bool {
-	a.lock.Lock()
-	defer a.lock.Unlock()
-
-	return a.config.IsTest
-}
-
-func (a *Agent) FeeRate() float32 {
-	a.lock.Lock()
-	defer a.lock.Unlock()
-
-	return a.config.FeeRate
-}
-
-func (a *Agent) DustFeeRate() float32 {
-	a.lock.Lock()
-	defer a.lock.Unlock()
-
-	return a.config.DustFeeRate
-}
-
-func (a *Agent) MinFeeRate() float32 {
-	a.lock.Lock()
-	defer a.lock.Unlock()
-
-	return a.config.MinFeeRate
-}
-
-func (a *Agent) MultiContractExpiration() time.Duration {
-	a.lock.Lock()
-	defer a.lock.Unlock()
-
-	return a.config.MultiContractExpiration.Duration
 }
 
 func (a *Agent) ActionIsSupported(action actions.Action) bool {

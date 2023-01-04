@@ -64,6 +64,7 @@ func Test_Responder_Response(t *testing.T) {
 		LockingScript:    contractLockingScript,
 		ContractFee:      contract.Formation.ContractFee,
 		FeeLockingScript: feeLockingScript,
+		IsActive:         true,
 	}
 
 	agent, err := NewAgent(ctx, agentData, DefaultConfig(), caches.Caches, caches.Transactions,
@@ -257,6 +258,7 @@ func Test_Responder_Request(t *testing.T) {
 		LockingScript:    contractLockingScript,
 		ContractFee:      contract.Formation.ContractFee,
 		FeeLockingScript: feeLockingScript,
+		IsActive:         true,
 	}
 
 	agent, err := NewAgent(ctx, agentData, DefaultConfig(), caches.Caches, caches.Transactions,
@@ -471,6 +473,7 @@ func Test_Responder_AlreadyProcessed(t *testing.T) {
 		LockingScript:    contractLockingScript,
 		ContractFee:      contract.Formation.ContractFee,
 		FeeLockingScript: feeLockingScript,
+		IsActive:         true,
 	}
 
 	agent, err := NewAgent(ctx, agentData, DefaultConfig(), caches.Caches, caches.Transactions,
@@ -679,6 +682,7 @@ func Test_Responder_Reject(t *testing.T) {
 		LockingScript:    contractLockingScript,
 		ContractFee:      contract.Formation.ContractFee,
 		FeeLockingScript: feeLockingScript,
+		IsActive:         true,
 	}
 
 	agent, err := NewAgent(ctx, agentData, DefaultConfig(), caches.Caches, caches.Transactions,

@@ -39,6 +39,7 @@ func Test_Freeze_Balances_Valid(t *testing.T) {
 		LockingScript:    contractLockingScript,
 		ContractFee:      contract.Formation.ContractFee,
 		FeeLockingScript: feeLockingScript,
+		IsActive:         true,
 	}
 
 	agent, err := NewAgent(ctx, agentData, DefaultConfig(), caches.Caches, caches.Transactions,
@@ -440,6 +441,7 @@ func Test_Freeze_Contract_Valid(t *testing.T) {
 		LockingScript:    contractLockingScript,
 		ContractFee:      contract.Formation.ContractFee,
 		FeeLockingScript: feeLockingScript,
+		IsActive:         true,
 	}
 
 	agent, err := NewAgent(ctx, agentData, DefaultConfig(), caches.Caches, caches.Transactions,
@@ -767,6 +769,7 @@ func Test_Freeze_Instrument_Valid(t *testing.T) {
 		LockingScript:    contractLockingScript,
 		ContractFee:      contract.Formation.ContractFee,
 		FeeLockingScript: feeLockingScript,
+		IsActive:         true,
 	}
 
 	agent, err := NewAgent(ctx, agentData, DefaultConfig(), caches.Caches, caches.Transactions,

@@ -93,12 +93,12 @@ func (a *Agent) addResponseTxID(ctx context.Context,
 	requestTransaction.Lock()
 
 	// Find request action
+	config := a.Config()
 	requestOutputIndex := -1
-	isTest := a.IsTest()
 	outputCount := requestTransaction.OutputCount()
 	for i := 0; i < outputCount; i++ {
 		output := requestTransaction.Output(i)
-		action, err := protocol.Deserialize(output.LockingScript, isTest)
+		action, err := protocol.Deserialize(output.LockingScript, config.IsTest)
 		if err != nil {
 			continue
 		}

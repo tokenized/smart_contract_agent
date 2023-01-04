@@ -239,8 +239,9 @@ func loadTx(ctx context.Context, agent *agents.Agent, transactions *transactions
 		return errors.Wrapf(err, "get inputs: %s", txid)
 	}
 
+	isTest := agent.Config().IsTest
 	transaction.Lock()
-	actionList, err := agents.CompileActions(ctx, transaction, agent.IsTest())
+	actionList, err := agents.CompileActions(ctx, transaction, isTest)
 	transaction.Unlock()
 	if err != nil {
 		return errors.Wrapf(err, "compile actions: %s", txid)

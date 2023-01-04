@@ -28,7 +28,8 @@ func (a *Agent) processSettlementRequest(ctx context.Context, transaction *trans
 
 	agentLockingScript := a.LockingScript()
 
-	settlementTx := txbuilder.NewTxBuilder(a.FeeRate(), a.DustFeeRate())
+	config := a.Config()
+	settlementTx := txbuilder.NewTxBuilder(config.FeeRate, config.DustFeeRate)
 
 	newTransferTxID, err := bitcoin.NewHash32(settlementRequest.TransferTxId)
 	if err != nil {
@@ -37,7 +38,7 @@ func (a *Agent) processSettlementRequest(ctx context.Context, transaction *trans
 	}
 	transferTxID := *newTransferTxID
 
-	settlementAction, err := protocol.Deserialize(settlementRequest.Settlement, a.IsTest())
+	settlementAction, err := protocol.Deserialize(settlementRequest.Settlement, config.IsTest)
 	if err != nil {
 		logger.Warn(ctx, "Failed to decode settlement from settlement request : %s", err)
 		return nil, platform.NewRejectError(actions.RejectionsMsgMalformed, "settlement invalid")
@@ -65,14 +66,13 @@ func (a *Agent) processSettlementRequest(ctx context.Context, transaction *trans
 	}
 	defer a.transactions.Release(ctx, transferTxID)
 
-	isTest := a.IsTest()
 	var transfer *actions.Transfer
 	var transferOutputIndex int
 	transferTransaction.Lock()
 	outputCount := transferTransaction.OutputCount()
 	for i := 0; i < outputCount; i++ {
 		output := transferTransaction.Output(i)
-		action, err := protocol.Deserialize(output.LockingScript, isTest)
+		action, err := protocol.Deserialize(output.LockingScript, config.IsTest)
 		if err != nil {
 			continue
 		}
@@ -266,7 +266,7 @@ func (a *Agent) processSettlementRequest(ctx context.Context, transaction *trans
 		}
 
 		// Add settlement
-		settlementScript, err := protocol.Serialize(settlement, a.IsTest())
+		settlementScript, err := protocol.Serialize(settlement, config.IsTest)
 		if err != nil {
 			allBalances.Revert(transferTxID)
 			return nil, errors.Wrap(err, "serialize settlement")
@@ -487,7 +487,8 @@ func (a *Agent) createSettlementRequest(ctx context.Context,
 		return nil, fmt.Errorf("Wrong locking script for funding output")
 	}
 
-	messageTx := txbuilder.NewTxBuilder(a.FeeRate(), a.DustFeeRate())
+	config := a.Config()
+	messageTx := txbuilder.NewTxBuilder(config.FeeRate, config.DustFeeRate)
 
 	if err := messageTx.AddInput(wire.OutPoint{Hash: currentTxID, Index: uint32(fundingIndex)},
 		agentLockingScript, fundingOutput.Value); err != nil {
@@ -498,8 +499,7 @@ func (a *Agent) createSettlementRequest(ctx context.Context,
 		return nil, errors.Wrap(err, "add next contract output")
 	}
 
-	isTest := a.IsTest()
-	settlementScript, err := protocol.Serialize(settlement, isTest)
+	settlementScript, err := protocol.Serialize(settlement, config.IsTest)
 	if err != nil {
 		return nil, errors.Wrap(err, "serialize settlement")
 	}
@@ -536,7 +536,7 @@ func (a *Agent) createSettlementRequest(ctx context.Context,
 		MessagePayload:  payloadBuffer.Bytes(),
 	}
 
-	messageScript, err := protocol.Serialize(message, isTest)
+	messageScript, err := protocol.Serialize(message, config.IsTest)
 	if err != nil {
 		return nil, errors.Wrap(err, "serialize message")
 	}
@@ -595,7 +595,7 @@ func (a *Agent) createSettlementRequest(ctx context.Context,
 
 	// Schedule cancel of transfer if other contract(s) don't respond.
 	if a.scheduler != nil {
-		expireTimeStamp := a.Now() + uint64(a.MultiContractExpiration().Nanoseconds())
+		expireTimeStamp := a.Now() + uint64(config.MultiContractExpiration.Nanoseconds())
 		expireTime := time.Unix(0, int64(expireTimeStamp))
 
 		logger.InfoWithFields(ctx, []logger.Field{

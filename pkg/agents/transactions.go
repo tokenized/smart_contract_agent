@@ -337,7 +337,8 @@ func (a *Agent) Process(ctx context.Context, transaction *transactions.Transacti
 		logger.Stringer("contract_locking_script", agentLockingScript),
 	}, "Processing transaction")
 
-	var feeRate, minFeeRate float32
+	minFeeRate := a.Config().MinFeeRate
+	var feeRate float32
 	if len(requestActions) > 0 {
 		transaction.Lock()
 		fee, err := transaction.CalculateFee()
@@ -348,11 +349,26 @@ func (a *Agent) Process(ctx context.Context, transaction *transactions.Transacti
 		size := transaction.Size()
 		transaction.Unlock()
 
-		minFeeRate = a.MinFeeRate()
 		feeRate = float32(fee) / float32(size)
 	}
 
 	for i, action := range relevantActions {
+		if !a.IsActive() {
+			etx, err := a.createRejection(ctx, transaction, action.OutputIndex,
+				platform.NewRejectError(actions.RejectionsInactive, ""))
+			if err != nil {
+				return errors.Wrap(err, "create rejection")
+			}
+
+			if etx != nil {
+				if err := a.BroadcastTx(ctx, etx, nil); err != nil {
+					return errors.Wrap(err, "broadcast")
+				}
+			}
+
+			continue
+		}
+
 		if IsRequest(action.Action) {
 			if feeRate < minFeeRate {
 				etx, err := a.createRejection(ctx, transaction, action.OutputIndex,
@@ -367,6 +383,8 @@ func (a *Agent) Process(ctx context.Context, transaction *transactions.Transacti
 						return errors.Wrap(err, "broadcast")
 					}
 				}
+
+				continue
 			}
 		}
 

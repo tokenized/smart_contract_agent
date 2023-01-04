@@ -43,6 +43,7 @@ func Test_BodyOfAgreement_Offer_Valid(t *testing.T) {
 		LockingScript:    contractLockingScript,
 		ContractFee:      contract.Formation.ContractFee,
 		FeeLockingScript: feeLockingScript,
+		IsActive:         true,
 	}
 
 	contract.Formation.BodyOfAgreementType = actions.ContractBodyOfAgreementTypeFull
@@ -204,6 +205,7 @@ func Test_BodyOfAgreement_Offer_UnreferencedTerm(t *testing.T) {
 		LockingScript:    contractLockingScript,
 		ContractFee:      contract.Formation.ContractFee,
 		FeeLockingScript: feeLockingScript,
+		IsActive:         true,
 	}
 
 	contract.Formation.BodyOfAgreementType = actions.ContractBodyOfAgreementTypeFull
@@ -402,6 +404,7 @@ func Test_BodyOfAgreement_Amendment_Basic(t *testing.T) {
 		LockingScript:    contractLockingScript,
 		ContractFee:      contract.Formation.ContractFee,
 		FeeLockingScript: feeLockingScript,
+		IsActive:         true,
 	}
 
 	agent, err := NewAgent(ctx, agentData, DefaultConfig(), caches.Caches, caches.Transactions,
@@ -598,6 +601,7 @@ func Test_BodyOfAgreement_Amendment_Child(t *testing.T) {
 		LockingScript:    contractLockingScript,
 		ContractFee:      contract.Formation.ContractFee,
 		FeeLockingScript: feeLockingScript,
+		IsActive:         true,
 	}
 
 	agent, err := NewAgent(ctx, agentData, DefaultConfig(), caches.Caches, caches.Transactions,
@@ -821,6 +825,7 @@ func Test_BodyOfAgreement_Amendment_Proposal(t *testing.T) {
 		LockingScript:    contractLockingScript,
 		ContractFee:      contract.Formation.ContractFee,
 		FeeLockingScript: feeLockingScript,
+		IsActive:         true,
 	}
 
 	agent, err := NewAgent(ctx, agentData, DefaultConfig(), caches.Caches, caches.Transactions,

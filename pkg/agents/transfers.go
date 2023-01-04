@@ -127,7 +127,8 @@ func (a *Agent) processTransfer(ctx context.Context, transaction *transactions.T
 			transferContracts.FirstContractOutputIndex)
 	}
 
-	settlementTx := txbuilder.NewTxBuilder(a.FeeRate(), a.DustFeeRate())
+	config := a.Config()
+	settlementTx := txbuilder.NewTxBuilder(config.FeeRate, config.DustFeeRate)
 	settlement := &actions.Settlement{
 		Timestamp: now,
 	}
@@ -177,7 +178,7 @@ func (a *Agent) processTransfer(ctx context.Context, transaction *transactions.T
 		return nil, platform.NewRejectError(actions.RejectionsMsgMalformed, err.Error())
 	}
 
-	settlementScript, err := protocol.Serialize(settlement, a.IsTest())
+	settlementScript, err := protocol.Serialize(settlement, config.IsTest)
 	if err != nil {
 		allBalances.Revert(txid)
 		return nil, errors.Wrap(err, "serialize settlement")

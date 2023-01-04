@@ -50,6 +50,7 @@ func Test_Process(t *testing.T) {
 		Key:              contractKey,
 		LockingScript:    contractLockingScript,
 		FeeLockingScript: feeLockingScript,
+		IsActive:         true,
 	}
 
 	agent, err := NewAgent(ctx, agentData, DefaultConfig(), caches.Caches, caches.Transactions,

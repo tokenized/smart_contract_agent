@@ -129,13 +129,12 @@ github.com/tokenized/pkg v0.4.1-0.20220520003654-d682cbe31551/go.mod h1:/ZeiNBa1
 github.com/tokenized/pkg v0.4.1-0.20220902162108-2e13eadf8696/go.mod h1:uUb7b1xHv6KfTB+b+FzAlUNJ/al+K7cEAT2wT2Ltglo=
 github.com/tokenized/pkg v0.4.1-0.20221027145548-3955be44bb3d/go.mod h1:uUb7b1xHv6KfTB+b+FzAlUNJ/al+K7cEAT2wT2Ltglo=
 github.com/tokenized/pkg v0.4.1-0.20221111193511-06a224463802/go.mod h1:uUb7b1xHv6KfTB+b+FzAlUNJ/al+K7cEAT2wT2Ltglo=
-github.com/tokenized/pkg v0.4.1-0.20221220034817-ed5f5e1f59be/go.mod h1:uUb7b1xHv6KfTB+b+FzAlUNJ/al+K7cEAT2wT2Ltglo=
 github.com/tokenized/pkg v0.4.1-0.20221220203801-70a5d9fe2a8a/go.mod h1:uUb7b1xHv6KfTB+b+FzAlUNJ/al+K7cEAT2wT2Ltglo=
-github.com/tokenized/pkg v0.4.1-0.20221223162213-08355e178598 h1:UOFAceC1tCtUaanxqDrWzBNoyJYPsm9X7bR+CsUs8+s=
-github.com/tokenized/pkg v0.4.1-0.20221223162213-08355e178598/go.mod h1:uUb7b1xHv6KfTB+b+FzAlUNJ/al+K7cEAT2wT2Ltglo=
+github.com/tokenized/pkg v0.4.1-0.20230104015025-4b404f658c06 h1:TeiH+aO9BDbiUtPPoR3n9OFTzgemTceBSUmhiQ9idwY=
+github.com/tokenized/pkg v0.4.1-0.20230104015025-4b404f658c06/go.mod h1:uUb7b1xHv6KfTB+b+FzAlUNJ/al+K7cEAT2wT2Ltglo=
 github.com/tokenized/specification v1.1.2-0.20220902163651-058d13f0a70f/go.mod h1:oGIczii95Lb/C8kVkHEC0eAaIXhAzhM6HOAr33d4kkc=
-github.com/tokenized/specification v1.1.2-0.20221220035048-9706511f5b95 h1:YIiPASewlMJgsf1Per0DfUkhGz4DnMhlkpah4mAMc1Q=
-github.com/tokenized/specification v1.1.2-0.20221220035048-9706511f5b95/go.mod h1:iX808CL1BXRPEF1ebdy12/IQYL4xhJ1R3uqDfWmRc28=
+github.com/tokenized/specification v1.1.2-0.20230104015151-3f4771229986 h1:GKNetzxi9ydyJFd+rKlrGk3QcISEz/1zNzi4F9fYqzY=
+github.com/tokenized/specification v1.1.2-0.20230104015151-3f4771229986/go.mod h1:en+PCyLVhT0r+A64Kzl7dwlrp22CWAjDd6LlvW4EdC4=
 github.com/tokenized/spynode v0.2.2-0.20221130210815-5c680ff76a56 h1:BNs+aBOjF13V2Rlgpt5Ga+xPqNrxYjDhvfQRcf2SInM=
 github.com/tokenized/spynode v0.2.2-0.20221130210815-5c680ff76a56/go.mod h1:2h4MQlpzxvrryHBpBkinhtVukh32fh6LhTLTz9XxE5U=
 github.com/tokenized/threads v0.1.1-0.20220902155404-d844f8ac41b5/go.mod h1:Dii75FyJFZwaFWPai5CrczSZpF8vqznaCtkiwDx/WEg=

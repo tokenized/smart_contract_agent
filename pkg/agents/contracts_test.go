@@ -47,6 +47,7 @@ func Test_Contracts_Offer_Invalid(t *testing.T) {
 		Key:              contractKey,
 		LockingScript:    contractLockingScript,
 		FeeLockingScript: feeLockingScript,
+		IsActive:         true,
 	}
 
 	agent, err := NewAgent(ctx, agentData, DefaultConfig(), caches.Caches, caches.Transactions,
@@ -200,6 +201,7 @@ func Test_Contracts_Offer_Valid(t *testing.T) {
 		Key:              contractKey,
 		LockingScript:    contractLockingScript,
 		FeeLockingScript: feeLockingScript,
+		IsActive:         true,
 	}
 
 	agent, err := NewAgent(ctx, agentData, DefaultConfig(), caches.Caches, caches.Transactions,
@@ -401,6 +403,7 @@ func Test_Contracts_Offer_AlreadyExists(t *testing.T) {
 		Key:              contractKey,
 		LockingScript:    contractLockingScript,
 		FeeLockingScript: feeLockingScript,
+		IsActive:         true,
 	}
 
 	agent, err := NewAgent(ctx, agentData, DefaultConfig(), caches.Caches, caches.Transactions,
@@ -548,6 +551,7 @@ func Test_Contracts_Amendment_Valid(t *testing.T) {
 		LockingScript:    contractLockingScript,
 		ContractFee:      contract.Formation.ContractFee,
 		FeeLockingScript: feeLockingScript,
+		IsActive:         true,
 	}
 
 	agent, err := NewAgent(ctx, agentData, DefaultConfig(), caches.Caches, caches.Transactions,
@@ -749,6 +753,7 @@ func Test_Contracts_Amendment_AdminChange(t *testing.T) {
 		LockingScript:    contractLockingScript,
 		ContractFee:      contract.Formation.ContractFee,
 		FeeLockingScript: feeLockingScript,
+		IsActive:         true,
 	}
 
 	agent, err := NewAgent(ctx, agentData, DefaultConfig(), caches.Caches, caches.Transactions,
@@ -942,6 +947,7 @@ func Test_Contracts_Amendment_Proposal(t *testing.T) {
 		LockingScript:    contractLockingScript,
 		ContractFee:      contract.Formation.ContractFee,
 		FeeLockingScript: feeLockingScript,
+		IsActive:         true,
 	}
 
 	agent, err := NewAgent(ctx, agentData, DefaultConfig(), caches.Caches, caches.Transactions,

@@ -47,6 +47,7 @@ func Test_Recovery_AcceptContractOffer(t *testing.T) {
 		Key:              contractKey,
 		LockingScript:    contractLockingScript,
 		FeeLockingScript: feeLockingScript,
+		IsActive:         true,
 	}
 
 	agent, err := NewAgent(ctx, agentData, agentConfig, caches.Caches, caches.Transactions,
@@ -156,7 +157,9 @@ func Test_Recovery_AcceptContractOffer(t *testing.T) {
 	}
 	caches.Caches.RecoveryTransactions.Release(ctx, contractLockingScript)
 
-	agent.config.RecoveryMode = false
+	config := agent.Config()
+	config.RecoveryMode = false
+	agent.SetConfig(config)
 	if err := agent.ProcessRecoveryRequests(ctx); err != nil {
 		t.Fatalf("Failed to process recovery requests : %s", err)
 	}
@@ -239,6 +242,7 @@ func Test_Recovery_ContractOfferAlreadyAccepted(t *testing.T) {
 		Key:              contractKey,
 		LockingScript:    contractLockingScript,
 		FeeLockingScript: feeLockingScript,
+		IsActive:         true,
 	}
 
 	agent, err := NewAgent(ctx, agentData, agentConfig, caches.Caches, caches.Transactions,
@@ -434,7 +438,9 @@ func Test_Recovery_ContractOfferAlreadyAccepted(t *testing.T) {
 	}
 	caches.Caches.RecoveryTransactions.Release(ctx, contractLockingScript)
 
-	agent.config.RecoveryMode = false
+	config := agent.Config()
+	config.RecoveryMode = false
+	agent.SetConfig(config)
 	if err := agent.ProcessRecoveryRequests(ctx); err != nil {
 		t.Fatalf("Failed to process recovery requests : %s", err)
 	}

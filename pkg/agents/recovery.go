@@ -21,11 +21,8 @@ func (a *Agent) addRecoveryRequests(ctx context.Context, txid bitcoin.Hash32,
 
 	lockingScript := a.LockingScript()
 
-	a.lock.Lock()
-	recoveryMode := a.config.RecoveryMode
-	a.lock.Unlock()
-
-	if !recoveryMode {
+	config := a.Config()
+	if !config.RecoveryMode {
 		return false, nil
 	}
 
@@ -62,11 +59,8 @@ func (a *Agent) removeRecoveryRequest(ctx context.Context, txid bitcoin.Hash32,
 
 	lockingScript := a.LockingScript()
 
-	a.lock.Lock()
-	recoveryMode := a.config.RecoveryMode
-	a.lock.Unlock()
-
-	if !recoveryMode {
+	config := a.Config()
+	if !config.RecoveryMode {
 		return false, nil
 	}
 
@@ -153,8 +147,8 @@ func (a *Agent) processRecoveryRequest(ctx context.Context,
 	}
 	defer a.transactions.Release(ctx, request.TxID)
 
-	isTest := a.IsTest()
-	actionList, err := compileActions(ctx, transaction, isTest)
+	config := a.Config()
+	actionList, err := compileActions(ctx, transaction, config.IsTest)
 	if err != nil {
 		return errors.Wrap(err, "compile actions")
 	}

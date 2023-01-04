@@ -62,9 +62,9 @@ func (a *Agent) ProcessPeerChannelMessage(ctx context.Context, msg peer_channels
 	}, "Received peer channel message with transaction")
 
 	agentLockingScript := a.LockingScript()
-	isTest := a.IsTest()
 
-	requestOutputs, err := relevantRequestOutputs(ctx, request.Tx, agentLockingScript, isTest)
+	config := a.Config()
+	requestOutputs, err := relevantRequestOutputs(ctx, request.Tx, agentLockingScript, config.IsTest)
 	if err != nil {
 		return errors.Wrap(err, "tx is relevant")
 	}

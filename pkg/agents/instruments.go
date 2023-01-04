@@ -160,7 +160,8 @@ func (a *Agent) processInstrumentDefinition(ctx context.Context, transaction *tr
 	}
 	creation.Timestamp = now // now might have changed while locking balance
 
-	creationTx := txbuilder.NewTxBuilder(a.FeeRate(), a.DustFeeRate())
+	config := a.Config()
+	creationTx := txbuilder.NewTxBuilder(config.FeeRate, config.DustFeeRate)
 
 	if err := creationTx.AddInput(wire.OutPoint{Hash: txid, Index: 0}, agentLockingScript,
 		contractOutput.Value); err != nil {
@@ -171,7 +172,7 @@ func (a *Agent) processInstrumentDefinition(ctx context.Context, transaction *tr
 		return nil, errors.Wrap(err, "add contract output")
 	}
 
-	creationScript, err := protocol.Serialize(creation, a.IsTest())
+	creationScript, err := protocol.Serialize(creation, config.IsTest)
 	if err != nil {
 		return nil, errors.Wrap(err, "serialize creation")
 	}
@@ -338,9 +339,9 @@ func (a *Agent) processInstrumentModification(ctx context.Context, transaction *
 	proposalType := uint32(0)
 	votingSystem := uint32(0)
 
-	isTest := a.IsTest()
+	config := a.Config()
 	vote, err := fetchReferenceVote(ctx, a.caches, a.transactions, agentLockingScript,
-		modification.RefTxID, isTest)
+		modification.RefTxID, config.IsTest)
 	if err != nil {
 		return nil, errors.Wrap(err, "fetch vote")
 	}
@@ -397,12 +398,12 @@ func (a *Agent) processInstrumentModification(ctx context.Context, transaction *
 	}
 
 	// Copy creation to prevent modification of the original.
-	copyScript, err := protocol.Serialize(instrument.Creation, isTest)
+	copyScript, err := protocol.Serialize(instrument.Creation, config.IsTest)
 	if err != nil {
 		return nil, errors.Wrap(err, "serialize instrument creation")
 	}
 
-	action, err := protocol.Deserialize(copyScript, isTest)
+	action, err := protocol.Deserialize(copyScript, config.IsTest)
 	if err != nil {
 		return nil, errors.Wrap(err, "deserialize instrument creation")
 	}
@@ -432,7 +433,7 @@ func (a *Agent) processInstrumentModification(ctx context.Context, transaction *
 	}
 	creation.Timestamp = now // now might have changed while locking balance
 
-	creationTx := txbuilder.NewTxBuilder(a.FeeRate(), a.DustFeeRate())
+	creationTx := txbuilder.NewTxBuilder(config.FeeRate, config.DustFeeRate)
 
 	if err := creationTx.AddInput(wire.OutPoint{Hash: txid, Index: 0}, agentLockingScript,
 		contractOutput.Value); err != nil {
@@ -443,7 +444,7 @@ func (a *Agent) processInstrumentModification(ctx context.Context, transaction *
 		return nil, errors.Wrap(err, "add contract output")
 	}
 
-	creationScript, err := protocol.Serialize(creation, isTest)
+	creationScript, err := protocol.Serialize(creation, config.IsTest)
 	if err != nil {
 		return nil, errors.Wrap(err, "serialize creation")
 	}

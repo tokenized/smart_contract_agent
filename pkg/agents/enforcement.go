@@ -164,7 +164,8 @@ func (a *Agent) processFreezeOrder(ctx context.Context, transaction *transaction
 		Timestamp:      now,
 	}
 
-	freezeTx := txbuilder.NewTxBuilder(a.FeeRate(), a.DustFeeRate())
+	config := a.Config()
+	freezeTx := txbuilder.NewTxBuilder(config.FeeRate, config.DustFeeRate)
 
 	if err := freezeTx.AddInput(wire.OutPoint{Hash: txid, Index: 0}, agentLockingScript,
 		contractOutput.Value); err != nil {
@@ -340,7 +341,7 @@ func (a *Agent) processFreezeOrder(ctx context.Context, transaction *transaction
 		return nil, platform.NewRejectError(actions.RejectionsMsgMalformed, err.Error())
 	}
 
-	freezeScript, err := protocol.Serialize(freeze, a.IsTest())
+	freezeScript, err := protocol.Serialize(freeze, config.IsTest)
 	if err != nil {
 		balances.RevertPending()
 		return nil, errors.Wrap(err, "serialize freeze")
@@ -459,7 +460,8 @@ func (a *Agent) processThawOrder(ctx context.Context, transaction *transactions.
 		Timestamp:  now,
 	}
 
-	thawTx := txbuilder.NewTxBuilder(a.FeeRate(), a.DustFeeRate())
+	config := a.Config()
+	thawTx := txbuilder.NewTxBuilder(config.FeeRate, config.DustFeeRate)
 
 	if err := thawTx.AddInput(wire.OutPoint{Hash: txid, Index: 0}, agentLockingScript,
 		contractOutput.Value); err != nil {
@@ -486,12 +488,11 @@ func (a *Agent) processThawOrder(ctx context.Context, transaction *transactions.
 
 	freezeTransaction.Lock()
 
-	isTest := a.IsTest()
 	var freeze *actions.Freeze
 	outputCount := freezeTransaction.OutputCount()
 	for i := 0; i < outputCount; i++ {
 		output := freezeTransaction.Output(i)
-		action, err := protocol.Deserialize(output.LockingScript, isTest)
+		action, err := protocol.Deserialize(output.LockingScript, config.IsTest)
 		if err != nil {
 			continue
 		}
@@ -627,7 +628,7 @@ func (a *Agent) processThawOrder(ctx context.Context, transaction *transactions.
 		return nil, platform.NewRejectError(actions.RejectionsMsgMalformed, err.Error())
 	}
 
-	thawScript, err := protocol.Serialize(thaw, a.IsTest())
+	thawScript, err := protocol.Serialize(thaw, config.IsTest)
 	if err != nil {
 		return nil, errors.Wrap(err, "serialize thaw")
 	}
@@ -738,7 +739,8 @@ func (a *Agent) processConfiscateOrder(ctx context.Context, transaction *transac
 		Timestamp:      now,
 	}
 
-	confiscationTx := txbuilder.NewTxBuilder(a.FeeRate(), a.DustFeeRate())
+	config := a.Config()
+	confiscationTx := txbuilder.NewTxBuilder(config.FeeRate, config.DustFeeRate)
 
 	if err := confiscationTx.AddInput(wire.OutPoint{Hash: txid, Index: 0}, agentLockingScript,
 		contractOutput.Value); err != nil {
@@ -937,7 +939,7 @@ func (a *Agent) processConfiscateOrder(ctx context.Context, transaction *transac
 		return nil, errors.Wrap(err, "add deposit output")
 	}
 
-	confiscationScript, err := protocol.Serialize(confiscation, a.IsTest())
+	confiscationScript, err := protocol.Serialize(confiscation, config.IsTest)
 	if err != nil {
 		balances.RevertPending()
 		return nil, errors.Wrap(err, "serialize confiscation")
@@ -1235,12 +1237,12 @@ func (a *Agent) processThaw(ctx context.Context, transaction *transactions.Trans
 
 	freezeTransaction.Lock()
 
-	isTest := a.IsTest()
+	config := a.Config()
 	var freeze *actions.Freeze
 	outputCount := freezeTransaction.OutputCount()
 	for i := 0; i < outputCount; i++ {
 		output := freezeTransaction.Output(i)
-		action, err := protocol.Deserialize(output.LockingScript, isTest)
+		action, err := protocol.Deserialize(output.LockingScript, config.IsTest)
 		if err != nil {
 			continue
 		}

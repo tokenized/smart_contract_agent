@@ -104,7 +104,7 @@ func (s *Service) HandleTxUpdate(ctx context.Context, txUpdate *spynodeClient.Tx
 
 func (s *Service) handleTx(ctx context.Context, transaction *transactions.Transaction) error {
 	txid := transaction.GetTxID()
-	isTest := s.agent.IsTest()
+	isTest := s.agent.Config().IsTest
 	transaction.Lock()
 	actionList, err := agents.CompileActions(ctx, transaction, isTest)
 	transaction.Unlock()

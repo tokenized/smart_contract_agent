@@ -85,13 +85,13 @@ func (a *Agent) processRejection(ctx context.Context, transaction *transactions.
 	defer a.transactions.Release(ctx, rejectedTxID)
 
 	// Find action
-	isTest := a.IsTest()
+	config := a.Config()
 	rejectedTransaction.Lock()
 	outputCount = rejectedTransaction.OutputCount()
 	var message *actions.Message
 	for i := 0; i < outputCount; i++ {
 		output := rejectedTransaction.Output(i)
-		action, err := protocol.Deserialize(output.LockingScript, isTest)
+		action, err := protocol.Deserialize(output.LockingScript, config.IsTest)
 		if err != nil {
 			continue
 		}
@@ -199,9 +199,9 @@ func (a *Agent) traceToTransfer(ctx context.Context,
 		return nil, nil, 0, errors.Wrap(err, "get tx")
 	}
 
+	config := a.Config()
 	if previousTransaction != nil {
 		// Find action
-		isTest := a.IsTest()
 		previousTransaction.Lock()
 		firstInput := previousTransaction.Input(0)
 		previousTxID := firstInput.PreviousOutPoint.Hash
@@ -209,7 +209,7 @@ func (a *Agent) traceToTransfer(ctx context.Context,
 		var message *actions.Message
 		for i := 0; i < outputCount; i++ {
 			output := previousTransaction.Output(i)
-			action, err := protocol.Deserialize(output.LockingScript, isTest)
+			action, err := protocol.Deserialize(output.LockingScript, config.IsTest)
 			if err != nil {
 				continue
 			}
@@ -249,10 +249,9 @@ func (a *Agent) traceToTransfer(ctx context.Context,
 	previousTxID := fetchedTx.TxIn[0].PreviousOutPoint.Hash
 
 	// Find action
-	isTest := a.IsTest()
 	var message *actions.Message
 	for _, txout := range fetchedTx.TxOut {
-		act, err := protocol.Deserialize(txout.LockingScript, isTest)
+		act, err := protocol.Deserialize(txout.LockingScript, config.IsTest)
 		if err != nil {
 			continue
 		}
@@ -289,7 +288,8 @@ func (a *Agent) createRejection(ctx context.Context, transaction *transactions.T
 	}
 
 	agentLockingScript := a.LockingScript()
-	rejectTx := txbuilder.NewTxBuilder(a.FeeRate(), a.DustFeeRate())
+	config := a.Config()
+	rejectTx := txbuilder.NewTxBuilder(config.FeeRate, config.DustFeeRate)
 
 	transaction.Lock()
 
@@ -399,7 +399,7 @@ func (a *Agent) createRejection(ctx context.Context, transaction *transactions.T
 		logger.String("reject_message", rejection.Message),
 	}, "Responding with rejection")
 
-	rejectionScript, err := protocol.Serialize(rejection, a.IsTest())
+	rejectionScript, err := protocol.Serialize(rejection, config.IsTest)
 	if err != nil {
 		transaction.Unlock()
 		return nil, errors.Wrap(err, "serialize rejection")

@@ -140,6 +140,7 @@ func (a *Agent) processProposal(ctx context.Context, transaction *transactions.T
 	contractWideVote := false
 	tokenQuantity := uint64(0)
 
+	config := a.Config()
 	if len(proposal.InstrumentCode) > 0 {
 		instrumentHash20, err := bitcoin.NewHash20(proposal.InstrumentCode)
 		if err != nil {
@@ -213,15 +214,14 @@ func (a *Agent) processProposal(ctx context.Context, transaction *transactions.T
 			}
 
 			// Validate proposed amendments.
-			isTest := a.IsTest()
 			instrument.Lock()
-			copyScript, err := protocol.Serialize(instrument.Creation, isTest)
+			copyScript, err := protocol.Serialize(instrument.Creation, config.IsTest)
 			instrument.Unlock()
 			if err != nil {
 				return nil, errors.Wrap(err, "serialize instrument creation")
 			}
 
-			action, err := protocol.Deserialize(copyScript, isTest)
+			action, err := protocol.Deserialize(copyScript, config.IsTest)
 			if err != nil {
 				return nil, errors.Wrap(err, "deserialize instrument creation")
 			}
@@ -270,15 +270,14 @@ func (a *Agent) processProposal(ctx context.Context, transaction *transactions.T
 			}
 
 			// Validate proposed amendments.
-			isTest := a.IsTest()
 			contract.Lock()
-			copyScript, err := protocol.Serialize(contract.Formation, isTest)
+			copyScript, err := protocol.Serialize(contract.Formation, config.IsTest)
 			contract.Unlock()
 			if err != nil {
 				return nil, errors.Wrap(err, "serialize contract formation")
 			}
 
-			action, err := protocol.Deserialize(copyScript, isTest)
+			action, err := protocol.Deserialize(copyScript, config.IsTest)
 			if err != nil {
 				return nil, errors.Wrap(err, "deserialize contract formation")
 			}
@@ -346,7 +345,7 @@ func (a *Agent) processProposal(ctx context.Context, transaction *transactions.T
 		return nil, platform.NewRejectError(actions.RejectionsMsgMalformed, err.Error())
 	}
 
-	voteTx := txbuilder.NewTxBuilder(a.FeeRate(), a.DustFeeRate())
+	voteTx := txbuilder.NewTxBuilder(config.FeeRate, config.DustFeeRate)
 
 	if err := voteTx.AddInput(wire.OutPoint{Hash: txid, Index: 0}, agentLockingScript,
 		contractOutput.Value); err != nil {
@@ -357,7 +356,7 @@ func (a *Agent) processProposal(ctx context.Context, transaction *transactions.T
 		return nil, errors.Wrap(err, "add contract output")
 	}
 
-	voteScript, err := protocol.Serialize(vote, a.IsTest())
+	voteScript, err := protocol.Serialize(vote, config.IsTest)
 	if err != nil {
 		return nil, errors.Wrap(err, "serialize vote")
 	}
@@ -522,6 +521,7 @@ func (a *Agent) processVote(ctx context.Context, transaction *transactions.Trans
 		addedVote.MarkModified()
 	}
 
+	config := a.Config()
 	if addedVote.Proposal == nil {
 		// Fetch proposal
 		proposalTransaction, err := a.transactions.Get(ctx, proposalTxID)
@@ -530,13 +530,12 @@ func (a *Agent) processVote(ctx context.Context, transaction *transactions.Trans
 		}
 
 		if proposalTransaction != nil {
-			isTest := a.IsTest()
 			proposalTransaction.Lock()
 			proposalOutputCount := proposalTransaction.OutputCount()
 			for i := 0; i < proposalOutputCount; i++ {
 				output := proposalTransaction.Output(i)
 
-				action, err := protocol.Deserialize(output.LockingScript, isTest)
+				action, err := protocol.Deserialize(output.LockingScript, config.IsTest)
 				if err != nil {
 					continue
 				}
@@ -704,7 +703,8 @@ func (a *Agent) processBallotCast(ctx context.Context, transaction *transactions
 		return nil, platform.NewRejectError(actions.RejectionsMsgMalformed, err.Error())
 	}
 
-	ballotCountedTx := txbuilder.NewTxBuilder(a.FeeRate(), a.DustFeeRate())
+	config := a.Config()
+	ballotCountedTx := txbuilder.NewTxBuilder(config.FeeRate, config.DustFeeRate)
 
 	if err := ballotCountedTx.AddInput(wire.OutPoint{Hash: txid, Index: 0}, agentLockingScript,
 		contractOutput.Value); err != nil {
@@ -715,7 +715,7 @@ func (a *Agent) processBallotCast(ctx context.Context, transaction *transactions
 		return nil, errors.Wrap(err, "add contract output")
 	}
 
-	ballotCountedScript, err := protocol.Serialize(ballotCounted, a.IsTest())
+	ballotCountedScript, err := protocol.Serialize(ballotCounted, config.IsTest)
 	if err != nil {
 		return nil, errors.Wrap(err, "serialize ballot counted")
 	}

@@ -25,6 +25,7 @@ func (a *Agent) processContractOffer(ctx context.Context, transaction *transacti
 	offer *actions.ContractOffer, outputIndex int) (*expanded_tx.ExpandedTx, error) {
 
 	agentLockingScript := a.LockingScript()
+	adminLockingScript := a.AdminLockingScript()
 
 	// First output must be the agent's locking script
 	transaction.Lock()
@@ -69,7 +70,15 @@ func (a *Agent) processContractOffer(ctx context.Context, transaction *transacti
 		return nil, errors.Wrap(err, "admin input output")
 	}
 
-	adminLockingScript := inputOutput.LockingScript
+	isNewAdminLockingScript := false
+	if len(adminLockingScript) == 0 {
+		adminLockingScript = inputOutput.LockingScript
+		isNewAdminLockingScript = true
+	} else if !adminLockingScript.Equal(inputOutput.LockingScript) {
+		return nil, platform.NewRejectError(actions.RejectionsUnauthorizedAddress,
+			"Not pre-arranged administrative locking script")
+	}
+
 	adminAddress, err := bitcoin.RawAddressFromLockingScript(inputOutput.LockingScript)
 	if err != nil {
 		transaction.Unlock()
@@ -185,7 +194,8 @@ func (a *Agent) processContractOffer(ctx context.Context, transaction *transacti
 		return nil, platform.NewRejectError(actions.RejectionsMsgMalformed, err.Error())
 	}
 
-	formationTx := txbuilder.NewTxBuilder(a.FeeRate(), a.DustFeeRate())
+	config := a.Config()
+	formationTx := txbuilder.NewTxBuilder(config.FeeRate, config.DustFeeRate)
 
 	if err := formationTx.AddInput(wire.OutPoint{Hash: txid, Index: 0}, agentLockingScript,
 		contractOutput.Value); err != nil {
@@ -196,7 +206,7 @@ func (a *Agent) processContractOffer(ctx context.Context, transaction *transacti
 		return nil, errors.Wrap(err, "add contract output")
 	}
 
-	formationScript, err := protocol.Serialize(formation, a.IsTest())
+	formationScript, err := protocol.Serialize(formation, config.IsTest)
 	if err != nil {
 		return nil, errors.Wrap(err, "serialize formation")
 	}
@@ -231,6 +241,10 @@ func (a *Agent) processContractOffer(ctx context.Context, transaction *transacti
 	contract.Formation = formation
 	contract.FormationTxID = formationTx.MsgTx.TxHash()
 	contract.MarkModified()
+
+	if isNewAdminLockingScript {
+		a.SetAdminLockingScript(adminLockingScript)
+	}
 
 	formationTxID := *formationTx.MsgTx.TxHash()
 	formationTransaction, err := a.transactions.AddRaw(ctx, formationTx.MsgTx, nil)
@@ -334,8 +348,9 @@ func (a *Agent) processContractAmendment(ctx context.Context, transaction *trans
 	proposalType := uint32(0)
 	votingSystem := uint32(0)
 
+	config := a.Config()
 	vote, err := fetchReferenceVote(ctx, a.caches, a.transactions, agentLockingScript,
-		amendment.RefTxID, a.IsTest())
+		amendment.RefTxID, config.IsTest)
 	if err != nil {
 		return nil, errors.Wrap(err, "fetch vote")
 	}
@@ -460,13 +475,12 @@ func (a *Agent) processContractAmendment(ctx context.Context, transaction *trans
 	}
 
 	// Copy formation to prevent modification of the original.
-	isTest := a.IsTest()
-	copyScript, err := protocol.Serialize(contract.Formation, isTest)
+	copyScript, err := protocol.Serialize(contract.Formation, config.IsTest)
 	if err != nil {
 		return nil, errors.Wrap(err, "serialize contract formation")
 	}
 
-	action, err := protocol.Deserialize(copyScript, isTest)
+	action, err := protocol.Deserialize(copyScript, config.IsTest)
 	if err != nil {
 		return nil, errors.Wrap(err, "deserialize contract formation")
 	}
@@ -488,6 +502,7 @@ func (a *Agent) processContractAmendment(ctx context.Context, transaction *trans
 		return nil, errors.Wrap(err, "admin address")
 	}
 
+	isNewAdminLockingScript := false
 	adminLockingScript, err := adminAddress.LockingScript()
 	if err != nil {
 		return nil, errors.Wrap(err, "admin locking script")
@@ -518,6 +533,7 @@ func (a *Agent) processContractAmendment(ctx context.Context, transaction *trans
 			logger.Stringer("previous_admin_locking_script", adminLockingScript),
 			logger.Stringer("new_admin_locking_script", inputOutput.LockingScript),
 		}, "Updating admin locking script")
+		isNewAdminLockingScript = true
 		adminLockingScript = inputOutput.LockingScript
 		formation.AdminAddress = ra.Bytes()
 		transaction.Unlock()
@@ -628,7 +644,7 @@ func (a *Agent) processContractAmendment(ctx context.Context, transaction *trans
 		return nil, platform.NewRejectError(actions.RejectionsMsgMalformed, err.Error())
 	}
 
-	formationTx := txbuilder.NewTxBuilder(a.FeeRate(), a.DustFeeRate())
+	formationTx := txbuilder.NewTxBuilder(config.FeeRate, config.DustFeeRate)
 
 	if err := formationTx.AddInput(wire.OutPoint{Hash: txid, Index: 0}, agentLockingScript,
 		contractOutput.Value); err != nil {
@@ -639,7 +655,7 @@ func (a *Agent) processContractAmendment(ctx context.Context, transaction *trans
 		return nil, errors.Wrap(err, "add contract output")
 	}
 
-	formationScript, err := protocol.Serialize(formation, isTest)
+	formationScript, err := protocol.Serialize(formation, config.IsTest)
 	if err != nil {
 		return nil, errors.Wrap(err, "serialize formation")
 	}
@@ -676,6 +692,10 @@ func (a *Agent) processContractAmendment(ctx context.Context, transaction *trans
 	contract.Formation = formation
 	contract.FormationTxID = &formationTxID
 	contract.MarkModified()
+
+	if isNewAdminLockingScript {
+		a.SetAdminLockingScript(adminLockingScript)
+	}
 
 	formationTransaction, err := a.transactions.AddRaw(ctx, formationTx.MsgTx, nil)
 	if err != nil {
@@ -761,6 +781,14 @@ func (a *Agent) processContractFormation(ctx context.Context, transaction *trans
 	a.contract.Formation = formation
 	a.contract.FormationTxID = &txid
 	a.contract.MarkModified()
+
+	adminAddress, err := bitcoin.DecodeRawAddress(formation.AdminAddress)
+	if err == nil {
+		adminLockingScript, err := adminAddress.LockingScript()
+		if err == nil {
+			a.SetAdminLockingScript(adminLockingScript)
+		}
+	}
 
 	if isFirst {
 		logger.InfoWithFields(ctx, []logger.Field{
@@ -899,13 +927,13 @@ func (a *Agent) processContractAddressChange(ctx context.Context, transaction *t
 		logger.Stringer("new_contract_locking_script", newLockingScript),
 	}, "Moving contract data to new contract in this system")
 
-	isTest := a.IsTest()
-	copyScript, err := protocol.Serialize(contract.Formation, isTest)
+	config := a.Config()
+	copyScript, err := protocol.Serialize(contract.Formation, config.IsTest)
 	if err != nil {
 		return nil, errors.Wrap(err, "serialize contract formation")
 	}
 
-	action, err := protocol.Deserialize(copyScript, isTest)
+	action, err := protocol.Deserialize(copyScript, config.IsTest)
 	if err != nil {
 		return nil, errors.Wrap(err, "deserialize contract formation")
 	}
@@ -917,12 +945,12 @@ func (a *Agent) processContractAddressChange(ctx context.Context, transaction *t
 	newContract.Formation = formation
 	newContract.FormationTxID = contract.FormationTxID
 
-	copyBodyScript, err := protocol.Serialize(contract.BodyOfAgreementFormation, isTest)
+	copyBodyScript, err := protocol.Serialize(contract.BodyOfAgreementFormation, config.IsTest)
 	if err != nil {
 		return nil, errors.Wrap(err, "serialize body of agreement formation")
 	}
 
-	bodyAction, err := protocol.Deserialize(copyBodyScript, isTest)
+	bodyAction, err := protocol.Deserialize(copyBodyScript, config.IsTest)
 	if err != nil {
 		return nil, errors.Wrap(err, "deserialize body of agreement formation")
 	}

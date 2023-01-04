@@ -93,7 +93,8 @@ func (a *Agent) processBodyOfAgreementOffer(ctx context.Context, transaction *tr
 		return nil, platform.NewRejectError(actions.RejectionsMsgMalformed, err.Error())
 	}
 
-	formationTx := txbuilder.NewTxBuilder(a.FeeRate(), a.DustFeeRate())
+	config := a.Config()
+	formationTx := txbuilder.NewTxBuilder(config.FeeRate, config.DustFeeRate)
 
 	if err := formationTx.AddInput(wire.OutPoint{Hash: txid, Index: 0}, agentLockingScript,
 		contractOutput.Value); err != nil {
@@ -104,7 +105,7 @@ func (a *Agent) processBodyOfAgreementOffer(ctx context.Context, transaction *tr
 		return nil, errors.Wrap(err, "add contract output")
 	}
 
-	formationScript, err := protocol.Serialize(formation, a.IsTest())
+	formationScript, err := protocol.Serialize(formation, config.IsTest)
 	if err != nil {
 		return nil, errors.Wrap(err, "serialize formation")
 	}
@@ -242,8 +243,9 @@ func (a *Agent) processBodyOfAgreementAmendment(ctx context.Context, transaction
 	proposalType := uint32(0)
 	votingSystem := uint32(0)
 
+	config := a.Config()
 	vote, err := fetchReferenceVote(ctx, a.caches, a.transactions, agentLockingScript,
-		amendment.RefTxID, a.IsTest())
+		amendment.RefTxID, config.IsTest)
 	if err != nil {
 		return nil, errors.Wrap(err, "fetch vote")
 	}
@@ -299,13 +301,12 @@ func (a *Agent) processBodyOfAgreementAmendment(ctx context.Context, transaction
 	}
 
 	// Copy formation to prevent modification of the original.
-	isTest := a.IsTest()
-	copyScript, err := protocol.Serialize(contract.BodyOfAgreementFormation, isTest)
+	copyScript, err := protocol.Serialize(contract.BodyOfAgreementFormation, config.IsTest)
 	if err != nil {
 		return nil, errors.Wrap(err, "serialize body of agreement formation")
 	}
 
-	action, err := protocol.Deserialize(copyScript, isTest)
+	action, err := protocol.Deserialize(copyScript, config.IsTest)
 	if err != nil {
 		return nil, errors.Wrap(err, "deserialize body of agreement formation")
 	}
@@ -330,7 +331,7 @@ func (a *Agent) processBodyOfAgreementAmendment(ctx context.Context, transaction
 		return nil, platform.NewRejectError(actions.RejectionsMsgMalformed, err.Error())
 	}
 
-	formationTx := txbuilder.NewTxBuilder(a.FeeRate(), a.DustFeeRate())
+	formationTx := txbuilder.NewTxBuilder(config.FeeRate, config.DustFeeRate)
 
 	if err := formationTx.AddInput(wire.OutPoint{Hash: txid, Index: 0}, agentLockingScript,
 		contractOutput.Value); err != nil {
@@ -341,7 +342,7 @@ func (a *Agent) processBodyOfAgreementAmendment(ctx context.Context, transaction
 		return nil, errors.Wrap(err, "add contract output")
 	}
 
-	formationScript, err := protocol.Serialize(formation, isTest)
+	formationScript, err := protocol.Serialize(formation, config.IsTest)
 	if err != nil {
 		return nil, errors.Wrap(err, "serialize formation")
 	}

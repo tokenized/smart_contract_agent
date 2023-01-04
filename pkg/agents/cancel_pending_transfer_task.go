@@ -125,7 +125,7 @@ func (a *Agent) CancelPendingTransfer(ctx context.Context,
 	defer a.transactions.Release(ctx, transferTxID)
 
 	var transfer *actions.Transfer
-	isTest := a.IsTest()
+	isTest := a.Config().IsTest
 	transferTransaction.Lock()
 	outputCount := transferTransaction.OutputCount()
 	for i := 0; i < outputCount; i++ {
