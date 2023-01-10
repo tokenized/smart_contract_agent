@@ -51,7 +51,7 @@ func NewBallotCache(cache *cacher.Cache) (*BallotCache, error) {
 	}
 
 	itemInterface := itemValue.Interface()
-	if _, ok := itemInterface.(cacher.CacheSetValue); !ok {
+	if _, ok := itemInterface.(cacher.SetValue); !ok {
 		return nil, errors.New("Type must implement CacheSetValue")
 	}
 
@@ -79,7 +79,7 @@ func (c *BallotCache) AddMulti(ctx context.Context, contractLockingScript bitcoi
 
 	pathPrefix := ballotPathPrefix(contractLockingScript, voteTxID)
 
-	values := make([]cacher.CacheSetValue, len(ballots))
+	values := make([]cacher.SetValue, len(ballots))
 	i := 0
 	for _, ballot := range ballots {
 		values[i] = ballot
@@ -236,7 +236,7 @@ func (b *Ballot) Hash() bitcoin.Hash32 {
 	return LockingScriptHash(b.LockingScript)
 }
 
-func (b *Ballot) CacheSetCopy() cacher.CacheSetValue {
+func (b *Ballot) CacheSetCopy() cacher.SetValue {
 	result := &Ballot{
 		Quantity: b.Quantity,
 		Vote:     b.Vote,

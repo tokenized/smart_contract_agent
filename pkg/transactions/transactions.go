@@ -77,7 +77,7 @@ func NewTransactionCache(cache *cacher.Cache) (*TransactionCache, error) {
 	}
 
 	itemInterface := itemValue.Interface()
-	if _, ok := itemInterface.(cacher.CacheValue); !ok {
+	if _, ok := itemInterface.(cacher.Value); !ok {
 		return nil, errors.New("Type must implement CacheValue")
 	}
 
@@ -417,7 +417,7 @@ func (tx *Transaction) IsModified() bool {
 	return tx.isModified
 }
 
-func (t *Transaction) CacheCopy() cacher.CacheValue {
+func (t *Transaction) CacheCopy() cacher.Value {
 	result := &Transaction{
 		State:        t.State,
 		MerkleProofs: t.MerkleProofs.Copy(),

@@ -656,7 +656,7 @@ func (a *Agent) postTransactionToSubscriptions(ctx context.Context, lockingScrip
 }
 
 // populateTransferSettlement adds all the new balances to the transfer settlement.
-func populateTransferSettlement(tx *txbuilder.TxBuilder,
+func populateTransferSettlement(ctx context.Context, tx *txbuilder.TxBuilder,
 	transferSettlement *actions.InstrumentSettlementField, balances state.Balances) error {
 
 	for i, balance := range balances {
@@ -665,11 +665,17 @@ func populateTransferSettlement(tx *txbuilder.TxBuilder,
 			return errors.Wrapf(err, "add locking script %d", i)
 		}
 
+		quantity := balance.SettlePendingQuantity()
 		transferSettlement.Settlements = append(transferSettlement.Settlements,
 			&actions.QuantityIndexField{
-				Quantity: balance.SettlePendingQuantity(),
+				Quantity: quantity,
 				Index:    index,
 			})
+
+		logger.InfoWithFields(ctx, []logger.Field{
+			logger.Stringer("locking_script", balance.LockingScript),
+			logger.Uint64("quantity", quantity),
+		}, "Settlement balance")
 	}
 
 	return nil
@@ -1106,7 +1112,8 @@ func (a *Agent) buildInstrumentSettlement(ctx context.Context, balances state.Ba
 		InstrumentCode: instrumentCode[:],
 	}
 
-	if err := populateTransferSettlement(settlementTx, instrumentSettlement, balances); err != nil {
+	if err := populateTransferSettlement(ctx, settlementTx, instrumentSettlement,
+		balances); err != nil {
 		return nil, errors.Wrap(err, "populate settlement")
 	}
 

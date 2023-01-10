@@ -67,7 +67,7 @@ func NewVoteCache(cache *cacher.Cache) (*VoteCache, error) {
 	}
 
 	itemInterface := itemValue.Interface()
-	if _, ok := itemInterface.(cacher.CacheValue); !ok {
+	if _, ok := itemInterface.(cacher.Value); !ok {
 		return nil, errors.New("Type must implement CacheValue")
 	}
 
@@ -616,7 +616,7 @@ func (v *Vote) IsModified() bool {
 	return v.isModified
 }
 
-func (v *Vote) CacheCopy() cacher.CacheValue {
+func (v *Vote) CacheCopy() cacher.Value {
 	result := &Vote{
 		ContractWideVote: v.ContractWideVote,
 		TokenQuantity:    v.TokenQuantity,

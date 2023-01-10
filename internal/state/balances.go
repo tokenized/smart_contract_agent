@@ -78,7 +78,7 @@ func NewBalanceCache(cache *cacher.Cache) (*BalanceCache, error) {
 	}
 
 	itemInterface := itemValue.Interface()
-	if _, ok := itemInterface.(cacher.CacheSetValue); !ok {
+	if _, ok := itemInterface.(cacher.SetValue); !ok {
 		return nil, errors.New("Type must implement CacheSetValue")
 	}
 
@@ -106,7 +106,7 @@ func (c *BalanceCache) AddMulti(ctx context.Context, contractLockingScript bitco
 
 	pathPrefix := balancePathPrefix(contractLockingScript, instrumentCode)
 
-	values := make([]cacher.CacheSetValue, len(balances))
+	values := make([]cacher.SetValue, len(balances))
 	for i, balance := range balances {
 		values[i] = balance
 	}
@@ -622,7 +622,7 @@ func (b *Balance) Hash() bitcoin.Hash32 {
 	return LockingScriptHash(b.LockingScript)
 }
 
-func (b *Balance) CacheSetCopy() cacher.CacheSetValue {
+func (b *Balance) CacheSetCopy() cacher.SetValue {
 	result := &Balance{
 		Quantity:    b.Quantity,
 		Timestamp:   b.Timestamp,

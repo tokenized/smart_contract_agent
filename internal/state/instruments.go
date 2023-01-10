@@ -59,7 +59,7 @@ func NewInstrumentCache(cache *cacher.Cache) (*InstrumentCache, error) {
 	}
 
 	itemInterface := itemValue.Interface()
-	if _, ok := itemInterface.(cacher.CacheValue); !ok {
+	if _, ok := itemInterface.(cacher.Value); !ok {
 		return nil, errors.New("Type must implement CacheValue")
 	}
 
@@ -217,7 +217,7 @@ func (i *Instrument) IsModified() bool {
 	return i.isModified
 }
 
-func (i *Instrument) CacheCopy() cacher.CacheValue {
+func (i *Instrument) CacheCopy() cacher.Value {
 	result := &Instrument{}
 
 	copy(result.InstrumentType[:], i.InstrumentType[:])

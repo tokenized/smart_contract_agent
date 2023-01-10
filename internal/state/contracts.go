@@ -67,7 +67,7 @@ func NewContractCache(cache *cacher.Cache) (*ContractCache, error) {
 	}
 
 	itemInterface := itemValue.Interface()
-	if _, ok := itemInterface.(cacher.CacheValue); !ok {
+	if _, ok := itemInterface.(cacher.Value); !ok {
 		return nil, errors.New("Type must implement CacheValue")
 	}
 
@@ -245,7 +245,7 @@ func (c *Contract) IsModified() bool {
 	return c.isModified
 }
 
-func (c *Contract) CacheCopy() cacher.CacheValue {
+func (c *Contract) CacheCopy() cacher.Value {
 	result := &Contract{
 		InstrumentCount: c.InstrumentCount,
 	}

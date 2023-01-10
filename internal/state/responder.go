@@ -47,7 +47,7 @@ func NewResponderCache(cache *cacher.Cache) (*ResponderCache, error) {
 	}
 
 	itemInterface := itemValue.Interface()
-	if _, ok := itemInterface.(cacher.CacheValue); !ok {
+	if _, ok := itemInterface.(cacher.Value); !ok {
 		return nil, errors.New("Type must implement CacheValue")
 	}
 
@@ -129,7 +129,7 @@ func (r *Responder) IsModified() bool {
 	return r.isModified
 }
 
-func (r *Responder) CacheCopy() cacher.CacheValue {
+func (r *Responder) CacheCopy() cacher.Value {
 	return r.Copy()
 }
 

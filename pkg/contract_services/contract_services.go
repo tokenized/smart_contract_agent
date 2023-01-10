@@ -62,7 +62,7 @@ func NewContractServicesCache(cache *cacher.Cache) (*ContractServicesCache, erro
 	}
 
 	itemInterface := itemValue.Interface()
-	if _, ok := itemInterface.(cacher.CacheValue); !ok {
+	if _, ok := itemInterface.(cacher.Value); !ok {
 		return nil, errors.New("Type must implement CacheValue")
 	}
 
@@ -186,7 +186,7 @@ func (c *ContractServices) IsModified() bool {
 	return c.isModified
 }
 
-func (s *ContractServices) CacheCopy() cacher.CacheValue {
+func (s *ContractServices) CacheCopy() cacher.Value {
 	result := &ContractServices{
 		Services: make([]*Service, len(s.Services)),
 	}

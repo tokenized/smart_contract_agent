@@ -55,7 +55,7 @@ func NewRecoveryTransactionsCache(cache *cacher.Cache) (*RecoveryTransactionsCac
 	}
 
 	itemInterface := itemValue.Interface()
-	if _, ok := itemInterface.(cacher.CacheValue); !ok {
+	if _, ok := itemInterface.(cacher.Value); !ok {
 		return nil, errors.New("Type must implement CacheValue")
 	}
 
@@ -170,7 +170,7 @@ func (txs *RecoveryTransactions) IsModified() bool {
 	return txs.isModified
 }
 
-func (txs *RecoveryTransactions) CacheCopy() cacher.CacheValue {
+func (txs *RecoveryTransactions) CacheCopy() cacher.Value {
 	return txs.Copy()
 }
 

@@ -41,6 +41,7 @@ type SubscriptionValue interface {
 
 	// Object has been modified since last write to storage.
 	IsModified() bool
+	MarkModified()
 	ClearModified()
 
 	// Storage path and serialization.
@@ -48,7 +49,7 @@ type SubscriptionValue interface {
 	Serialize(w io.Writer) error
 	Deserialize(r io.Reader) error
 
-	CacheSetCopy() cacher.CacheSetValue
+	CacheSetCopy() cacher.SetValue
 
 	// All functions will be called by cache while the object is locked.
 	Lock()
@@ -77,7 +78,7 @@ func NewSubscriptionCache(cache *cacher.Cache) (*SubscriptionCache, error) {
 	}
 
 	itemInterface := itemValue.Interface()
-	if _, ok := itemInterface.(cacher.CacheSetValue); !ok {
+	if _, ok := itemInterface.(cacher.SetValue); !ok {
 		return nil, errors.New("Type must implement CacheSetValue")
 	}
 
@@ -105,7 +106,7 @@ func (c *SubscriptionCache) AddMulti(ctx context.Context, contractLockingScript 
 
 	pathPrefix := subscriptionPathPrefix(contractLockingScript)
 
-	values := make([]cacher.CacheSetValue, len(subscriptions))
+	values := make([]cacher.SetValue, len(subscriptions))
 	for i, subscription := range subscriptions {
 		values[i] = subscription
 	}
@@ -251,7 +252,7 @@ func (s *Subscription) Hash() bitcoin.Hash32 {
 	return s.value.Hash()
 }
 
-func (s *Subscription) CacheSetCopy() cacher.CacheSetValue {
+func (s *Subscription) CacheSetCopy() cacher.SetValue {
 	return s.value.CacheSetCopy()
 }
 
@@ -314,7 +315,7 @@ func (s *LockingScriptSubscription) ClearModified() {
 	s.isModified = false
 }
 
-func (s *LockingScriptSubscription) CacheSetCopy() cacher.CacheSetValue {
+func (s *LockingScriptSubscription) CacheSetCopy() cacher.SetValue {
 	result := &LockingScriptSubscription{
 		LockingScript: make(bitcoin.Script, len(s.LockingScript)),
 	}
