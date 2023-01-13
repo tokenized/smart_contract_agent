@@ -194,13 +194,6 @@ func (a *Agent) FeeLockingScript() bitcoin.Script {
 	return a.data.FeeLockingScript.Copy()
 }
 
-func (a *Agent) SetFeeLockingScript(lockingScript bitcoin.Script) {
-	a.dataLock.Lock()
-	defer a.dataLock.Unlock()
-
-	a.data.FeeLockingScript = lockingScript.Copy()
-}
-
 func (a *Agent) RequestPeerChannel() *peer_channels.Channel {
 	a.dataLock.Lock()
 	defer a.dataLock.Unlock()

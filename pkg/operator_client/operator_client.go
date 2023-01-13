@@ -33,14 +33,14 @@ func WrapRequest(msg channels.Writer, id uuid.UUID, replyPeerChannel peer_channe
 		PeerChannel: &replyPeerChannel,
 	}
 
-	signature := channels.NewSignature(key, channelsWallet.RandomHashPtr(), false)
-
-	return channels.Wrap(msg, replyTo, signature)
+	signature := channels.NewSignature(key, channelsWallet.RandomHashPtr(), true)
+	uuid := channels.UUID(id)
+	return channels.Wrap(msg, replyTo, &uuid, signature)
 }
 
 func UnwrapRequest(script bitcoin.Script) (*Request, error) {
 	protocols := channels.NewProtocols(channels.NewSignedProtocol(),
-		channels.NewReplyToProtocol(), contract_operator.NewProtocol())
+		channels.NewReplyToProtocol(), channels.NewUUIDProtocol(), contract_operator.NewProtocol())
 
 	msg, wrappers, err := protocols.Parse(script)
 	if err != nil {
@@ -57,16 +57,16 @@ func UnwrapRequest(script bitcoin.Script) (*Request, error) {
 	}
 
 	if len(wrappers) > 0 {
-		if reply, ok := wrappers[0].(*channels.ReplyTo); ok {
-			result.ReplyTo = reply
+		if id, ok := wrappers[0].(*channels.UUID); ok {
+			uuid := uuid.UUID(*id)
+			result.ID = &uuid
 			wrappers = wrappers[1:]
 		}
 	}
 
 	if len(wrappers) > 0 {
-		if id, ok := wrappers[0].(*channels.UUID); ok {
-			uuid := uuid.UUID(*id)
-			result.ID = &uuid
+		if reply, ok := wrappers[0].(*channels.ReplyTo); ok {
+			result.ReplyTo = reply
 			wrappers = wrappers[1:]
 		}
 	}
@@ -85,12 +85,12 @@ func WrapResponse(msg channels.Writer, id uuid.UUID, response *channels.Response
 
 	signature := channels.NewSignature(key, channelsWallet.RandomHashPtr(), false)
 	uuid := channels.UUID(id)
-	return channels.Wrap(msg, &uuid, response, signature)
+	return channels.Wrap(msg, response, &uuid, signature)
 }
 
 func UnwrapResponse(script bitcoin.Script) (*Response, error) {
 	protocols := channels.NewProtocols(channels.NewSignedProtocol(),
-		channels.NewResponseProtocol(), contract_operator.NewProtocol())
+		channels.NewResponseProtocol(), channels.NewUUIDProtocol(), contract_operator.NewProtocol())
 
 	msg, wrappers, err := protocols.Parse(script)
 	if err != nil {
@@ -103,13 +103,8 @@ func UnwrapResponse(script bitcoin.Script) (*Response, error) {
 		if sig, ok := wrappers[0].(*channels.Signature); ok {
 			result.Signature = sig
 			wrappers = wrappers[1:]
-		}
-	}
-
-	if len(wrappers) > 0 {
-		if res, ok := wrappers[0].(*channels.Response); ok {
-			result.Response = res
-			wrappers = wrappers[1:]
+		} else {
+			println("wrapper not signature")
 		}
 	}
 
@@ -118,6 +113,17 @@ func UnwrapResponse(script bitcoin.Script) (*Response, error) {
 			uuid := uuid.UUID(*id)
 			result.ID = &uuid
 			wrappers = wrappers[1:]
+		} else {
+			println("wrapper not id")
+		}
+	}
+
+	if len(wrappers) > 0 {
+		if res, ok := wrappers[0].(*channels.Response); ok {
+			result.Response = res
+			wrappers = wrappers[1:]
+		} else {
+			println("wrapper not response")
 		}
 	}
 
@@ -126,6 +132,14 @@ func UnwrapResponse(script bitcoin.Script) (*Response, error) {
 			wrappers[0].ProtocolID())
 	}
 
-	result.Msg = msg
+	// If there is no main message payload then the parser will read the last wrapper into msg.
+	if res, ok := msg.(*channels.Response); ok {
+		result.Response = res
+		println("msg is response")
+	} else {
+		result.Msg = msg
+		println("msg is not response")
+	}
+
 	return result, nil
 }

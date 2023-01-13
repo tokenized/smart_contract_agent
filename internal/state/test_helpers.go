@@ -90,7 +90,7 @@ func StartTestCaches(ctx context.Context, t *testing.T, store storage.StreamStor
 			}
 
 			result.Wait.Done()
-			t.Logf("Locker finished")
+			// t.Logf("Locker finished")
 		}()
 
 		result.Wait.Add(1)
@@ -121,7 +121,7 @@ func StartTestCaches(ctx context.Context, t *testing.T, store storage.StreamStor
 			}
 
 		case <-result.StartShutdown:
-			t.Logf("Cache start shutdown triggered")
+			// t.Logf("Cache start shutdown triggered")
 		}
 	}()
 

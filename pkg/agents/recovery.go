@@ -7,6 +7,7 @@ import (
 	"github.com/tokenized/logger"
 	"github.com/tokenized/pkg/bitcoin"
 	"github.com/tokenized/smart_contract_agent/internal/state"
+	"github.com/tokenized/threads"
 
 	"github.com/google/uuid"
 	"github.com/pkg/errors"
@@ -88,7 +89,7 @@ func (a *Agent) removeRecoveryRequest(ctx context.Context, txid bitcoin.Hash32,
 	return result, nil
 }
 
-func (a *Agent) ProcessRecoveryRequests(ctx context.Context) error {
+func (a *Agent) ProcessRecoveryRequests(ctx context.Context, interrupt <-chan interface{}) error {
 	ctx = logger.ContextWithLogFields(ctx, logger.Stringer("recovery", uuid.New()))
 
 	agentLockingScript := a.LockingScript()
@@ -122,6 +123,12 @@ func (a *Agent) ProcessRecoveryRequests(ctx context.Context) error {
 	}, "Processing recovery requests")
 
 	for _, request := range copyTxs.Transactions {
+		select {
+		case <-interrupt:
+			return threads.Interrupted
+		default:
+		}
+
 		if err := a.processRecoveryRequest(ctx, request); err != nil {
 			return errors.Wrapf(err, "process recovery request: %s", request.TxID)
 		}

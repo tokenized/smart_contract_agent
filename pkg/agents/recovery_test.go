@@ -160,7 +160,8 @@ func Test_Recovery_AcceptContractOffer(t *testing.T) {
 	config := agent.Config()
 	config.RecoveryMode = false
 	agent.SetConfig(config)
-	if err := agent.ProcessRecoveryRequests(ctx); err != nil {
+	recoverInterrupt := make(chan interface{})
+	if err := agent.ProcessRecoveryRequests(ctx, recoverInterrupt); err != nil {
 		t.Fatalf("Failed to process recovery requests : %s", err)
 	}
 
@@ -441,7 +442,8 @@ func Test_Recovery_ContractOfferAlreadyAccepted(t *testing.T) {
 	config := agent.Config()
 	config.RecoveryMode = false
 	agent.SetConfig(config)
-	if err := agent.ProcessRecoveryRequests(ctx); err != nil {
+	recoverInterrupt := make(chan interface{})
+	if err := agent.ProcessRecoveryRequests(ctx, recoverInterrupt); err != nil {
 		t.Fatalf("Failed to process recovery requests : %s", err)
 	}
 
