@@ -87,6 +87,8 @@ type Agent struct {
 	fetcher     Fetcher
 	headers     BlockHeaders
 
+	peerChannelResponses chan PeerChannelResponse
+
 	// scheduler and store are used to schedule tasks that spawn a new agent and perform a
 	// function. For example, vote finalization and multi-contract transfer expiration.
 	scheduler  *scheduler.Scheduler
@@ -118,7 +120,8 @@ func NewAgent(ctx context.Context, data AgentData, config Config, caches *state.
 	transactions *transactions.TransactionCache, services *contract_services.ContractServicesCache,
 	locker locker.Locker, store storage.CopyList, broadcaster Broadcaster, fetcher Fetcher,
 	headers BlockHeaders, scheduler *scheduler.Scheduler, agentStore Store,
-	peerChannelsFactory *peer_channels.Factory) (*Agent, error) {
+	peerChannelsFactory *peer_channels.Factory,
+	peerChannelResponses chan PeerChannelResponse) (*Agent, error) {
 
 	newContract := &state.Contract{
 		LockingScript: data.LockingScript,
@@ -130,19 +133,20 @@ func NewAgent(ctx context.Context, data AgentData, config Config, caches *state.
 	}
 
 	result := &Agent{
-		data:                data,
-		contract:            contract,
-		caches:              caches,
-		transactions:        transactions,
-		services:            services,
-		locker:              locker,
-		store:               store,
-		broadcaster:         broadcaster,
-		fetcher:             fetcher,
-		headers:             headers,
-		scheduler:           scheduler,
-		agentStore:          agentStore,
-		peerChannelsFactory: peerChannelsFactory,
+		data:                 data,
+		contract:             contract,
+		caches:               caches,
+		transactions:         transactions,
+		services:             services,
+		locker:               locker,
+		store:                store,
+		broadcaster:          broadcaster,
+		fetcher:              fetcher,
+		headers:              headers,
+		scheduler:            scheduler,
+		agentStore:           agentStore,
+		peerChannelsFactory:  peerChannelsFactory,
+		peerChannelResponses: peerChannelResponses,
 	}
 
 	result.config.Store(config)

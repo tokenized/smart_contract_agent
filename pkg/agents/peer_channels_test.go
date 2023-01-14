@@ -8,7 +8,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tokenized/cacher"
 	"github.com/tokenized/channels"
 	channelsExpandedTx "github.com/tokenized/channels/expanded_tx"
 	envelopeV1 "github.com/tokenized/envelope/pkg/golang/envelope/v1"
@@ -16,11 +15,9 @@ import (
 	"github.com/tokenized/pkg/bitcoin"
 	"github.com/tokenized/pkg/expanded_tx"
 	"github.com/tokenized/pkg/peer_channels"
-	"github.com/tokenized/pkg/storage"
 	"github.com/tokenized/pkg/txbuilder"
 	"github.com/tokenized/smart_contract_agent/internal/state"
 	"github.com/tokenized/smart_contract_agent/pkg/client"
-	"github.com/tokenized/smart_contract_agent/pkg/locker"
 	"github.com/tokenized/smart_contract_agent/pkg/transactions"
 	"github.com/tokenized/specification/dist/golang/actions"
 	"github.com/tokenized/specification/dist/golang/protocol"
@@ -30,16 +27,16 @@ import (
 
 func Test_Responder_Response(t *testing.T) {
 	ctx := logger.ContextWithLogger(context.Background(), true, true, "")
-	store := storage.NewMockStorage()
-	broadcaster := state.NewMockTxBroadcaster()
-	peerChannelsFactory := peer_channels.NewFactory()
-	mockClient := peerChannelsFactory.MockClient()
-	accountID, accountToken, err := mockClient.CreateAccount(ctx)
+	agent, test := StartTestAgentWithInstrument(ctx, t)
+
+	mockClient := test.peerChannelsFactory.MockClient()
+	account, err := mockClient.CreateAccount(ctx)
 	if err != nil {
 		t.Fatalf("Failed to create peer channels account : %s", err)
 	}
 
-	accountClient := peer_channels.NewMockAccountClient(mockClient, *accountID, *accountToken)
+	accountClient := peer_channels.NewMockAccountClient(mockClient, account.AccountID,
+		account.Token)
 
 	peerChannelData, err := accountClient.CreateChannel(ctx)
 	if err != nil {
@@ -52,31 +49,10 @@ func Test_Responder_Response(t *testing.T) {
 		t.Fatalf("Failed new peer channel : %s", err)
 	}
 
-	caches := StartTestCaches(ctx, t, store, cacher.DefaultConfig(), time.Second)
-	locker := locker.NewInlineLocker()
-
-	contractKey, contractLockingScript, adminKey, adminLockingScript, contract, instrument := state.MockInstrument(ctx,
-		&caches.TestCaches)
-	_, feeLockingScript, _ := state.MockKey()
-
-	agentData := AgentData{
-		Key:              contractKey,
-		LockingScript:    contractLockingScript,
-		ContractFee:      contract.Formation.ContractFee,
-		FeeLockingScript: feeLockingScript,
-		IsActive:         true,
-	}
-
-	agent, err := NewAgent(ctx, agentData, DefaultConfig(), caches.Caches, caches.Transactions,
-		caches.Services, locker, store, broadcaster, nil, nil, nil, nil, peerChannelsFactory)
-	if err != nil {
-		t.Fatalf("Failed to create agent : %s", err)
-	}
-
 	instrumentTransfer := &actions.InstrumentTransferField{
 		ContractIndex:  0,
-		InstrumentType: string(instrument.InstrumentType[:]),
-		InstrumentCode: instrument.InstrumentCode[:],
+		InstrumentType: string(test.instrument.InstrumentType[:]),
+		InstrumentCode: test.instrument.InstrumentCode[:],
 	}
 
 	transfer := &actions.Transfer{
@@ -97,13 +73,13 @@ func Test_Responder_Response(t *testing.T) {
 		})
 
 	// Add input
-	outpoint := state.MockOutPoint(adminLockingScript, 1)
+	outpoint := state.MockOutPoint(test.adminLockingScript, 1)
 	spentOutputs = append(spentOutputs, &expanded_tx.Output{
-		LockingScript: adminLockingScript,
+		LockingScript: test.adminLockingScript,
 		Value:         1,
 	})
 
-	if err := tx.AddInput(*outpoint, adminLockingScript, 1); err != nil {
+	if err := tx.AddInput(*outpoint, test.adminLockingScript, 1); err != nil {
 		t.Fatalf("Failed to add input : %s", err)
 	}
 
@@ -117,7 +93,7 @@ func Test_Responder_Response(t *testing.T) {
 		})
 
 	// Add contract output
-	if err := tx.AddOutput(contractLockingScript, 200, false, false); err != nil {
+	if err := tx.AddOutput(test.contractLockingScript, 200, false, false); err != nil {
 		t.Fatalf("Failed to add contract output : %s", err)
 	}
 
@@ -147,7 +123,7 @@ func Test_Responder_Response(t *testing.T) {
 	_, changeLockingScript, _ := state.MockKey()
 	tx.SetChangeLockingScript(changeLockingScript, "")
 
-	if _, err := tx.Sign([]bitcoin.Key{adminKey, fundingKey}); err != nil {
+	if _, err := tx.Sign([]bitcoin.Key{test.adminKey, fundingKey}); err != nil {
 		t.Fatalf("Failed to sign tx : %s", err)
 	}
 
@@ -164,20 +140,20 @@ func Test_Responder_Response(t *testing.T) {
 		SpentOutputs: spentOutputs,
 	}
 
-	transaction, err := caches.Transactions.Add(ctx, addTransaction)
+	transaction, err := test.caches.Transactions.Add(ctx, addTransaction)
 	if err != nil {
 		t.Fatalf("Failed to add transaction : %s", err)
 	}
 
 	if err := agent.Process(ctx, transaction, []Action{{
-		AgentLockingScripts: []bitcoin.Script{contractLockingScript},
+		AgentLockingScripts: []bitcoin.Script{test.contractLockingScript},
 		OutputIndex:         transferScriptOutputIndex,
 		Action:              transfer,
 	}}); err != nil {
 		t.Fatalf("Failed to process transaction : %s", err)
 	}
 
-	caches.Transactions.Release(ctx, requestTxID)
+	test.caches.Transactions.Release(ctx, requestTxID)
 
 	responseMessages, err := mockClient.GetMessages(ctx, peerChannelData.ID,
 		peerChannelData.ReadToken, true, 5)
@@ -216,24 +192,21 @@ func Test_Responder_Response(t *testing.T) {
 	etx := expanded_tx.ExpandedTx(*cetx)
 	t.Logf("Response tx : %s", etx.String())
 
-	agent.Release(ctx)
-	caches.Caches.Instruments.Release(ctx, contractLockingScript, instrument.InstrumentCode)
-	caches.Caches.Contracts.Release(ctx, contractLockingScript)
-	caches.StopTestCaches()
+	StopTestAgent(ctx, t, test)
 }
 
 func Test_Responder_Request(t *testing.T) {
 	ctx := logger.ContextWithLogger(context.Background(), true, true, "")
-	store := storage.NewMockStorage()
-	broadcaster := state.NewMockTxBroadcaster()
-	peerChannelsFactory := peer_channels.NewFactory()
-	mockClient := peerChannelsFactory.MockClient()
-	accountID, accountToken, err := mockClient.CreateAccount(ctx)
+	agent, test := StartTestAgentWithInstrument(ctx, t)
+
+	mockClient := test.peerChannelsFactory.MockClient()
+	account, err := mockClient.CreateAccount(ctx)
 	if err != nil {
 		t.Fatalf("Failed to create peer channels account : %s", err)
 	}
 
-	accountClient := peer_channels.NewMockAccountClient(mockClient, *accountID, *accountToken)
+	accountClient := peer_channels.NewMockAccountClient(mockClient, account.AccountID,
+		account.Token)
 
 	peerChannelData, err := accountClient.CreateChannel(ctx)
 	if err != nil {
@@ -246,31 +219,10 @@ func Test_Responder_Request(t *testing.T) {
 		t.Fatalf("Failed new peer channel : %s", err)
 	}
 
-	caches := StartTestCaches(ctx, t, store, cacher.DefaultConfig(), time.Second)
-	locker := locker.NewInlineLocker()
-
-	contractKey, contractLockingScript, adminKey, adminLockingScript, contract, instrument := state.MockInstrument(ctx,
-		&caches.TestCaches)
-	_, feeLockingScript, _ := state.MockKey()
-
-	agentData := AgentData{
-		Key:              contractKey,
-		LockingScript:    contractLockingScript,
-		ContractFee:      contract.Formation.ContractFee,
-		FeeLockingScript: feeLockingScript,
-		IsActive:         true,
-	}
-
-	agent, err := NewAgent(ctx, agentData, DefaultConfig(), caches.Caches, caches.Transactions,
-		caches.Services, locker, store, broadcaster, nil, nil, nil, nil, peerChannelsFactory)
-	if err != nil {
-		t.Fatalf("Failed to create agent : %s", err)
-	}
-
 	instrumentTransfer := &actions.InstrumentTransferField{
 		ContractIndex:  0,
-		InstrumentType: string(instrument.InstrumentType[:]),
-		InstrumentCode: instrument.InstrumentCode[:],
+		InstrumentType: string(test.instrument.InstrumentType[:]),
+		InstrumentCode: test.instrument.InstrumentCode[:],
 	}
 
 	transfer := &actions.Transfer{
@@ -291,13 +243,13 @@ func Test_Responder_Request(t *testing.T) {
 		})
 
 	// Add input
-	adminTx, outpoint := state.MockOutPointTx(adminLockingScript, 1)
+	adminTx, outpoint := state.MockOutPointTx(test.adminLockingScript, 1)
 	spentOutputs = append(spentOutputs, &expanded_tx.Output{
-		LockingScript: adminLockingScript,
+		LockingScript: test.adminLockingScript,
 		Value:         1,
 	})
 
-	if err := tx.AddInput(*outpoint, adminLockingScript, 1); err != nil {
+	if err := tx.AddInput(*outpoint, test.adminLockingScript, 1); err != nil {
 		t.Fatalf("Failed to add input : %s", err)
 	}
 
@@ -311,7 +263,7 @@ func Test_Responder_Request(t *testing.T) {
 		})
 
 	// Add contract output
-	if err := tx.AddOutput(contractLockingScript, 200, false, false); err != nil {
+	if err := tx.AddOutput(test.contractLockingScript, 200, false, false); err != nil {
 		t.Fatalf("Failed to add contract output : %s", err)
 	}
 
@@ -341,7 +293,7 @@ func Test_Responder_Request(t *testing.T) {
 	_, changeLockingScript, _ := state.MockKey()
 	tx.SetChangeLockingScript(changeLockingScript, "")
 
-	if _, err := tx.Sign([]bitcoin.Key{adminKey, fundingKey}); err != nil {
+	if _, err := tx.Sign([]bitcoin.Key{test.adminKey, fundingKey}); err != nil {
 		t.Fatalf("Failed to sign tx : %s", err)
 	}
 	requestTxID := *tx.MsgTx.TxHash()
@@ -380,7 +332,7 @@ func Test_Responder_Request(t *testing.T) {
 		t.Fatalf("Failed to process message : %s", err)
 	}
 
-	transaction, err := caches.Transactions.Get(ctx, requestTxID)
+	transaction, err := test.caches.Transactions.Get(ctx, requestTxID)
 	if err != nil {
 		t.Fatalf("Failed to add transaction : %s", err)
 	}
@@ -390,14 +342,16 @@ func Test_Responder_Request(t *testing.T) {
 	}
 
 	if err := agent.Process(ctx, transaction, []Action{{
-		AgentLockingScripts: []bitcoin.Script{contractLockingScript},
+		AgentLockingScripts: []bitcoin.Script{test.contractLockingScript},
 		OutputIndex:         transferScriptOutputIndex,
 		Action:              transfer,
 	}}); err != nil {
 		t.Fatalf("Failed to process transaction : %s", err)
 	}
 
-	caches.Transactions.Release(ctx, requestTxID)
+	test.caches.Transactions.Release(ctx, requestTxID)
+
+	time.Sleep(100 * time.Millisecond)
 
 	responseMessages, err := mockClient.GetMessages(ctx, peerChannelData.ID,
 		peerChannelData.ReadToken, true, 5)
@@ -431,24 +385,21 @@ func Test_Responder_Request(t *testing.T) {
 
 	t.Logf("Response tx : %s", response.Tx.String())
 
-	agent.Release(ctx)
-	caches.Caches.Instruments.Release(ctx, contractLockingScript, instrument.InstrumentCode)
-	caches.Caches.Contracts.Release(ctx, contractLockingScript)
-	caches.StopTestCaches()
+	StopTestAgent(ctx, t, test)
 }
 
 func Test_Responder_AlreadyProcessed(t *testing.T) {
 	ctx := logger.ContextWithLogger(context.Background(), true, true, "")
-	store := storage.NewMockStorage()
-	broadcaster := state.NewMockTxBroadcaster()
-	peerChannelsFactory := peer_channels.NewFactory()
-	mockClient := peerChannelsFactory.MockClient()
-	accountID, accountToken, err := mockClient.CreateAccount(ctx)
+	agent, test := StartTestAgentWithInstrument(ctx, t)
+
+	mockClient := test.peerChannelsFactory.MockClient()
+	account, err := mockClient.CreateAccount(ctx)
 	if err != nil {
 		t.Fatalf("Failed to create peer channels account : %s", err)
 	}
 
-	accountClient := peer_channels.NewMockAccountClient(mockClient, *accountID, *accountToken)
+	accountClient := peer_channels.NewMockAccountClient(mockClient, account.AccountID,
+		account.Token)
 
 	peerChannelData, err := accountClient.CreateChannel(ctx)
 	if err != nil {
@@ -461,31 +412,10 @@ func Test_Responder_AlreadyProcessed(t *testing.T) {
 		t.Fatalf("Failed new peer channel : %s", err)
 	}
 
-	caches := StartTestCaches(ctx, t, store, cacher.DefaultConfig(), time.Second)
-	locker := locker.NewInlineLocker()
-
-	contractKey, contractLockingScript, adminKey, adminLockingScript, contract, instrument := state.MockInstrument(ctx,
-		&caches.TestCaches)
-	_, feeLockingScript, _ := state.MockKey()
-
-	agentData := AgentData{
-		Key:              contractKey,
-		LockingScript:    contractLockingScript,
-		ContractFee:      contract.Formation.ContractFee,
-		FeeLockingScript: feeLockingScript,
-		IsActive:         true,
-	}
-
-	agent, err := NewAgent(ctx, agentData, DefaultConfig(), caches.Caches, caches.Transactions,
-		caches.Services, locker, store, broadcaster, nil, nil, nil, nil, peerChannelsFactory)
-	if err != nil {
-		t.Fatalf("Failed to create agent : %s", err)
-	}
-
 	instrumentTransfer := &actions.InstrumentTransferField{
 		ContractIndex:  0,
-		InstrumentType: string(instrument.InstrumentType[:]),
-		InstrumentCode: instrument.InstrumentCode[:],
+		InstrumentType: string(test.instrument.InstrumentType[:]),
+		InstrumentCode: test.instrument.InstrumentCode[:],
 	}
 
 	transfer := &actions.Transfer{
@@ -506,13 +436,13 @@ func Test_Responder_AlreadyProcessed(t *testing.T) {
 		})
 
 	// Add input
-	adminTx, outpoint := state.MockOutPointTx(adminLockingScript, 1)
+	adminTx, outpoint := state.MockOutPointTx(test.adminLockingScript, 1)
 	spentOutputs = append(spentOutputs, &expanded_tx.Output{
-		LockingScript: adminLockingScript,
+		LockingScript: test.adminLockingScript,
 		Value:         1,
 	})
 
-	if err := tx.AddInput(*outpoint, adminLockingScript, 1); err != nil {
+	if err := tx.AddInput(*outpoint, test.adminLockingScript, 1); err != nil {
 		t.Fatalf("Failed to add input : %s", err)
 	}
 
@@ -526,7 +456,7 @@ func Test_Responder_AlreadyProcessed(t *testing.T) {
 		})
 
 	// Add contract output
-	if err := tx.AddOutput(contractLockingScript, 200, false, false); err != nil {
+	if err := tx.AddOutput(test.contractLockingScript, 200, false, false); err != nil {
 		t.Fatalf("Failed to add contract output : %s", err)
 	}
 
@@ -556,7 +486,7 @@ func Test_Responder_AlreadyProcessed(t *testing.T) {
 	_, changeLockingScript, _ := state.MockKey()
 	tx.SetChangeLockingScript(changeLockingScript, "")
 
-	if _, err := tx.Sign([]bitcoin.Key{adminKey, fundingKey}); err != nil {
+	if _, err := tx.Sign([]bitcoin.Key{test.adminKey, fundingKey}); err != nil {
 		t.Fatalf("Failed to sign tx : %s", err)
 	}
 	requestTxID := *tx.MsgTx.TxHash()
@@ -576,20 +506,20 @@ func Test_Responder_AlreadyProcessed(t *testing.T) {
 
 	t.Logf("Created tx : %s", requestEtx)
 
-	transaction, err := caches.Transactions.AddExpandedTx(ctx, requestEtx)
+	transaction, err := test.caches.Transactions.AddExpandedTx(ctx, requestEtx)
 	if err != nil {
 		t.Fatalf("Failed to add transaction : %s", err)
 	}
 
 	if err := agent.Process(ctx, transaction, []Action{{
-		AgentLockingScripts: []bitcoin.Script{contractLockingScript},
+		AgentLockingScripts: []bitcoin.Script{test.contractLockingScript},
 		OutputIndex:         transferScriptOutputIndex,
 		Action:              transfer,
 	}}); err != nil {
 		t.Fatalf("Failed to process transaction : %s", err)
 	}
 
-	caches.Transactions.Release(ctx, requestTxID)
+	test.caches.Transactions.Release(ctx, requestTxID)
 
 	script, err := client.WrapRequest(requestEtx, writePeerChannel)
 	if err != nil {
@@ -640,24 +570,21 @@ func Test_Responder_AlreadyProcessed(t *testing.T) {
 
 	t.Logf("Response tx : %s", response.Tx.String())
 
-	agent.Release(ctx)
-	caches.Caches.Instruments.Release(ctx, contractLockingScript, instrument.InstrumentCode)
-	caches.Caches.Contracts.Release(ctx, contractLockingScript)
-	caches.StopTestCaches()
+	StopTestAgent(ctx, t, test)
 }
 
 func Test_Responder_Reject(t *testing.T) {
 	ctx := logger.ContextWithLogger(context.Background(), true, true, "")
-	store := storage.NewMockStorage()
-	broadcaster := state.NewMockTxBroadcaster()
-	peerChannelsFactory := peer_channels.NewFactory()
-	mockClient := peerChannelsFactory.MockClient()
-	accountID, accountToken, err := mockClient.CreateAccount(ctx)
+	agent, test := StartTestAgentWithInstrument(ctx, t)
+
+	mockClient := test.peerChannelsFactory.MockClient()
+	account, err := mockClient.CreateAccount(ctx)
 	if err != nil {
 		t.Fatalf("Failed to create peer channels account : %s", err)
 	}
 
-	accountClient := peer_channels.NewMockAccountClient(mockClient, *accountID, *accountToken)
+	accountClient := peer_channels.NewMockAccountClient(mockClient, account.AccountID,
+		account.Token)
 
 	peerChannelData, err := accountClient.CreateChannel(ctx)
 	if err != nil {
@@ -670,31 +597,10 @@ func Test_Responder_Reject(t *testing.T) {
 		t.Fatalf("Failed new peer channel : %s", err)
 	}
 
-	caches := StartTestCaches(ctx, t, store, cacher.DefaultConfig(), time.Second)
-	locker := locker.NewInlineLocker()
-
-	contractKey, contractLockingScript, adminKey, adminLockingScript, contract, instrument := state.MockInstrument(ctx,
-		&caches.TestCaches)
-	_, feeLockingScript, _ := state.MockKey()
-
-	agentData := AgentData{
-		Key:              contractKey,
-		LockingScript:    contractLockingScript,
-		ContractFee:      contract.Formation.ContractFee,
-		FeeLockingScript: feeLockingScript,
-		IsActive:         true,
-	}
-
-	agent, err := NewAgent(ctx, agentData, DefaultConfig(), caches.Caches, caches.Transactions,
-		caches.Services, locker, store, broadcaster, nil, nil, nil, nil, peerChannelsFactory)
-	if err != nil {
-		t.Fatalf("Failed to create agent : %s", err)
-	}
-
 	instrumentTransfer := &actions.InstrumentTransferField{
 		ContractIndex:  0,
-		InstrumentType: string(instrument.InstrumentType[:]),
-		InstrumentCode: instrument.InstrumentCode[:],
+		InstrumentType: string(test.instrument.InstrumentType[:]),
+		InstrumentCode: test.instrument.InstrumentCode[:],
 	}
 
 	transfer := &actions.Transfer{
@@ -715,13 +621,13 @@ func Test_Responder_Reject(t *testing.T) {
 		})
 
 	// Add input
-	adminTx, outpoint := state.MockOutPointTx(adminLockingScript, 1)
+	adminTx, outpoint := state.MockOutPointTx(test.adminLockingScript, 1)
 	spentOutputs = append(spentOutputs, &expanded_tx.Output{
-		LockingScript: adminLockingScript,
+		LockingScript: test.adminLockingScript,
 		Value:         1,
 	})
 
-	if err := tx.AddInput(*outpoint, adminLockingScript, 1); err != nil {
+	if err := tx.AddInput(*outpoint, test.adminLockingScript, 1); err != nil {
 		t.Fatalf("Failed to add input : %s", err)
 	}
 
@@ -735,7 +641,7 @@ func Test_Responder_Reject(t *testing.T) {
 		})
 
 	// Add contract output
-	if err := tx.AddOutput(contractLockingScript, 200, false, false); err != nil {
+	if err := tx.AddOutput(test.contractLockingScript, 200, false, false); err != nil {
 		t.Fatalf("Failed to add contract output : %s", err)
 	}
 
@@ -764,7 +670,7 @@ func Test_Responder_Reject(t *testing.T) {
 	_, changeLockingScript, _ := state.MockKey()
 	tx.SetChangeLockingScript(changeLockingScript, "")
 
-	if _, err := tx.Sign([]bitcoin.Key{adminKey, fundingKey}); err != nil {
+	if _, err := tx.Sign([]bitcoin.Key{test.adminKey, fundingKey}); err != nil {
 		t.Fatalf("Failed to sign tx : %s", err)
 	}
 
@@ -823,7 +729,7 @@ func Test_Responder_Reject(t *testing.T) {
 		t.Errorf("Response signature missing")
 	}
 
-	pk := contractKey.PublicKey()
+	pk := test.contractKey.PublicKey()
 	response.Signature.SetPublicKey(&pk)
 
 	if err := response.Signature.Verify(); err != nil {
@@ -854,8 +760,5 @@ func Test_Responder_Reject(t *testing.T) {
 		t.Fatalf("Response should contain request tx : got %s, want %s", response.TxID, requestTxID)
 	}
 
-	agent.Release(ctx)
-	caches.Caches.Instruments.Release(ctx, contractLockingScript, instrument.InstrumentCode)
-	caches.Caches.Contracts.Release(ctx, contractLockingScript)
-	caches.StopTestCaches()
+	StopTestAgent(ctx, t, test)
 }

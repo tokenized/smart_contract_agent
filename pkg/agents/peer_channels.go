@@ -13,7 +13,6 @@ import (
 	"github.com/tokenized/pkg/peer_channels"
 	"github.com/tokenized/smart_contract_agent/internal/state"
 	"github.com/tokenized/smart_contract_agent/pkg/client"
-	"github.com/tokenized/smart_contract_agent/pkg/transactions"
 	spyNodeClient "github.com/tokenized/spynode/pkg/client"
 
 	"github.com/google/uuid"
@@ -101,9 +100,10 @@ func (a *Agent) ProcessPeerChannelMessage(ctx context.Context, msg peer_channels
 
 		contractHash := a.ContractHash()
 		allResponded := true
-		transaction.Lock()
 		for _, outputIndex := range requestOutputs {
+			transaction.Lock()
 			processeds := transaction.ContractProcessed(contractHash, outputIndex)
+			transaction.Unlock()
 			if len(processeds) == 0 {
 				allResponded = false
 				continue
@@ -145,7 +145,6 @@ func (a *Agent) ProcessPeerChannelMessage(ctx context.Context, msg peer_channels
 				}
 			}
 		}
-		transaction.Unlock()
 
 		if allResponded { // this tx is already fully processed
 			if err := a.RemoveResponder(ctx, txid, request.ReplyTo.PeerChannel); err != nil {
@@ -227,11 +226,67 @@ func (a *Agent) RemoveResponder(ctx context.Context, requestTxID bitcoin.Hash32,
 	return nil
 }
 
-func (a *Agent) Respond(ctx context.Context, requestTxID bitcoin.Hash32,
-	responseTransaction *transactions.Transaction) error {
+func (a *Agent) AddResponse(ctx context.Context, requestTxID bitcoin.Hash32,
+	lockingScripts []bitcoin.Script, isContractWide bool, etx *expanded_tx.ExpandedTx) error {
+	a.peerChannelResponses <- PeerChannelResponse{
+		RequestTxID:        requestTxID,
+		LockingScripts:     lockingScripts,
+		Etx:                etx,
+		AgentLockingScript: a.LockingScript(),
+	}
+	return nil
+}
 
-	agentLockingScript := a.LockingScript()
-	responder, err := a.caches.Responders.Get(ctx, agentLockingScript, requestTxID)
+type PeerChannelResponse struct {
+	AgentLockingScript bitcoin.Script
+	RequestTxID        bitcoin.Hash32
+	LockingScripts     []bitcoin.Script
+	IsContractWide     bool
+	Etx                *expanded_tx.ExpandedTx
+}
+
+func ProcessResponses(ctx context.Context, peerChannelResponder *PeerChannelResponder,
+	peerChannelResponses chan PeerChannelResponse) error {
+
+	for response := range peerChannelResponses {
+		if err := peerChannelResponder.Respond(ctx, response); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func Respond(ctx context.Context, caches *state.Caches, peerChannelsFactory *peer_channels.Factory,
+	response PeerChannelResponse) error {
+
+	if err := postToResponders(ctx, caches, peerChannelsFactory, response.AgentLockingScript,
+		response.RequestTxID, response.Etx); err != nil {
+		return errors.Wrap(err, "post to responders")
+	}
+
+	if len(response.LockingScripts) > 0 {
+		if err := postToLockingScriptSubscriptions(ctx, caches, response.AgentLockingScript,
+			response.LockingScripts, response.Etx); err != nil {
+			return errors.Wrap(err, "post to locking script subscriptions")
+		}
+	}
+
+	if response.IsContractWide {
+		if err := postTransactionToContractSubscriptions(ctx, caches,
+			response.AgentLockingScript, response.Etx); err != nil {
+			return errors.Wrap(err, "post formation")
+		}
+	}
+
+	return nil
+}
+
+func postToResponders(ctx context.Context, caches *state.Caches,
+	peerChannelsFactory *peer_channels.Factory, agentLockingScript bitcoin.Script,
+	requestTxID bitcoin.Hash32, etx *expanded_tx.ExpandedTx) error {
+
+	responder, err := caches.Responders.Get(ctx, agentLockingScript, requestTxID)
 	if err != nil {
 		return errors.Wrap(err, "get responder")
 	}
@@ -239,7 +294,7 @@ func (a *Agent) Respond(ctx context.Context, requestTxID bitcoin.Hash32,
 	if responder == nil {
 		return nil // no responder
 	}
-	defer a.caches.Responders.Release(ctx, agentLockingScript, requestTxID)
+	defer caches.Responders.Release(ctx, agentLockingScript, requestTxID)
 
 	responder.Lock()
 	if len(responder.PeerChannels) == 0 {
@@ -249,25 +304,19 @@ func (a *Agent) Respond(ctx context.Context, requestTxID bitcoin.Hash32,
 	cpy := responder.Copy()
 	responder.Unlock()
 
-	responseTransaction.Lock()
-	responseEtx, err := a.transactions.ExpandedTx(ctx, responseTransaction)
-	responseTransaction.Unlock()
-	if err != nil {
-		return errors.Wrap(err, "expanded tx")
-	}
-
 	var toRemove peer_channels.Channels
 	for _, peerChannel := range cpy.PeerChannels {
-		if err := a.sendPeerChannelResponseTx(ctx, peerChannel, responseEtx); err != nil {
+		if err := SendPeerChannelResponseTx(ctx, peerChannelsFactory, peerChannel,
+			etx); err != nil {
 			logger.WarnWithFields(ctx, []logger.Field{
 				logger.Stringer("request_txid", requestTxID),
-				logger.Stringer("response_txid", responseEtx.TxID()),
+				logger.Stringer("response_txid", etx.TxID()),
 				logger.String("peer_channel", peerChannel.MaskedString()),
 			}, "Failed to send peer channel response : %s", err)
 		} else {
 			logger.InfoWithFields(ctx, []logger.Field{
 				logger.Stringer("request_txid", requestTxID),
-				logger.Stringer("response_txid", responseEtx.TxID()),
+				logger.Stringer("response_txid", etx.TxID()),
 				logger.String("peer_channel", peerChannel.MaskedString()),
 			}, "Posted response tx to peer channel")
 			toRemove = append(toRemove, peerChannel)

@@ -6,7 +6,6 @@ import (
 	"crypto/sha256"
 	"fmt"
 
-	channels_expanded_tx "github.com/tokenized/channels/expanded_tx"
 	"github.com/tokenized/logger"
 	"github.com/tokenized/pkg/bitcoin"
 	"github.com/tokenized/pkg/expanded_tx"
@@ -357,13 +356,8 @@ func (a *Agent) completeSettlement(ctx context.Context, transferTransaction *tra
 		logger.Stringer("response_txid", settlementTxID),
 	}, "Responding with settlement")
 
-	if err := a.Respond(ctx, transferTxID, settlementTransaction); err != nil {
+	if err := a.AddResponse(ctx, transferTxID, balances.LockingScripts(), false, etx); err != nil {
 		return etx, errors.Wrap(err, "respond")
-	}
-
-	if err := a.postTransactionToSubscriptions(ctx, balances.LockingScripts(),
-		settlementTransaction); err != nil {
-		return etx, errors.Wrap(err, "post settlement")
 	}
 
 	return etx, nil
@@ -378,19 +372,20 @@ func (a *Agent) processSettlement(ctx context.Context, transaction *transactions
 		return errors.Wrap(err, "apply settlements")
 	}
 
+	transaction.Lock()
+	etx, err := a.transactions.ExpandedTx(ctx, transaction)
+	transaction.Unlock()
+	if err != nil {
+		return errors.Wrap(err, "expand tx")
+	}
+
 	if transferTxID != nil {
 		if _, err := a.addResponseTxID(ctx, *transferTxID, transaction.GetTxID()); err != nil {
 			return errors.Wrap(err, "add response txid")
 		}
 
-		if err := a.Respond(ctx, *transferTxID, transaction); err != nil {
+		if err := a.AddResponse(ctx, *transferTxID, lockingScripts, false, etx); err != nil {
 			return errors.Wrap(err, "respond")
-		}
-	}
-
-	if len(lockingScripts) > 0 {
-		if err := a.postTransactionToSubscriptions(ctx, lockingScripts, transaction); err != nil {
-			return errors.Wrap(err, "post settlement")
 		}
 	}
 
@@ -416,8 +411,16 @@ func (a *Agent) processRectificationSettlement(ctx context.Context, transaction 
 		}
 	}
 
+	transaction.Lock()
+	etx, err := a.transactions.ExpandedTx(ctx, transaction)
+	transaction.Unlock()
+	if err != nil {
+		return errors.Wrap(err, "expand tx")
+	}
+
 	if len(lockingScripts) > 0 {
-		if err := a.postTransactionToSubscriptions(ctx, lockingScripts, transaction); err != nil {
+		if err := postToLockingScriptSubscriptions(ctx, a.caches, a.LockingScript(), lockingScripts,
+			etx); err != nil {
 			return errors.Wrap(err, "post settlement")
 		}
 	}
@@ -598,61 +601,6 @@ func (a *Agent) applySettlements(ctx context.Context, transaction *transactions.
 	}
 
 	return transferTxID, lockingScripts, nil
-}
-
-// postTransactionToSubscriptions posts the transaction to any subscriptions for the relevant
-// locking scripts.
-func (a *Agent) postTransactionToSubscriptions(ctx context.Context, lockingScripts []bitcoin.Script,
-	transaction *transactions.Transaction) error {
-
-	agentLockingScript := a.LockingScript()
-
-	subscriptions, err := a.caches.Subscriptions.GetLockingScriptMulti(ctx, agentLockingScript,
-		lockingScripts)
-	if err != nil {
-		return errors.Wrap(err, "get subscriptions")
-	}
-	defer a.caches.Subscriptions.ReleaseMulti(ctx, agentLockingScript, subscriptions)
-
-	if len(subscriptions) == 0 {
-		return nil
-	}
-
-	transaction.Lock()
-	expandedTx, err := a.transactions.ExpandedTx(ctx, transaction)
-	transaction.Unlock()
-	if err != nil {
-		return errors.Wrap(err, "expanded tx")
-	}
-
-	msg := channels_expanded_tx.ExpandedTxMessage(*expandedTx)
-
-	for _, subscription := range subscriptions {
-		if subscription == nil {
-			continue
-		}
-
-		subscription.Lock()
-		channelHash := subscription.GetChannelHash()
-		subscription.Unlock()
-
-		// Send settlement over channel
-		channel, err := a.GetChannel(ctx, channelHash)
-		if err != nil {
-			return errors.Wrapf(err, "get channel : %s", channelHash)
-		}
-		if channel == nil {
-			continue
-		}
-
-		if err := channel.SendMessage(ctx, &msg); err != nil {
-			logger.WarnWithFields(ctx, []logger.Field{
-				logger.Stringer("channel", channelHash),
-			}, "Failed to send channels message : %s", err)
-		}
-	}
-
-	return nil
 }
 
 // populateTransferSettlement adds all the new balances to the transfer settlement.

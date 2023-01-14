@@ -423,19 +423,8 @@ func (a *Agent) processFreezeOrder(ctx context.Context, transaction *transaction
 		logger.Stringer("response_txid", freezeTxID),
 	}, "Responding with freeze")
 
-	if err := a.Respond(ctx, txid, freezeTransaction); err != nil {
+	if err := a.AddResponse(ctx, txid, lockingScripts, isFull, etx); err != nil {
 		return etx, errors.Wrap(err, "respond")
-	}
-
-	if isFull {
-		if err := a.postTransactionToContractSubscriptions(ctx, freezeTransaction); err != nil {
-			return etx, errors.Wrap(err, "post freeze to contract")
-		}
-	} else {
-		if err := a.postTransactionToSubscriptions(ctx, lockingScripts,
-			freezeTransaction); err != nil {
-			return etx, errors.Wrap(err, "post freeze to locking scripts")
-		}
 	}
 
 	return etx, nil
@@ -665,12 +654,10 @@ func (a *Agent) processThawOrder(ctx context.Context, transaction *transactions.
 	}
 
 	thawTxID := *thawTx.MsgTx.TxHash()
-
-	thawTransaction, err := a.transactions.AddRaw(ctx, thawTx.MsgTx, nil)
-	if err != nil {
+	if _, err := a.transactions.AddRaw(ctx, thawTx.MsgTx, nil); err != nil {
 		return nil, errors.Wrap(err, "add response tx")
 	}
-	defer a.transactions.Release(ctx, thawTxID)
+	a.transactions.Release(ctx, thawTxID)
 
 	if len(freeze.InstrumentCode) == 0 {
 		contract.Thaw(freeze.Timestamp)
@@ -701,19 +688,8 @@ func (a *Agent) processThawOrder(ctx context.Context, transaction *transactions.
 		logger.Stringer("response_txid", thawTxID),
 	}, "Responding with thaw")
 
-	if err := a.Respond(ctx, txid, thawTransaction); err != nil {
+	if err := a.AddResponse(ctx, txid, lockingScripts, isFull, etx); err != nil {
 		return etx, errors.Wrap(err, "respond")
-	}
-
-	if isFull {
-		if err := a.postTransactionToContractSubscriptions(ctx, thawTransaction); err != nil {
-			return etx, errors.Wrap(err, "post thaw to contract")
-		}
-	} else {
-		if err := a.postTransactionToSubscriptions(ctx, lockingScripts,
-			thawTransaction); err != nil {
-			return etx, errors.Wrap(err, "post thaw to locking scripts")
-		}
 	}
 
 	return etx, nil
@@ -1005,13 +981,9 @@ func (a *Agent) processConfiscateOrder(ctx context.Context, transaction *transac
 		logger.Stringer("response_txid", confiscationTxID),
 	}, "Responding with confiscation")
 
-	if err := a.Respond(ctx, txid, confiscationTransaction); err != nil {
+	if err := a.AddResponse(ctx, txid, append(lockingScripts, depositLockingScript), false,
+		etx); err != nil {
 		return etx, errors.Wrap(err, "respond")
-	}
-
-	if err := a.postTransactionToSubscriptions(ctx, append(lockingScripts, depositLockingScript),
-		confiscationTransaction); err != nil {
-		return etx, errors.Wrap(err, "post confiscation to locking scripts")
 	}
 
 	return etx, nil

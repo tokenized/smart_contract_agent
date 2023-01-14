@@ -23,6 +23,7 @@ import (
 	"github.com/tokenized/specification/dist/golang/actions"
 	"github.com/tokenized/specification/dist/golang/instruments"
 	"github.com/tokenized/specification/dist/golang/protocol"
+	"github.com/tokenized/threads"
 
 	"github.com/pkg/errors"
 )
@@ -34,7 +35,214 @@ type TestCaches struct {
 	Services     *contract_services.ContractServicesCache
 }
 
-func StartTestCaches(ctx context.Context, t *testing.T, store storage.StreamStorage,
+type TestData struct {
+	store               *storage.MockStorage
+	broadcaster         *state.MockTxBroadcaster
+	caches              *TestCaches
+	locker              *locker.InlineLocker
+	peerChannelsFactory *peer_channels.Factory
+
+	peerChannelResponder         *PeerChannelResponder
+	peerChannelResponsesComplete chan interface{}
+	peerChannelResponses         chan PeerChannelResponse
+
+	schedulerInterrupt chan interface{}
+	schedulerComplete  chan interface{}
+	scheduler          *scheduler.Scheduler
+	headers            *state.MockHeaders
+
+	contractKey           bitcoin.Key
+	contractLockingScript bitcoin.Script
+	adminKey              bitcoin.Key
+	adminLockingScript    bitcoin.Script
+	feeLockingScript      bitcoin.Script
+
+	oracleKey bitcoin.Key
+
+	contract   *state.Contract
+	instrument *state.Instrument
+
+	mockStore *MockStore
+
+	agentData AgentData
+	agent     *Agent
+}
+
+func StartTestData(ctx context.Context, t testing.TB) *TestData {
+	test := prepareTestData(ctx, t)
+
+	return test
+}
+
+func StartTestAgent(ctx context.Context, t testing.TB) (*Agent, *TestData) {
+	test := prepareTestData(ctx, t)
+
+	test.contractKey, test.contractLockingScript, _ = state.MockKey()
+	test.adminKey, test.adminLockingScript, _ = state.MockKey()
+
+	test.contract = &state.Contract{
+		LockingScript: test.contractLockingScript,
+	}
+
+	var err error
+	test.contract, err = test.caches.Caches.Contracts.Add(ctx, test.contract)
+	if err != nil {
+		t.Fatalf("Failed to add contract : %s", err)
+	}
+	_, test.feeLockingScript, _ = state.MockKey()
+
+	finalizeTestAgent(ctx, t, test)
+
+	return test.agent, test
+}
+
+func StartTestAgentWithContract(ctx context.Context, t testing.TB) (*Agent, *TestData) {
+	test := prepareTestData(ctx, t)
+
+	test.contractKey, test.contractLockingScript, test.adminKey, test.adminLockingScript, test.contract = state.MockContract(ctx,
+		&test.caches.TestCaches)
+	_, test.feeLockingScript, _ = state.MockKey()
+
+	finalizeTestAgent(ctx, t, test)
+
+	return test.agent, test
+}
+
+func StartTestAgentWithInstrument(ctx context.Context, t testing.TB) (*Agent, *TestData) {
+	test := prepareTestData(ctx, t)
+
+	test.contractKey, test.contractLockingScript, test.adminKey, test.adminLockingScript, test.contract, test.instrument = state.MockInstrument(ctx,
+		&test.caches.TestCaches)
+	_, test.feeLockingScript, _ = state.MockKey()
+
+	finalizeTestAgent(ctx, t, test)
+
+	return test.agent, test
+}
+
+func StartTestAgentWithInstrumentWithOracle(ctx context.Context, t testing.TB) (*Agent, *TestData) {
+	test := prepareTestData(ctx, t)
+
+	test.contractKey, test.contractLockingScript, test.adminKey, test.adminLockingScript, test.contract, test.instrument, test.oracleKey = MockInstrumentWithOracle(ctx,
+		test.caches)
+	_, test.feeLockingScript, _ = state.MockKey()
+
+	finalizeTestAgent(ctx, t, test)
+
+	return test.agent, test
+}
+
+func StartTestAgentWithVoteSystems(ctx context.Context, t testing.TB,
+	votingSystems []*actions.VotingSystemField) (*Agent, *TestData) {
+	test := prepareTestData(ctx, t)
+
+	test.contractKey, test.contractLockingScript, test.adminKey, test.adminLockingScript, test.contract = state.MockContractWithVoteSystems(ctx,
+		&test.caches.TestCaches, votingSystems)
+	_, test.feeLockingScript, _ = state.MockKey()
+
+	finalizeTestAgent(ctx, t, test)
+
+	return test.agent, test
+}
+
+func prepareTestData(ctx context.Context, t testing.TB) *TestData {
+	test := &TestData{
+		store:                        storage.NewMockStorage(),
+		broadcaster:                  state.NewMockTxBroadcaster(),
+		locker:                       locker.NewInlineLocker(),
+		peerChannelsFactory:          peer_channels.NewFactory(),
+		peerChannelResponsesComplete: make(chan interface{}),
+		peerChannelResponses:         make(chan PeerChannelResponse),
+		schedulerInterrupt:           make(chan interface{}),
+		schedulerComplete:            make(chan interface{}),
+		headers:                      state.NewMockHeaders(),
+	}
+
+	test.scheduler = scheduler.NewScheduler(test.broadcaster)
+
+	test.caches = StartTestCaches(ctx, t, test.store, cacher.DefaultConfig(), time.Second)
+
+	if test.caches.Transactions == nil {
+		t.Fatalf("Transactions is nil")
+	}
+
+	test.mockStore = NewMockStore(DefaultConfig(), test.feeLockingScript, test.caches.Caches,
+		test.caches.Transactions, test.caches.Services, test.locker, test.store, test.broadcaster,
+		nil, nil, test.scheduler, test.peerChannelsFactory, test.peerChannelResponses)
+
+	test.peerChannelResponder = NewPeerChannelResponder(test.caches.Caches,
+		test.peerChannelsFactory)
+
+	go func() {
+		defer func() {
+			if err := recover(); err != nil {
+				t.Errorf("Scheduler panic : %s", err)
+			}
+		}()
+
+		if err := test.scheduler.Run(ctx, test.schedulerInterrupt); err != nil &&
+			errors.Cause(err) != threads.Interrupted {
+			t.Errorf("Scheduler returned an error : %s", err)
+		}
+		close(test.schedulerComplete)
+	}()
+
+	go func() {
+		ProcessResponses(ctx, test.peerChannelResponder, test.peerChannelResponses)
+		close(test.peerChannelResponsesComplete)
+	}()
+
+	return test
+}
+
+func finalizeTestAgent(ctx context.Context, t testing.TB, test *TestData) {
+	test.agentData = AgentData{
+		Key:              test.contractKey,
+		LockingScript:    test.contractLockingScript,
+		FeeLockingScript: test.feeLockingScript,
+		ContractFee:      100,
+		IsActive:         true,
+	}
+
+	var err error
+	test.agent, err = NewAgent(ctx, test.agentData, DefaultConfig(), test.caches.Caches,
+		test.caches.Transactions, test.caches.Services, test.locker, test.store,
+		test.broadcaster, nil, test.headers, test.scheduler, test.mockStore,
+		test.peerChannelsFactory, test.peerChannelResponses)
+	if err != nil {
+		t.Fatalf("Failed to create agent : %s", err)
+	}
+}
+
+func StopTestAgent(ctx context.Context, t *testing.T, test *TestData) {
+	close(test.peerChannelResponses)
+	select {
+	case <-test.peerChannelResponsesComplete:
+	case <-time.After(time.Second):
+		t.Fatalf("Peer channel response shut down timed out")
+	}
+
+	close(test.schedulerInterrupt)
+	select {
+	case <-test.schedulerComplete:
+	case <-time.After(time.Second):
+		t.Fatalf("Scheduler shut down timed out")
+	}
+
+	if test.agent != nil {
+		test.agent.Release(ctx)
+	}
+	if test.instrument != nil {
+		test.caches.Caches.Instruments.Release(ctx, test.contractLockingScript,
+			test.instrument.InstrumentCode)
+	}
+	if test.contract != nil {
+		test.caches.Caches.Contracts.Release(ctx, test.contractLockingScript)
+	}
+	test.caches.StopTestCaches()
+}
+
+func StartTestCaches(ctx context.Context, t testing.TB, store storage.StreamStorage,
 	config cacher.Config, timeout time.Duration) *TestCaches {
 
 	tc := state.StartTestCaches(ctx, t, store, config, timeout)
@@ -59,17 +267,19 @@ func StartTestCaches(ctx context.Context, t *testing.T, store storage.StreamStor
 type MockStore struct {
 	data []*AgentData
 
-	config           Config
-	feeLockingScript bitcoin.Script
-	caches           *state.Caches
-	transactions     *transactions.TransactionCache
-	services         *contract_services.ContractServicesCache
-	locker           locker.Locker
-	store            storage.CopyList
-	broadcaster      Broadcaster
-	fetcher          Fetcher
-	headers          BlockHeaders
-	scheduler        *scheduler.Scheduler
+	config               Config
+	feeLockingScript     bitcoin.Script
+	caches               *state.Caches
+	transactions         *transactions.TransactionCache
+	services             *contract_services.ContractServicesCache
+	locker               locker.Locker
+	store                storage.CopyList
+	broadcaster          Broadcaster
+	fetcher              Fetcher
+	headers              BlockHeaders
+	scheduler            *scheduler.Scheduler
+	peerChannelsFactory  *peer_channels.Factory
+	peerChannelResponses chan PeerChannelResponse
 
 	lock sync.Mutex
 }
@@ -77,18 +287,22 @@ type MockStore struct {
 func NewMockStore(config Config, feeLockingScript bitcoin.Script, caches *state.Caches,
 	transactions *transactions.TransactionCache, services *contract_services.ContractServicesCache,
 	locker locker.Locker, store storage.CopyList, broadcaster Broadcaster, fetcher Fetcher,
-	headers BlockHeaders, scheduler *scheduler.Scheduler) *MockStore {
+	headers BlockHeaders, scheduler *scheduler.Scheduler,
+	peerChannelsFactory *peer_channels.Factory,
+	peerChannelResponses chan PeerChannelResponse) *MockStore {
 
 	return &MockStore{
-		config:       config,
-		caches:       caches,
-		transactions: transactions,
-		services:     services,
-		locker:       locker,
-		store:        store,
-		fetcher:      fetcher,
-		broadcaster:  broadcaster,
-		scheduler:    scheduler,
+		config:               config,
+		caches:               caches,
+		transactions:         transactions,
+		services:             services,
+		locker:               locker,
+		store:                store,
+		fetcher:              fetcher,
+		broadcaster:          broadcaster,
+		scheduler:            scheduler,
+		peerChannelResponses: peerChannelResponses,
+		peerChannelsFactory:  peerChannelsFactory,
 	}
 }
 
@@ -117,7 +331,8 @@ func (f *MockStore) GetAgent(ctx context.Context,
 	}
 
 	agent, err := NewAgent(ctx, *data, f.config, f.caches, f.transactions, f.services, f.locker,
-		f.store, f.broadcaster, f.fetcher, f.headers, f.scheduler, f, peer_channels.NewFactory())
+		f.store, f.broadcaster, f.fetcher, f.headers, f.scheduler, f, f.peerChannelsFactory,
+		f.peerChannelResponses)
 	if err != nil {
 		return nil, errors.Wrap(err, "new agent")
 	}

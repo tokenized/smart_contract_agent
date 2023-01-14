@@ -23,7 +23,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var SendRequest = &cobra.Command{
+var SendRequestTx = &cobra.Command{
 	Use:   "send_request agent_peer_channel response_write_peer_channel response_read_token expanded_tx",
 	Short: "Sends a request to the smart contract agent",
 	Args:  cobra.ExactArgs(4),
@@ -49,13 +49,13 @@ var SendRequest = &cobra.Command{
 
 		peerChannelsFactory := peer_channels.NewFactory()
 
-		if err = sendRequest(ctx, peerChannelsFactory, agentPeerChannel, responsePeerChannel,
+		if err = sendAgentRequest(ctx, peerChannelsFactory, agentPeerChannel, responsePeerChannel,
 			etx); err != nil {
 			return errors.Wrap(err, "request")
 		}
 
-		if err = waitForResponse(ctx, peerChannelsFactory, responsePeerChannel, responseReadToken,
-			etx.TxID()); err != nil {
+		if err = waitForAgentResponse(ctx, peerChannelsFactory, responsePeerChannel,
+			responseReadToken, etx.TxID()); err != nil {
 			return errors.Wrap(err, "response")
 		}
 
@@ -99,7 +99,7 @@ func decodeExpandedTx(arg string) (*expanded_tx.ExpandedTx, error) {
 	return nil, channels.ErrUnsupportedProtocol
 }
 
-func sendRequest(ctx context.Context, peerChannelsFactory *peer_channels.Factory,
+func sendAgentRequest(ctx context.Context, peerChannelsFactory *peer_channels.Factory,
 	requestPeerChannel, responsePeerChannel *peer_channels.Channel,
 	etx *expanded_tx.ExpandedTx) error {
 
@@ -122,7 +122,7 @@ func sendRequest(ctx context.Context, peerChannelsFactory *peer_channels.Factory
 	return nil
 }
 
-func waitForResponse(ctx context.Context, peerChannelsFactory *peer_channels.Factory,
+func waitForAgentResponse(ctx context.Context, peerChannelsFactory *peer_channels.Factory,
 	peerChannel *peer_channels.Channel, readToken string, txid bitcoin.Hash32) error {
 
 	peerChannelsClient, err := peerChannelsFactory.NewClient(peerChannel.BaseURL)
@@ -140,7 +140,7 @@ func waitForResponse(ctx context.Context, peerChannelsFactory *peer_channels.Fac
 
 	handleMessagesThread, handleMessagesComplete := threads.NewUninterruptableThreadComplete("Handle Messages",
 		func(ctx context.Context) error {
-			return handleResponseMessages(ctx, peerChannelsClient, readToken, txid, incoming)
+			return handleAgentResponseMessages(ctx, peerChannelsClient, readToken, txid, incoming)
 		}, &wait)
 
 	osSignals := make(chan os.Signal, 1)
@@ -169,7 +169,7 @@ func waitForResponse(ctx context.Context, peerChannelsFactory *peer_channels.Fac
 	return nil
 }
 
-func handleResponseMessages(ctx context.Context, peerChannelsClient peer_channels.Client,
+func handleAgentResponseMessages(ctx context.Context, peerChannelsClient peer_channels.Client,
 	token string, txid bitcoin.Hash32, incoming <-chan peer_channels.Message) error {
 
 	for msg := range incoming {

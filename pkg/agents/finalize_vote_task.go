@@ -253,7 +253,7 @@ func (a *Agent) FinalizeVote(ctx context.Context,
 		return nil, errors.Wrap(err, "expanded tx")
 	}
 
-	if err := a.postTransactionToContractSubscriptions(ctx, voteResultTransaction); err != nil {
+	if err := postTransactionToContractSubscriptions(ctx, a.caches, agentLockingScript, etx); err != nil {
 		return etx, errors.Wrap(err, "post vote result")
 	}
 

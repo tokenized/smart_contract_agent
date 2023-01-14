@@ -164,12 +164,8 @@ func (a *Agent) processBodyOfAgreementOffer(ctx context.Context, transaction *tr
 		return nil, errors.Wrap(err, "expanded tx")
 	}
 
-	if err := a.Respond(ctx, txid, formationTransaction); err != nil {
+	if err := a.AddResponse(ctx, txid, nil, true, etx); err != nil {
 		return etx, errors.Wrap(err, "respond")
-	}
-
-	if err := a.postTransactionToContractSubscriptions(ctx, formationTransaction); err != nil {
-		return etx, errors.Wrap(err, "post formation")
 	}
 
 	return etx, nil
@@ -401,12 +397,8 @@ func (a *Agent) processBodyOfAgreementAmendment(ctx context.Context, transaction
 		return nil, errors.Wrap(err, "expanded tx")
 	}
 
-	if err := a.Respond(ctx, txid, formationTransaction); err != nil {
+	if err := a.AddResponse(ctx, txid, nil, true, etx); err != nil {
 		return etx, errors.Wrap(err, "respond")
-	}
-
-	if err := a.postTransactionToContractSubscriptions(ctx, formationTransaction); err != nil {
-		return etx, errors.Wrap(err, "post formation")
 	}
 
 	return etx, nil

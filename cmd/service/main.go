@@ -83,6 +83,8 @@ func main() {
 
 	peerChannelsFactory := peer_channels.NewFactory()
 
+	peerChannelResponses := make(chan agents.PeerChannelResponse, 100)
+
 	if cfg.SpyNode.ConnectionType != spyNodeClient.ConnectionTypeFull {
 		logger.Fatal(ctx, "Spynode connection type must be full to receive data : %s", err)
 	}
@@ -116,10 +118,11 @@ func main() {
 
 	service := service.NewService(cfg.AgentData, cfg.Agents, spyNode, caches, transactions,
 		services, locker, store, broadcaster, spyNode, headers.NewHeaders(spyNode), scheduler,
-		peerChannelsFactory)
+		peerChannelsFactory, peerChannelResponses)
 	spyNode.RegisterHandler(service)
 
-	var spyNodeWait, cacheWait, lockerWait, schedulerWait, peerChannelWait sync.WaitGroup
+	var spyNodeWait, cacheWait, lockerWait, peerChannelResponseWait, schedulerWait,
+		peerChannelWait sync.WaitGroup
 
 	schedulerThread, schedulerComplete := threads.NewInterruptableThreadComplete("Scheduler",
 		scheduler.Run, &schedulerWait)
@@ -132,6 +135,12 @@ func main() {
 
 	lockerThread, lockerComplete := threads.NewInterruptableThreadComplete("Balance Locker",
 		locker.Run, &lockerWait)
+
+	peerChannelResponder := agents.NewPeerChannelResponder(caches, peerChannelsFactory)
+	peerChannelResponseThread, peerChannelResponseComplete := threads.NewUninterruptableThreadComplete("Peer Channel Response",
+		func(ctx context.Context) error {
+			return agents.ProcessResponses(ctx, peerChannelResponder, peerChannelResponses)
+		}, &peerChannelResponseWait)
 
 	spyNodeThread, spyNodeComplete := threads.NewInterruptableThreadComplete("SpyNode", spyNode.Run,
 		&spyNodeWait)
@@ -153,6 +162,7 @@ func main() {
 
 	schedulerThread.Start(ctx)
 	lockerThread.Start(ctx)
+	peerChannelResponseThread.Start(ctx)
 	spyNodeThread.Start(ctx)
 	peerChannelThread.Start(ctx)
 
@@ -179,6 +189,9 @@ func main() {
 	case err := <-lockerComplete:
 		logger.Error(ctx, "Balance locker completed : %s", err)
 
+	case err := <-peerChannelResponseComplete:
+		logger.Error(ctx, "Peer Channel Response completed : %s", err)
+
 	case err := <-spyNodeComplete:
 		logger.Error(ctx, "SpyNode completed : %s", err)
 
@@ -197,6 +210,9 @@ func main() {
 
 	spyNodeThread.Stop(ctx)
 	spyNodeWait.Wait()
+
+	close(peerChannelResponses)
+	peerChannelResponseWait.Wait()
 
 	lockerThread.Stop(ctx)
 	lockerWait.Wait()

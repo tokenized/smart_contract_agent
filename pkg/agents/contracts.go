@@ -268,12 +268,8 @@ func (a *Agent) processContractOffer(ctx context.Context, transaction *transacti
 		return nil, errors.Wrap(err, "expanded tx")
 	}
 
-	if err := a.Respond(ctx, txid, formationTransaction); err != nil {
+	if err := a.AddResponse(ctx, txid, nil, true, etx); err != nil {
 		return etx, errors.Wrap(err, "respond")
-	}
-
-	if err := a.postTransactionToContractSubscriptions(ctx, formationTransaction); err != nil {
-		return etx, errors.Wrap(err, "post formation")
 	}
 
 	return etx, nil
@@ -718,12 +714,8 @@ func (a *Agent) processContractAmendment(ctx context.Context, transaction *trans
 		return nil, errors.Wrap(err, "expanded tx")
 	}
 
-	if err := a.Respond(ctx, txid, formationTransaction); err != nil {
+	if err := a.AddResponse(ctx, txid, nil, true, etx); err != nil {
 		return etx, errors.Wrap(err, "respond")
-	}
-
-	if err := a.postTransactionToContractSubscriptions(ctx, formationTransaction); err != nil {
-		return etx, errors.Wrap(err, "post formation")
 	}
 
 	return etx, nil
@@ -1215,59 +1207,6 @@ func applyContractAmendments(contractFormation *actions.ContractFormation,
 		return platform.NewRejectError(actions.RejectionsMsgMalformed,
 			fmt.Sprintf("Contract invalid after amendments: %s", err))
 	}
-
-	return nil
-}
-
-// postTransactionToContractSubscriptions posts the transaction to any subscriptions for the
-// relevant locking scripts for the contract.
-func (a *Agent) postTransactionToContractSubscriptions(ctx context.Context,
-	transaction *transactions.Transaction) error {
-
-	// agentLockingScript := a.LockingScript()
-
-	// subscriptions, err := a.caches.Subscriptions.GetLockingScriptMulti(ctx, agentLockingScript,
-	// 	lockingScripts)
-	// if err != nil {
-	// 	return errors.Wrap(err, "get subscriptions")
-	// }
-	// defer a.caches.Subscriptions.ReleaseMulti(ctx, agentLockingScript, subscriptions)
-
-	// if len(subscriptions) == 0 {
-	// 	return nil
-	// }
-
-	// expandedTx, err := transaction.ExpandedTx(ctx)
-	// if err != nil {
-	// 	return errors.Wrap(err, "get expanded tx")
-	// }
-
-	// msg := channels_expanded_tx.ExpandedTxMessage(*expandedTx)
-
-	// for _, subscription := range subscriptions {
-	// 	if subscription == nil {
-	// 		continue
-	// 	}
-
-	// 	subscription.Lock()
-	// 	channelHash := subscription.GetChannelHash()
-	// 	subscription.Unlock()
-
-	// 	// Send settlement over channel
-	// 	channel, err := a.GetChannel(ctx, channelHash)
-	// 	if err != nil {
-	// 		return errors.Wrapf(err, "get channel : %s", channelHash)
-	// 	}
-	// 	if channel == nil {
-	// 		continue
-	// 	}
-
-	// 	if err := channel.SendMessage(ctx, &msg); err != nil {
-	// 		logger.WarnWithFields(ctx, []logger.Field{
-	// 			logger.Stringer("channel", channelHash),
-	// 		}, "Failed to send channels message : %s", err)
-	// 	}
-	// }
 
 	return nil
 }

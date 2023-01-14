@@ -12,7 +12,9 @@ var scCmd = &cobra.Command{
 }
 
 func main() {
-	scCmd.AddCommand(commands.SendRequest)
+	scCmd.AddCommand(commands.SendRequestTx)
 	scCmd.AddCommand(commands.ExpandTx)
+	scCmd.AddCommand(commands.CreateAgent)
+	scCmd.AddCommand(commands.CreateContractOffer)
 	scCmd.Execute()
 }

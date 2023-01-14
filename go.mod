@@ -13,6 +13,6 @@ require (
 	github.com/tokenized/logger v0.1.3-0.20230110032957-7357f78dfcc2
 	github.com/tokenized/pkg v0.4.1-0.20230113031120-71712a0df209
 	github.com/tokenized/specification v1.1.2-0.20230104015151-3f4771229986
-	github.com/tokenized/spynode v0.2.2-0.20221130210815-5c680ff76a56
-	github.com/tokenized/threads v0.1.1-0.20221115220050-91bea32c8aa2
+	github.com/tokenized/spynode v0.2.2-0.20230117032616-f8e51bfe0bc5
+	github.com/tokenized/threads v0.1.1
 )

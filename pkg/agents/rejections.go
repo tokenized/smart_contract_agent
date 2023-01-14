@@ -473,7 +473,7 @@ func (a *Agent) createRejection(ctx context.Context, transaction *transactions.T
 		return nil, errors.Wrap(err, "expanded tx")
 	}
 
-	if err := a.Respond(ctx, txid, rejectTransaction); err != nil {
+	if err := a.AddResponse(ctx, txid, nil, false, etx); err != nil {
 		return etx, errors.Wrap(err, "respond")
 	}
 

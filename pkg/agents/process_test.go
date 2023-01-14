@@ -7,17 +7,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tokenized/cacher"
 	"github.com/tokenized/channels/wallet"
 	"github.com/tokenized/logger"
 	"github.com/tokenized/pkg/bitcoin"
 	"github.com/tokenized/pkg/expanded_tx"
-	"github.com/tokenized/pkg/peer_channels"
-	"github.com/tokenized/pkg/storage"
 	"github.com/tokenized/pkg/txbuilder"
 	"github.com/tokenized/pkg/wire"
 	"github.com/tokenized/smart_contract_agent/internal/state"
-	"github.com/tokenized/smart_contract_agent/pkg/locker"
 	"github.com/tokenized/smart_contract_agent/pkg/transactions"
 	"github.com/tokenized/specification/dist/golang/actions"
 	"github.com/tokenized/specification/dist/golang/instruments"
@@ -26,38 +22,7 @@ import (
 
 func Test_Process(t *testing.T) {
 	ctx := logger.ContextWithLogger(context.Background(), true, true, "")
-	store := storage.NewMockStorage()
-	broadcaster := state.NewMockTxBroadcaster()
-
-	caches := StartTestCaches(ctx, t, store, cacher.DefaultConfig(), time.Second)
-	locker := locker.NewInlineLocker()
-
-	contractKey, contractLockingScript, contractAddress := state.MockKey()
-	_, feeLockingScript, _ := state.MockKey()
-	_, _, entityAddress := state.MockKey()
-
-	contract := &state.Contract{
-		LockingScript: contractLockingScript,
-	}
-
-	var err error
-	contract, err = caches.Caches.Contracts.Add(ctx, contract)
-	if err != nil {
-		t.Fatalf("Failed to add contract : %s", err)
-	}
-
-	agentData := AgentData{
-		Key:              contractKey,
-		LockingScript:    contractLockingScript,
-		FeeLockingScript: feeLockingScript,
-		IsActive:         true,
-	}
-
-	agent, err := NewAgent(ctx, agentData, DefaultConfig(), caches.Caches, caches.Transactions,
-		caches.Services, locker, store, broadcaster, nil, nil, nil, nil, peer_channels.NewFactory())
-	if err != nil {
-		t.Fatalf("Failed to create agent : %s", err)
-	}
+	agent, test := StartTestAgent(ctx, t)
 
 	// Create a contract by processing contract formation.
 	var outputs []*expanded_tx.Output
@@ -68,7 +33,7 @@ func Test_Process(t *testing.T) {
 	offer := &actions.ContractOffer{}
 	offerScript, _ := protocol.Serialize(offer, true)
 	offerTx.AddTxOut(wire.NewTxOut(0, offerScript))
-	offerTx.AddTxOut(wire.NewTxOut(2200, contractLockingScript))
+	offerTx.AddTxOut(wire.NewTxOut(2200, test.contractLockingScript))
 	contractOfferTxID := *offerTx.TxHash()
 
 	contractOfferTransaction := &transactions.Transaction{
@@ -77,38 +42,30 @@ func Test_Process(t *testing.T) {
 		SpentOutputs: outputs,
 	}
 
-	contractOfferTransaction, err = caches.Transactions.Add(ctx,
+	contractOfferTransaction, err := test.caches.Transactions.Add(ctx,
 		contractOfferTransaction)
 	if err != nil {
 		t.Fatalf("Failed to add contract offer tx : %s", err)
 	}
-	caches.Transactions.Release(ctx, contractOfferTxID)
+	test.caches.Transactions.Release(ctx, contractOfferTxID)
 
 	outputs = append(outputs, &expanded_tx.Output{
-		LockingScript: contractLockingScript,
+		LockingScript: test.contractLockingScript,
 		Value:         2200,
 	})
 	tx.AddTxIn(wire.NewTxIn(wire.NewOutPoint(&contractOfferTxID, 0), make([]byte,
 		txbuilder.MaximumP2PKHSigScriptSize)))
 
 	// Contract output
-	tx.AddTxOut(wire.NewTxOut(50, contractLockingScript))
+	tx.AddTxOut(wire.NewTxOut(50, test.contractLockingScript))
 
 	// Contract formation output
-	adminKey, err := bitcoin.GenerateKey(bitcoin.MainNet)
-	if err != nil {
-		t.Fatalf("Failed to generate key : %s", err)
-	}
-
-	ra, err := adminKey.RawAddress()
+	ra, err := test.adminKey.RawAddress()
 	if err != nil {
 		t.Fatalf("Failed to create raw address : %s", err)
 	}
 
-	adminLockingScript, err := adminKey.LockingScript()
-	if err != nil {
-		t.Fatalf("Failed to create locking script : %s", err)
-	}
+	_, _, entityAddress := state.MockKey()
 
 	contractFormation := &actions.ContractFormation{
 		ContractName:   "Test Contract",
@@ -133,23 +90,23 @@ func Test_Process(t *testing.T) {
 		SpentOutputs: outputs,
 	}
 
-	contractFormationTransaction, err = caches.Transactions.Add(ctx,
+	contractFormationTransaction, err = test.caches.Transactions.Add(ctx,
 		contractFormationTransaction)
 	if err != nil {
 		t.Fatalf("Failed to add contract formation tx : %s", err)
 	}
 
 	if err := agent.Process(ctx, contractFormationTransaction, []Action{{
-		AgentLockingScripts: []bitcoin.Script{contractLockingScript},
+		AgentLockingScripts: []bitcoin.Script{test.contractLockingScript},
 		OutputIndex:         contractFormationScriptOutputIndex,
 		Action:              contractFormation,
 	}}); err != nil {
 		t.Fatalf("Failed to process contract formation : %s", err)
 	}
-	caches.Transactions.Release(ctx, contractFormationTxID)
+	test.caches.Transactions.Release(ctx, contractFormationTxID)
 
 	// Check contract is correct.
-	currentContract, err := caches.Caches.Contracts.Get(ctx, contractLockingScript)
+	currentContract, err := test.caches.Caches.Contracts.Get(ctx, test.contractLockingScript)
 	if err != nil {
 		t.Fatalf("Failed to get contract : %s", err)
 	}
@@ -179,7 +136,7 @@ func Test_Process(t *testing.T) {
 	t.Logf("Found %d instruments", currentContract.InstrumentCount)
 
 	currentContract.Unlock()
-	caches.Caches.Contracts.Release(ctx, contractLockingScript)
+	test.caches.Caches.Contracts.Release(ctx, test.contractLockingScript)
 
 	// Create instrument by processing instrument creation.
 	outputs = nil
@@ -190,7 +147,7 @@ func Test_Process(t *testing.T) {
 	definition := &actions.InstrumentDefinition{}
 	definitionScript, _ := protocol.Serialize(definition, true)
 	definitionTx.AddTxOut(wire.NewTxOut(0, definitionScript))
-	definitionTx.AddTxOut(wire.NewTxOut(2200, contractLockingScript))
+	definitionTx.AddTxOut(wire.NewTxOut(2200, test.contractLockingScript))
 	instrumentDefinitionTxID := *definitionTx.TxHash()
 
 	instrumentDefinitionTransaction := &transactions.Transaction{
@@ -199,22 +156,22 @@ func Test_Process(t *testing.T) {
 		SpentOutputs: outputs,
 	}
 
-	instrumentDefinitionTransaction, err = caches.Transactions.Add(ctx,
+	instrumentDefinitionTransaction, err = test.caches.Transactions.Add(ctx,
 		instrumentDefinitionTransaction)
 	if err != nil {
 		t.Fatalf("Failed to add instrument definition tx : %s", err)
 	}
-	caches.Transactions.Release(ctx, instrumentDefinitionTxID)
+	test.caches.Transactions.Release(ctx, instrumentDefinitionTxID)
 
 	outputs = append(outputs, &expanded_tx.Output{
-		LockingScript: contractLockingScript,
+		LockingScript: test.contractLockingScript,
 		Value:         2200,
 	})
 	tx.AddTxIn(wire.NewTxIn(wire.NewOutPoint(&instrumentDefinitionTxID, 0), make([]byte,
 		txbuilder.MaximumP2PKHSigScriptSize)))
 
 	// Contract output
-	tx.AddTxOut(wire.NewTxOut(50, contractLockingScript))
+	tx.AddTxOut(wire.NewTxOut(50, test.contractLockingScript))
 
 	// Instrument creation output
 	currency := instruments.Currency{
@@ -226,6 +183,8 @@ func Test_Process(t *testing.T) {
 	if err := currency.Serialize(currencyBuf); err != nil {
 		t.Fatalf("Failed to serialize currency payload : %s", err)
 	}
+
+	contractAddress, _ := bitcoin.RawAddressFromLockingScript(test.contractLockingScript)
 
 	instrumentCode := state.InstrumentCode(protocol.InstrumentCodeFromContract(contractAddress, 0))
 	authorizedQuantity := uint64(1000000000)
@@ -256,22 +215,22 @@ func Test_Process(t *testing.T) {
 		SpentOutputs: outputs,
 	}
 
-	instrumentCreationTx, err = caches.Transactions.Add(ctx, instrumentCreationTx)
+	instrumentCreationTx, err = test.caches.Transactions.Add(ctx, instrumentCreationTx)
 	if err != nil {
 		t.Fatalf("Failed to add instrument creation tx : %s", err)
 	}
 
 	if err := agent.Process(ctx, instrumentCreationTx, []Action{{
-		AgentLockingScripts: []bitcoin.Script{contractLockingScript},
+		AgentLockingScripts: []bitcoin.Script{test.contractLockingScript},
 		OutputIndex:         instrumentCreationScriptOutputIndex,
 		Action:              instrumentCreation,
 	}}); err != nil {
 		t.Fatalf("Failed to process instrument creation : %s", err)
 	}
-	caches.Transactions.Release(ctx, instrumentCreationTxID)
+	test.caches.Transactions.Release(ctx, instrumentCreationTxID)
 
 	// Check instrument is correct.
-	currentContract, err = caches.Caches.Contracts.Get(ctx, contractLockingScript)
+	currentContract, err = test.caches.Caches.Contracts.Get(ctx, test.contractLockingScript)
 	if err != nil {
 		t.Fatalf("Failed to get contract : %s", err)
 	}
@@ -306,7 +265,7 @@ func Test_Process(t *testing.T) {
 		t.Logf("Instrument : %s", protocol.InstrumentID(instruments.CodeCurrency,
 			bitcoin.Hash20(instrumentCode)))
 
-		gotInstrument, err := caches.Caches.Instruments.Get(ctx, contractLockingScript,
+		gotInstrument, err := test.caches.Caches.Instruments.Get(ctx, test.contractLockingScript,
 			instrumentCode)
 		if err != nil {
 			t.Fatalf("Failed to get instrument : %s", err)
@@ -315,7 +274,7 @@ func Test_Process(t *testing.T) {
 		if gotInstrument == nil {
 			t.Fatalf("Instrument missing")
 		}
-		caches.Caches.Instruments.Release(ctx, contractLockingScript, instrumentCode)
+		test.caches.Caches.Instruments.Release(ctx, test.contractLockingScript, instrumentCode)
 
 		if !gotInstrument.InstrumentCode.Equal(instrumentCode) {
 			t.Errorf("Wrong instrument code : got %s, want %s", gotInstrument.InstrumentCode,
@@ -340,34 +299,34 @@ func Test_Process(t *testing.T) {
 	}
 
 	currentContract.Unlock()
-	caches.Caches.Contracts.Release(ctx, contractLockingScript)
+	test.caches.Caches.Contracts.Release(ctx, test.contractLockingScript)
 
-	if err := caches.IsFailed(); err != nil {
+	if err := test.caches.IsFailed(); err != nil {
 		t.Fatalf("Cache failed : %s", err)
 	}
 
-	// Check admin balance is correct.
-	adminBalance, err := caches.Caches.Balances.Get(ctx, contractLockingScript, instrumentCode,
-		adminLockingScript)
+	// Check test.admin balance is correct.
+	adminBalance, err := test.caches.Caches.Balances.Get(ctx, test.contractLockingScript, instrumentCode,
+		test.adminLockingScript)
 	if err != nil {
-		t.Fatalf("Failed to get admin balance : %s", err)
+		t.Fatalf("Failed to get test.admin balance : %s", err)
 	}
 
 	if adminBalance == nil {
-		t.Fatalf("Missing admin balance")
+		t.Fatalf("Missing test.admin balance")
 	}
 
 	adminBalance.Lock()
 	t.Logf("Admin balance : %d", adminBalance.Quantity)
 
 	if adminBalance.Quantity != authorizedQuantity {
-		t.Errorf("Wrong admin balance quantity : got %d, want %d", adminBalance.Quantity,
+		t.Errorf("Wrong test.admin balance quantity : got %d, want %d", adminBalance.Quantity,
 			authorizedQuantity)
 	}
 	adminBalance.Unlock()
-	caches.Caches.Balances.Release(ctx, contractLockingScript, instrumentCode, adminBalance)
+	test.caches.Caches.Balances.Release(ctx, test.contractLockingScript, instrumentCode, adminBalance)
 
-	if err := caches.IsFailed(); err != nil {
+	if err := test.caches.IsFailed(); err != nil {
 		t.Fatalf("Cache failed : %s", err)
 	}
 
@@ -379,7 +338,7 @@ func Test_Process(t *testing.T) {
 	remainingQuantity := authorizedQuantity
 	recipientCount := 10
 	for i := 0; i < recipientCount; i++ {
-		if err := caches.IsFailed(); err != nil {
+		if err := test.caches.IsFailed(); err != nil {
 			t.Fatalf("Cache failed : %s", err)
 		}
 
@@ -407,7 +366,7 @@ func Test_Process(t *testing.T) {
 		transfer := &actions.Transfer{}
 		transferScript, _ := protocol.Serialize(transfer, true)
 		transferTx.AddTxOut(wire.NewTxOut(0, transferScript))
-		transferTx.AddTxOut(wire.NewTxOut(2200, contractLockingScript))
+		transferTx.AddTxOut(wire.NewTxOut(2200, test.contractLockingScript))
 		transferTxID := *transferTx.TxHash()
 
 		transferTransaction := &transactions.Transaction{
@@ -416,22 +375,22 @@ func Test_Process(t *testing.T) {
 			SpentOutputs: outputs,
 		}
 
-		transferTransaction, err = caches.Transactions.Add(ctx,
+		transferTransaction, err = test.caches.Transactions.Add(ctx,
 			transferTransaction)
 		if err != nil {
 			t.Fatalf("Failed to add transfer tx : %s", err)
 		}
-		caches.Transactions.Release(ctx, transferTxID)
+		test.caches.Transactions.Release(ctx, transferTxID)
 
 		outputs = append(outputs, &expanded_tx.Output{
-			LockingScript: contractLockingScript,
+			LockingScript: test.contractLockingScript,
 			Value:         2200,
 		})
 		tx.AddTxIn(wire.NewTxIn(wire.NewOutPoint(&transferTxID, 0), make([]byte,
 			txbuilder.MaximumP2PKHSigScriptSize)))
 
-		// admin output
-		tx.AddTxOut(wire.NewTxOut(50, adminLockingScript))
+		// test.admin output
+		tx.AddTxOut(wire.NewTxOut(50, test.adminLockingScript))
 
 		// recipient output
 		tx.AddTxOut(wire.NewTxOut(50, lockingScript))
@@ -497,31 +456,31 @@ func Test_Process(t *testing.T) {
 			SpentOutputs: outputs,
 		}
 
-		settlementTx, err = caches.Transactions.Add(ctx, settlementTx)
+		settlementTx, err = test.caches.Transactions.Add(ctx, settlementTx)
 		if err != nil {
 			t.Fatalf("Failed to add settlement tx : %s", err)
 		}
 
 		t.Logf("Sending transfer request : %s", settlementTxID)
 		if err := agent.Process(ctx, settlementTx, []Action{{
-			AgentLockingScripts: []bitcoin.Script{contractLockingScript},
+			AgentLockingScripts: []bitcoin.Script{test.contractLockingScript},
 			OutputIndex:         settlementScriptOutputIndex,
 			Action:              settlement,
 		}}); err != nil {
 			t.Fatalf("Failed to process settlement : %s", err)
 		}
 		t.Logf("Processed transfer request : %s", settlementTxID)
-		caches.Transactions.Release(ctx, settlementTxID)
+		test.caches.Transactions.Release(ctx, settlementTxID)
 	}
 
-	// Check caches.Balances
+	// Check test.caches.Balances
 	t.Logf("Checking balances")
 	for i := 0; i < recipientCount; i++ {
-		if err := caches.IsFailed(); err != nil {
+		if err := test.caches.IsFailed(); err != nil {
 			t.Fatalf("Cache failed : %s", err)
 		}
 
-		balance, err := caches.Caches.Balances.Get(ctx, contractLockingScript, instrumentCode,
+		balance, err := test.caches.Caches.Balances.Get(ctx, test.contractLockingScript, instrumentCode,
 			lockingScripts[i])
 		if err != nil {
 			t.Fatalf("Failed to get balance : %s", err)
@@ -536,34 +495,34 @@ func Test_Process(t *testing.T) {
 		if balance.Quantity != quantities[i] {
 			t.Errorf("Wrong balance quantity : got %d, want %d", balance.Quantity, quantities[i])
 		}
-		caches.Caches.Balances.Release(ctx, contractLockingScript, instrumentCode, balance)
+		test.caches.Caches.Balances.Release(ctx, test.contractLockingScript, instrumentCode, balance)
 	}
 
-	// Check admin balance is correct.
-	adminBalance, err = caches.Caches.Balances.Get(ctx, contractLockingScript, instrumentCode,
-		adminLockingScript)
+	// Check test.admin balance is correct.
+	adminBalance, err = test.caches.Caches.Balances.Get(ctx, test.contractLockingScript, instrumentCode,
+		test.adminLockingScript)
 	if err != nil {
-		t.Fatalf("Failed to get admin balance : %s", err)
+		t.Fatalf("Failed to get test.admin balance : %s", err)
 	}
 
 	if adminBalance == nil {
-		t.Fatalf("Missing admin balance")
+		t.Fatalf("Missing test.admin balance")
 	}
 
 	t.Logf("Admin balance : %d", adminBalance.Quantity)
 
 	if adminBalance.Quantity != remainingQuantity {
-		t.Errorf("Wrong admin balance quantity : got %d, want %d", adminBalance.Quantity,
+		t.Errorf("Wrong test.admin balance quantity : got %d, want %d", adminBalance.Quantity,
 			remainingQuantity)
 	}
-	caches.Caches.Balances.Release(ctx, contractLockingScript, instrumentCode, adminBalance)
+	test.caches.Caches.Balances.Release(ctx, test.contractLockingScript, instrumentCode, adminBalance)
 
-	// Transfer caches.Balances from scripts
+	// Transfer test.caches.Balances from scripts
 	var lockingScripts2 []bitcoin.Script
 	var quantities2 []uint64
 	var txids2 []bitcoin.Hash32
 	for i := 0; i < recipientCount; i++ {
-		if err := caches.IsFailed(); err != nil {
+		if err := test.caches.IsFailed(); err != nil {
 			t.Fatalf("Cache failed : %s", err)
 		}
 
@@ -590,7 +549,7 @@ func Test_Process(t *testing.T) {
 		transfer := &actions.Transfer{}
 		transferScript, _ := protocol.Serialize(transfer, true)
 		transferTx.AddTxOut(wire.NewTxOut(0, transferScript))
-		transferTx.AddTxOut(wire.NewTxOut(2200, contractLockingScript))
+		transferTx.AddTxOut(wire.NewTxOut(2200, test.contractLockingScript))
 		transferTxID := *transferTx.TxHash()
 
 		transferTransaction := &transactions.Transaction{
@@ -599,21 +558,21 @@ func Test_Process(t *testing.T) {
 			SpentOutputs: outputs,
 		}
 
-		transferTransaction, err = caches.Transactions.Add(ctx,
+		transferTransaction, err = test.caches.Transactions.Add(ctx,
 			transferTransaction)
 		if err != nil {
 			t.Fatalf("Failed to add transfer tx : %s", err)
 		}
-		caches.Transactions.Release(ctx, transferTxID)
+		test.caches.Transactions.Release(ctx, transferTxID)
 
 		outputs = append(outputs, &expanded_tx.Output{
-			LockingScript: contractLockingScript,
+			LockingScript: test.contractLockingScript,
 			Value:         2200,
 		})
 		tx.AddTxIn(wire.NewTxIn(wire.NewOutPoint(&transferTxID, 0), make([]byte,
 			txbuilder.MaximumP2PKHSigScriptSize)))
 
-		// admin output
+		// test.admin output
 		tx.AddTxOut(wire.NewTxOut(50, lockingScripts[i]))
 
 		// recipient output
@@ -680,34 +639,34 @@ func Test_Process(t *testing.T) {
 			SpentOutputs: outputs,
 		}
 
-		settlementTx, err = caches.Transactions.Add(ctx, settlementTx)
+		settlementTx, err = test.caches.Transactions.Add(ctx, settlementTx)
 		if err != nil {
 			t.Fatalf("Failed to add settlement tx : %s", err)
 		}
 
 		if err := agent.Process(ctx, settlementTx, []Action{{
-			AgentLockingScripts: []bitcoin.Script{contractLockingScript},
+			AgentLockingScripts: []bitcoin.Script{test.contractLockingScript},
 			OutputIndex:         settlementScriptOutputIndex,
 			Action:              settlement,
 		}}); err != nil {
 			t.Fatalf("Failed to process settlement : %s", err)
 		}
-		caches.Transactions.Release(ctx, settlementTxID)
+		test.caches.Transactions.Release(ctx, settlementTxID)
 	}
 
 	for i := 0; i < recipientCount; i++ {
-		if err := caches.IsFailed(); err != nil {
+		if err := test.caches.IsFailed(); err != nil {
 			t.Fatalf("Cache failed : %s", err)
 		}
 
-		bothBalances, err := caches.Caches.Balances.GetMulti(ctx, contractLockingScript, instrumentCode,
+		bothBalances, err := test.caches.Caches.Balances.GetMulti(ctx, test.contractLockingScript, instrumentCode,
 			[]bitcoin.Script{lockingScripts[i], lockingScripts2[i]})
 		if err != nil {
-			t.Fatalf("Failed to get caches.Balances : %s", err)
+			t.Fatalf("Failed to get test.caches.Balances : %s", err)
 		}
 
 		if len(bothBalances) != 2 {
-			t.Fatalf("Missing caches.Balances : %d", len(bothBalances))
+			t.Fatalf("Missing test.caches.Balances : %d", len(bothBalances))
 		}
 
 		t.Logf("Balances : %d, %d", bothBalances[0].Quantity, bothBalances[1].Quantity)
@@ -722,11 +681,8 @@ func Test_Process(t *testing.T) {
 				quantities2[i])
 		}
 
-		caches.Caches.Balances.ReleaseMulti(ctx, contractLockingScript, instrumentCode, bothBalances)
+		test.caches.Caches.Balances.ReleaseMulti(ctx, test.contractLockingScript, instrumentCode, bothBalances)
 	}
 
-	caches.Caches.Contracts.Release(ctx, contractLockingScript)
-
-	agent.Release(ctx)
-	caches.StopTestCaches()
+	StopTestAgent(ctx, t, test)
 }

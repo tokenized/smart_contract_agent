@@ -39,7 +39,7 @@ type TestCaches struct {
 }
 
 // StartTestCaches starts all the caches and wraps them into one interrupt and complete.
-func StartTestCaches(ctx context.Context, t *testing.T, store storage.StreamStorage,
+func StartTestCaches(ctx context.Context, t testing.TB, store storage.StreamStorage,
 	config cacher.Config, timeout time.Duration) *TestCaches {
 
 	result := &TestCaches{

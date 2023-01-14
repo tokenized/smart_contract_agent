@@ -16,25 +16,27 @@ import (
 )
 
 type Factory struct {
-	config              Config
-	store               storage.CopyList
-	caches              *state.Caches
-	transactions        *transactions.TransactionCache
-	services            *contract_services.ContractServicesCache
-	locker              locker.Locker
-	broadcaster         Broadcaster
-	fetcher             Fetcher
-	headers             BlockHeaders
-	scheduler           *scheduler.Scheduler
-	agentStore          Store
-	peerChannelsFactory *peer_channels.Factory
+	config               Config
+	store                storage.CopyList
+	caches               *state.Caches
+	transactions         *transactions.TransactionCache
+	services             *contract_services.ContractServicesCache
+	locker               locker.Locker
+	broadcaster          Broadcaster
+	fetcher              Fetcher
+	headers              BlockHeaders
+	scheduler            *scheduler.Scheduler
+	agentStore           Store
+	peerChannelsFactory  *peer_channels.Factory
+	peerChannelResponses chan PeerChannelResponse
 }
 
 func NewFactory(config Config, store storage.CopyList, cache *cacher.Cache,
 	transactions *transactions.TransactionCache,
 	services *contract_services.ContractServicesCache, locker locker.Locker,
 	broadcaster Broadcaster, fetcher Fetcher, headers BlockHeaders, scheduler *scheduler.Scheduler,
-	agentStore Store, peerChannelsFactory *peer_channels.Factory) (*Factory, error) {
+	agentStore Store, peerChannelsFactory *peer_channels.Factory,
+	peerChannelResponses chan PeerChannelResponse) (*Factory, error) {
 
 	caches, err := state.NewCaches(cache)
 	if err != nil {
@@ -42,22 +44,28 @@ func NewFactory(config Config, store storage.CopyList, cache *cacher.Cache,
 	}
 
 	return &Factory{
-		config:              config,
-		store:               store,
-		caches:              caches,
-		transactions:        transactions,
-		services:            services,
-		locker:              locker,
-		broadcaster:         broadcaster,
-		fetcher:             fetcher,
-		headers:             headers,
-		scheduler:           scheduler,
-		agentStore:          agentStore,
-		peerChannelsFactory: peerChannelsFactory,
+		config:               config,
+		store:                store,
+		caches:               caches,
+		transactions:         transactions,
+		services:             services,
+		locker:               locker,
+		broadcaster:          broadcaster,
+		fetcher:              fetcher,
+		headers:              headers,
+		scheduler:            scheduler,
+		agentStore:           agentStore,
+		peerChannelsFactory:  peerChannelsFactory,
+		peerChannelResponses: peerChannelResponses,
 	}, nil
 }
 
 func (f *Factory) NewAgent(ctx context.Context, data AgentData) (*Agent, error) {
 	return NewAgent(ctx, data, f.config, f.caches, f.transactions, f.services, f.locker, f.store,
-		f.broadcaster, f.fetcher, f.headers, f.scheduler, f.agentStore, f.peerChannelsFactory)
+		f.broadcaster, f.fetcher, f.headers, f.scheduler, f.agentStore, f.peerChannelsFactory,
+		f.peerChannelResponses)
+}
+
+func (f *Factory) NewPeerChannelResponder() *PeerChannelResponder {
+	return NewPeerChannelResponder(f.caches, f.peerChannelsFactory)
 }

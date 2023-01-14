@@ -225,12 +225,8 @@ func (a *Agent) processInstrumentDefinition(ctx context.Context, transaction *tr
 		return nil, errors.Wrap(err, "expanded tx")
 	}
 
-	if err := a.Respond(ctx, txid, creationTransaction); err != nil {
+	if err := a.AddResponse(ctx, txid, nil, true, etx); err != nil {
 		return etx, errors.Wrap(err, "respond")
-	}
-
-	if err := a.postTransactionToContractSubscriptions(ctx, creationTransaction); err != nil {
-		return etx, errors.Wrap(err, "post creation")
 	}
 
 	return etx, nil
@@ -503,12 +499,8 @@ func (a *Agent) processInstrumentModification(ctx context.Context, transaction *
 		return nil, errors.Wrap(err, "expanded tx")
 	}
 
-	if err := a.Respond(ctx, txid, creationTransaction); err != nil {
+	if err := a.AddResponse(ctx, txid, nil, true, etx); err != nil {
 		return etx, errors.Wrap(err, "respond")
-	}
-
-	if err := a.postTransactionToContractSubscriptions(ctx, creationTransaction); err != nil {
-		return etx, errors.Wrap(err, "post creation")
 	}
 
 	return etx, nil

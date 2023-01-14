@@ -42,11 +42,12 @@ type Service struct {
 	locker        locker.Locker
 	store         storage.StreamStorage
 
-	broadcaster         agents.Broadcaster
-	fetcher             agents.Fetcher
-	headers             agents.BlockHeaders
-	scheduler           *scheduler.Scheduler
-	peerChannelsFactory *peer_channels.Factory
+	broadcaster          agents.Broadcaster
+	fetcher              agents.Fetcher
+	headers              agents.BlockHeaders
+	scheduler            *scheduler.Scheduler
+	peerChannelsFactory  *peer_channels.Factory
+	peerChannelResponses chan agents.PeerChannelResponse
 
 	nextSpyNodeMessageID uint64
 
@@ -58,7 +59,8 @@ func NewService(agentData agents.AgentData, config agents.Config, spyNodeClient 
 	services *contract_services.ContractServicesCache, locker locker.Locker,
 	store storage.StreamStorage, broadcaster agents.Broadcaster, fetcher agents.Fetcher,
 	headers agents.BlockHeaders, scheduler *scheduler.Scheduler,
-	peerChannelsFactory *peer_channels.Factory) *Service {
+	peerChannelsFactory *peer_channels.Factory,
+	peerChannelResponses chan agents.PeerChannelResponse) *Service {
 
 	return &Service{
 		agentData:            agentData,
@@ -74,6 +76,7 @@ func NewService(agentData agents.AgentData, config agents.Config, spyNodeClient 
 		headers:              headers,
 		scheduler:            scheduler,
 		peerChannelsFactory:  peerChannelsFactory,
+		peerChannelResponses: peerChannelResponses,
 		nextSpyNodeMessageID: 1,
 	}
 }
@@ -97,7 +100,7 @@ func (s *Service) Load(ctx context.Context) error {
 
 	agent, err := agents.NewAgent(ctx, s.agentData, s.config, s.caches, s.transactions, s.services,
 		s.locker, s.store, s.broadcaster, s.fetcher, s.headers, s.scheduler, s,
-		s.peerChannelsFactory)
+		s.peerChannelsFactory, s.peerChannelResponses)
 	if err != nil {
 		return errors.Wrap(err, "new agent")
 	}

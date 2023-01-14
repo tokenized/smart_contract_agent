@@ -441,12 +441,8 @@ func (a *Agent) processProposal(ctx context.Context, transaction *transactions.T
 		return nil, errors.Wrap(err, "expanded tx")
 	}
 
-	if err := a.Respond(ctx, txid, voteTransaction); err != nil {
+	if err := a.AddResponse(ctx, txid, nil, true, etx); err != nil {
 		return etx, errors.Wrap(err, "respond")
-	}
-
-	if err := a.postTransactionToContractSubscriptions(ctx, voteTransaction); err != nil {
-		return etx, errors.Wrap(err, "post vote")
 	}
 
 	if a.scheduler != nil {
@@ -780,13 +776,8 @@ func (a *Agent) processBallotCast(ctx context.Context, transaction *transactions
 		return nil, errors.Wrap(err, "expanded tx")
 	}
 
-	if err := a.Respond(ctx, txid, ballotCountedTransaction); err != nil {
+	if err := a.AddResponse(ctx, txid, []bitcoin.Script{lockingScript}, false, etx); err != nil {
 		return etx, errors.Wrap(err, "respond")
-	}
-
-	if err := a.postTransactionToSubscriptions(ctx, []bitcoin.Script{lockingScript},
-		ballotCountedTransaction); err != nil {
-		return etx, errors.Wrap(err, "post ballot counted")
 	}
 
 	return etx, nil

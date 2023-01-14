@@ -102,15 +102,18 @@ func main() {
 
 	peerChannelsFactory := peer_channels.NewFactory()
 
+	peerChannelResponses := make(chan agents.PeerChannelResponse)
+
 	agent, err := agents.NewAgent(ctx, cfg.AgentData, cfg.Agents, caches, transactions, services,
-		locker, store, broadcaster, woc, woc, nil, agentStore, peerChannelsFactory)
+		locker, store, broadcaster, woc, woc, nil, agentStore, peerChannelsFactory,
+		peerChannelResponses)
 	if err != nil {
 		logger.Fatal(ctx, "Failed to create agent : %s", err)
 	}
 
 	agentStore.SetAgent(agent)
 
-	var cacheWait, lockerWait, loadWait sync.WaitGroup
+	var cacheWait, lockerWait, peerChannelResponseWait, loadWait sync.WaitGroup
 
 	cacheShutdown := make(chan error)
 	cacheThread, cacheComplete := threads.NewInterruptableThreadComplete("Cache",
@@ -121,6 +124,12 @@ func main() {
 	lockerThread, lockerComplete := threads.NewInterruptableThreadComplete("Balance Locker",
 		locker.Run, &lockerWait)
 
+	peerChannelResponder := agents.NewPeerChannelResponder(caches, peerChannelsFactory)
+	peerChannelResponseThread, peerChannelResponseComplete := threads.NewUninterruptableThreadComplete("Peer Channel Response",
+		func(ctx context.Context) error {
+			return agents.ProcessResponses(ctx, peerChannelResponder, peerChannelResponses)
+		}, &peerChannelResponseWait)
+
 	loadThread, loadComplete := threads.NewInterruptableThreadComplete("Load",
 		func(ctx context.Context, interrupt <-chan interface{}) error {
 			return load(ctx, interrupt, agent, transactions, woc)
@@ -128,6 +137,7 @@ func main() {
 
 	cacheThread.Start(ctx)
 	lockerThread.Start(ctx)
+	peerChannelResponseThread.Start(ctx)
 	loadThread.Start(ctx)
 
 	// Shutdown
@@ -150,6 +160,9 @@ func main() {
 	case err := <-lockerComplete:
 		logger.Error(ctx, "Balance locker completed : %s", err)
 
+	case err := <-peerChannelResponseComplete:
+		logger.Error(ctx, "Peer Channel Response completed : %s", err)
+
 	case err := <-loadComplete:
 		if err != nil {
 			logger.Error(ctx, "Load completed : %s", err)
@@ -166,6 +179,9 @@ func main() {
 
 	lockerThread.Stop(ctx)
 	lockerWait.Wait()
+
+	close(peerChannelResponses)
+	peerChannelResponseWait.Wait()
 
 	agent.Release(ctx)
 
