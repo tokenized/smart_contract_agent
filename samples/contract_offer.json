@@ -1,0 +1,14 @@
+{
+  "ContractType": 0,
+  "GoverningLaw": "AUD",
+  "Jurisdiction": "AUD",
+  "ContractName": "Sample Business (Development - Test purposes only)",
+  "Issuer": {
+    "Name": "Sample Business Incorporated",
+    "Type": "C",
+    "CountryCode": "AUD",
+    "DomainName": "sample_business.com"
+  },
+  "ContractFee": 100,
+  "ContractOperatorIncluded": true
+}
