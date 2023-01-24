@@ -378,12 +378,22 @@ func Test_Transfers_InsufficientQuantity(t *testing.T) {
 
 	var keys []bitcoin.Key
 	var spentOutputs []*expanded_tx.Output
+	var lockingScripts []bitcoin.Script
+	var resultQuantities []uint64
 
 	// Add senders
 	senderCount := mathRand.Intn(5) + 1
+	mockBalances := state.MockBalances(ctx, &test.caches.TestCaches, test.contract,
+		test.instrument, senderCount)
 	senderQuantity := uint64(0)
 	for s := 0; s < senderCount; s++ {
-		quantity := uint64(mathRand.Intn(1000))
+		mockBalance := mockBalances[s]
+		quantity := mockBalance.Quantity
+		resultQuantities = append(resultQuantities, quantity)
+		if s == 0 {
+			quantity++ // add extra quantity that isn't available
+		}
+
 		senderQuantity += quantity
 		// Add sender
 		instrumentTransfer.InstrumentSenders = append(instrumentTransfer.InstrumentSenders,
@@ -393,23 +403,25 @@ func Test_Transfers_InsufficientQuantity(t *testing.T) {
 			})
 
 		// Add input
-		key, lockingScript, _ := state.MockKey()
-		keys = append(keys, key)
+		keys = append(keys, mockBalance.Key)
+		lockingScripts = append(lockingScripts, mockBalance.LockingScript)
 
-		outpoint := state.MockOutPoint(lockingScript, 1)
+		outpoint := state.MockOutPoint(mockBalance.LockingScript, 1)
 		spentOutputs = append(spentOutputs, &expanded_tx.Output{
-			LockingScript: lockingScript,
+			LockingScript: mockBalance.LockingScript,
 			Value:         1,
 		})
 
-		if err := tx.AddInput(*outpoint, lockingScript, 1); err != nil {
+		if err := tx.AddInput(*outpoint, mockBalance.LockingScript, 1); err != nil {
 			t.Fatalf("Failed to add input : %s", err)
 		}
 	}
 
 	// Add receivers
 	for {
-		_, _, ra := state.MockKey()
+		_, lockingScript, ra := state.MockKey()
+		lockingScripts = append(lockingScripts, lockingScript)
+		resultQuantities = append(resultQuantities, 0)
 		quantity := uint64(mathRand.Intn(1000)) + 1
 		if quantity > senderQuantity {
 			quantity = senderQuantity
@@ -486,6 +498,225 @@ func Test_Transfers_InsufficientQuantity(t *testing.T) {
 	}
 
 	test.caches.Transactions.Release(ctx, transaction.GetTxID())
+
+	balances, err := test.caches.TestCaches.Caches.Balances.GetMulti(ctx, test.contractLockingScript,
+		test.instrument.InstrumentCode, lockingScripts)
+	if err != nil {
+		t.Fatalf("Failed to get balances : %s", err)
+	}
+
+	for i, balance := range balances {
+		js, _ := json.MarshalIndent(balance, "", "  ")
+		t.Logf("Balance : %s", js)
+
+		balance.Lock()
+		gotQuantity := balance.SettlePendingQuantity()
+
+		if gotQuantity != resultQuantities[i] {
+			t.Errorf("Balance wrong : got %d, want %d", gotQuantity, resultQuantities[i])
+		}
+		balance.Unlock()
+	}
+
+	if err := test.caches.TestCaches.Caches.Balances.ReleaseMulti(ctx, test.contractLockingScript,
+		test.instrument.InstrumentCode, balances); err != nil {
+		t.Fatalf("Failed to release balances : %s", err)
+	}
+
+	StopTestAgent(ctx, t, test)
+
+	responseTx := test.broadcaster.GetLastTx()
+	if responseTx == nil {
+		t.Fatalf("No response tx")
+	}
+
+	t.Logf("Response Tx : %s", responseTx)
+
+	// Find rejection action
+	var rejection *actions.Rejection
+	for _, txout := range responseTx.Tx.TxOut {
+		action, err := protocol.Deserialize(txout.LockingScript, true)
+		if err != nil {
+			continue
+		}
+
+		r, ok := action.(*actions.Rejection)
+		if ok {
+			rejection = r
+		}
+	}
+
+	if rejection == nil {
+		t.Fatalf("Missing rejection action")
+	}
+
+	rejectData := actions.RejectionsData(rejection.RejectionCode)
+	if rejectData != nil {
+		t.Logf("Rejection Code : %s", rejectData.Label)
+	}
+
+	js, _ = json.MarshalIndent(rejection, "", "  ")
+	t.Logf("Rejection : %s", js)
+
+	if rejection.RejectionCode != actions.RejectionsInsufficientQuantity {
+		t.Errorf("Wrong rejection code : got %d, want %d", rejection.RejectionCode,
+			actions.RejectionsInsufficientQuantity)
+	}
+}
+
+// Test_Transfers_NoQuantity creates a transfer action for locking scripts that don't have
+// any tokens and will be rejected for insufficient quantity.
+func Test_Transfers_NoQuantity(t *testing.T) {
+	ctx := logger.ContextWithLogger(context.Background(), true, true, "")
+	agent, test := StartTestAgentWithInstrument(ctx, t)
+
+	instrumentTransfer := &actions.InstrumentTransferField{
+		ContractIndex:  0,
+		InstrumentType: string(test.instrument.InstrumentType[:]),
+		InstrumentCode: test.instrument.InstrumentCode[:],
+	}
+
+	transfer := &actions.Transfer{
+		Instruments: []*actions.InstrumentTransferField{instrumentTransfer},
+	}
+
+	tx := txbuilder.NewTxBuilder(0.05, 0.0)
+
+	var keys []bitcoin.Key
+	var spentOutputs []*expanded_tx.Output
+	var lockingScripts []bitcoin.Script
+
+	// Add senders
+	senderCount := mathRand.Intn(5) + 1
+	senderQuantity := uint64(0)
+	for s := 0; s < senderCount; s++ {
+		quantity := uint64(mathRand.Intn(1000))
+		senderQuantity += quantity
+		// Add sender
+		instrumentTransfer.InstrumentSenders = append(instrumentTransfer.InstrumentSenders,
+			&actions.QuantityIndexField{
+				Quantity: quantity,
+				Index:    uint32(len(tx.MsgTx.TxIn)),
+			})
+
+		// Add input
+		key, lockingScript, _ := state.MockKey()
+		keys = append(keys, key)
+		lockingScripts = append(lockingScripts, lockingScript)
+
+		outpoint := state.MockOutPoint(lockingScript, 1)
+		spentOutputs = append(spentOutputs, &expanded_tx.Output{
+			LockingScript: lockingScript,
+			Value:         1,
+		})
+
+		if err := tx.AddInput(*outpoint, lockingScript, 1); err != nil {
+			t.Fatalf("Failed to add input : %s", err)
+		}
+	}
+
+	// Add receivers
+	for {
+		_, lockingScript, ra := state.MockKey()
+		lockingScripts = append(lockingScripts, lockingScript)
+		quantity := uint64(mathRand.Intn(1000)) + 1
+		if quantity > senderQuantity {
+			quantity = senderQuantity
+		}
+		senderQuantity -= quantity
+		instrumentTransfer.InstrumentReceivers = append(instrumentTransfer.InstrumentReceivers,
+			&actions.InstrumentReceiverField{
+				Address:  ra.Bytes(),
+				Quantity: quantity,
+			})
+
+		if senderQuantity == 0 {
+			break
+		}
+	}
+
+	// Add contract output
+	if err := tx.AddOutput(test.contractLockingScript, 150, false, false); err != nil {
+		t.Fatalf("Failed to add contract output : %s", err)
+	}
+
+	js, _ := json.MarshalIndent(transfer, "", "  ")
+	t.Logf("Transfer : %s", js)
+
+	// Add action output
+	transferScript, err := protocol.Serialize(transfer, true)
+	if err != nil {
+		t.Fatalf("Failed to serialize transfer action : %s", err)
+	}
+
+	transferScriptOutputIndex := len(tx.Outputs)
+	if err := tx.AddOutput(transferScript, 0, false, false); err != nil {
+		t.Fatalf("Failed to add transfer action output : %s", err)
+	}
+
+	// Add funding
+	key, lockingScript, _ := state.MockKey()
+	keys = append(keys, key)
+	outpoint := state.MockOutPoint(lockingScript, 250)
+	spentOutputs = append(spentOutputs, &expanded_tx.Output{
+		LockingScript: lockingScript,
+		Value:         250,
+	})
+
+	if err := tx.AddInput(*outpoint, lockingScript, 250); err != nil {
+		t.Fatalf("Failed to add input : %s", err)
+	}
+
+	_, changeLockingScript, _ := state.MockKey()
+	tx.SetChangeLockingScript(changeLockingScript, "")
+
+	if _, err := tx.Sign(keys); err != nil {
+		t.Fatalf("Failed to sign tx : %s", err)
+	}
+
+	t.Logf("Created tx : %s", tx.String(bitcoin.MainNet))
+
+	addTransaction := &transactions.Transaction{
+		Tx:           tx.MsgTx,
+		SpentOutputs: spentOutputs,
+	}
+
+	transaction, err := test.caches.Transactions.Add(ctx, addTransaction)
+	if err != nil {
+		t.Fatalf("Failed to add transaction : %s", err)
+	}
+
+	if err := agent.Process(ctx, transaction, []Action{{
+		AgentLockingScripts: []bitcoin.Script{test.contractLockingScript},
+		OutputIndex:         transferScriptOutputIndex,
+		Action:              transfer,
+	}}); err != nil {
+		t.Fatalf("Failed to process transaction : %s", err)
+	}
+
+	test.caches.Transactions.Release(ctx, transaction.GetTxID())
+
+	balances, err := test.caches.TestCaches.Caches.Balances.GetMulti(ctx, test.contractLockingScript,
+		test.instrument.InstrumentCode, lockingScripts)
+	if err != nil {
+		t.Fatalf("Failed to get balances : %s", err)
+	}
+
+	for _, balance := range balances {
+		js, _ := json.MarshalIndent(balance, "", "  ")
+		t.Logf("Balance : %s", js)
+
+		balance.Lock()
+		if balance.SettlePendingQuantity() != 0 {
+			t.Errorf("Balance not zero : %d", balance.SettlePendingQuantity())
+		}
+		balance.Unlock()
+	}
+
+	if err := test.caches.TestCaches.Caches.Balances.ReleaseMulti(ctx, test.contractLockingScript,
+		test.instrument.InstrumentCode, balances); err != nil {
+		t.Fatalf("Failed to release balances : %s", err)
+	}
 
 	StopTestAgent(ctx, t, test)
 
