@@ -161,6 +161,16 @@ func Test_Responder_Response(t *testing.T) {
 		t.Fatalf("Failed to get peer channel messages : %s", err)
 	}
 
+	if len(responseMessages) == 0 {
+		// wait a bit more to get response since it is in another thread
+		time.Sleep(100 * time.Millisecond)
+		responseMessages, err = mockClient.GetMessages(ctx, peerChannelData.ID,
+			peerChannelData.ReadToken, true, 5)
+		if err != nil {
+			t.Fatalf("Failed to get peer channel messages : %s", err)
+		}
+	}
+
 	js, _ := json.MarshalIndent(responseMessages, "", "  ")
 	t.Logf("Response Messages : %s", js)
 
@@ -351,12 +361,20 @@ func Test_Responder_Request(t *testing.T) {
 
 	test.caches.Transactions.Release(ctx, requestTxID)
 
-	time.Sleep(100 * time.Millisecond)
-
 	responseMessages, err := mockClient.GetMessages(ctx, peerChannelData.ID,
 		peerChannelData.ReadToken, true, 5)
 	if err != nil {
 		t.Fatalf("Failed to get peer channel messages : %s", err)
+	}
+
+	if len(responseMessages) == 0 {
+		// wait a bit more to get response since it is in another thread
+		time.Sleep(100 * time.Millisecond)
+		responseMessages, err = mockClient.GetMessages(ctx, peerChannelData.ID,
+			peerChannelData.ReadToken, true, 5)
+		if err != nil {
+			t.Fatalf("Failed to get peer channel messages : %s", err)
+		}
 	}
 
 	js, _ := json.MarshalIndent(responseMessages, "", "  ")
@@ -544,6 +562,16 @@ func Test_Responder_AlreadyProcessed(t *testing.T) {
 		t.Fatalf("Failed to get peer channel messages : %s", err)
 	}
 
+	if len(responseMessages) == 0 {
+		// wait a bit more to get response since it is in another thread
+		time.Sleep(100 * time.Millisecond)
+		responseMessages, err = mockClient.GetMessages(ctx, peerChannelData.ID,
+			peerChannelData.ReadToken, true, 5)
+		if err != nil {
+			t.Fatalf("Failed to get peer channel messages : %s", err)
+		}
+	}
+
 	js, _ := json.MarshalIndent(responseMessages, "", "  ")
 	t.Logf("Response Messages : %s", js)
 
@@ -711,6 +739,16 @@ func Test_Responder_Reject(t *testing.T) {
 		peerChannelData.ReadToken, true, 5)
 	if err != nil {
 		t.Fatalf("Failed to get peer channel messages : %s", err)
+	}
+
+	if len(responseMessages) == 0 {
+		// wait a bit more to get response since it is in another thread
+		time.Sleep(100 * time.Millisecond)
+		responseMessages, err = mockClient.GetMessages(ctx, peerChannelData.ID,
+			peerChannelData.ReadToken, true, 5)
+		if err != nil {
+			t.Fatalf("Failed to get peer channel messages : %s", err)
+		}
 	}
 
 	js, _ := json.MarshalIndent(responseMessages, "", "  ")
