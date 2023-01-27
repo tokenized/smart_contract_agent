@@ -77,7 +77,7 @@ func CompileActions(ctx context.Context, transaction expanded_tx.TransactionWith
 		}
 
 		if len(agentLockingScripts) == 0 {
-			logger.ErrorWithFields(ctx, []logger.Field{
+			logger.WarnWithFields(ctx, []logger.Field{
 				logger.Stringer("txid", transaction.TxID()),
 				logger.String("action_code", action.Code()),
 				logger.Int("output_index", index),

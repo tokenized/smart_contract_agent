@@ -107,8 +107,8 @@ github.com/stretchr/testify v1.3.0/go.mod h1:M5WIy9Dh21IEIfnGCwXGc5bZfKNJtfHm1UV
 github.com/stretchr/testify v1.4.0/go.mod h1:j7eGeouHqKxXV5pUuKE4zz7dFj8WfuZ+81PSLYec5m4=
 github.com/stretchr/testify v1.5.1 h1:nOGnQDM7FYENwehXlg/kFVnos3rEvtKTjRvOWSzb6H4=
 github.com/stretchr/testify v1.5.1/go.mod h1:5W2xD1RspED5o8YsWQXVCued0rvSQ+mT+I5cxcmMvtA=
-github.com/tokenized/cacher v0.0.0-20230113031236-c5bfc832a86b h1:AudeTXyi8TMoeCAZZbf3kWeAsaxapO+g/6OBpVrkdnQ=
-github.com/tokenized/cacher v0.0.0-20230113031236-c5bfc832a86b/go.mod h1:e4ihMB2mZXyEGZWN04M7r9HCkmMqO/wB2EAjyh/3Kno=
+github.com/tokenized/cacher v0.0.0-20230127205613-a338a00652eb h1:3wPPmVlYyHlx51s9hyquziSpGGZ9Aui0ajURLxsjvx0=
+github.com/tokenized/cacher v0.0.0-20230127205613-a338a00652eb/go.mod h1:mNyXXvCSPz3KjrZywHFj9qgeUJT453dEKeingfKyU9Q=
 github.com/tokenized/channels v0.0.0-20230104015307-4714f95d816d h1:E5M2zsD3lHRFriijbBnn5IN9fUHIBwgmIWVQzAChiqE=
 github.com/tokenized/channels v0.0.0-20230104015307-4714f95d816d/go.mod h1:KLZJ0mpn/DOr1bj2C9BnSUUBP6AfLTzWNWdeHkVd31U=
 github.com/tokenized/config v0.2.1/go.mod h1:+8nT8o80nFsxk7Qt5utgfAkEIFNHFtb26hD56hMlSZE=
@@ -129,9 +129,9 @@ github.com/tokenized/pkg v0.4.1-0.20220520003654-d682cbe31551/go.mod h1:/ZeiNBa1
 github.com/tokenized/pkg v0.4.1-0.20220902162108-2e13eadf8696/go.mod h1:uUb7b1xHv6KfTB+b+FzAlUNJ/al+K7cEAT2wT2Ltglo=
 github.com/tokenized/pkg v0.4.1-0.20221220203801-70a5d9fe2a8a/go.mod h1:uUb7b1xHv6KfTB+b+FzAlUNJ/al+K7cEAT2wT2Ltglo=
 github.com/tokenized/pkg v0.4.1-0.20230104015025-4b404f658c06/go.mod h1:uUb7b1xHv6KfTB+b+FzAlUNJ/al+K7cEAT2wT2Ltglo=
-github.com/tokenized/pkg v0.4.1-0.20230113031120-71712a0df209/go.mod h1:4YaWQp72hr/U+Iu8RqlvlPckYluEzZZ13WCbaYlBUDE=
-github.com/tokenized/pkg v0.4.1-0.20230120221341-1123a91306b7 h1:eb4bdiEvWTwcP5DQ1IlElwTlwidWejQlWL4gAkXvdXk=
 github.com/tokenized/pkg v0.4.1-0.20230120221341-1123a91306b7/go.mod h1:4YaWQp72hr/U+Iu8RqlvlPckYluEzZZ13WCbaYlBUDE=
+github.com/tokenized/pkg v0.4.1-0.20230127204934-f5b3bd113e56 h1:fjusU0kjJ+UW/PZLsgMIrEpAYM5CC3Qzpk4oDmJzQ0M=
+github.com/tokenized/pkg v0.4.1-0.20230127204934-f5b3bd113e56/go.mod h1:4YaWQp72hr/U+Iu8RqlvlPckYluEzZZ13WCbaYlBUDE=
 github.com/tokenized/specification v1.1.2-0.20220902163651-058d13f0a70f/go.mod h1:oGIczii95Lb/C8kVkHEC0eAaIXhAzhM6HOAr33d4kkc=
 github.com/tokenized/specification v1.1.2-0.20230104015151-3f4771229986 h1:GKNetzxi9ydyJFd+rKlrGk3QcISEz/1zNzi4F9fYqzY=
 github.com/tokenized/specification v1.1.2-0.20230104015151-3f4771229986/go.mod h1:en+PCyLVhT0r+A64Kzl7dwlrp22CWAjDd6LlvW4EdC4=
