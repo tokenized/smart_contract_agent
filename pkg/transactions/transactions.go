@@ -326,6 +326,32 @@ func (c *TransactionCache) Get(ctx context.Context, txid bitcoin.Hash32) (*Trans
 	return item.(*Transaction), nil
 }
 
+func (c *TransactionCache) GetMulti(ctx context.Context,
+	txids []bitcoin.Hash32) ([]*Transaction, error) {
+
+	paths := make([]string, len(txids))
+	for i, txid := range txids {
+		paths[i] = TransactionPath(txid)
+	}
+
+	items, err := c.cacher.GetMulti(ctx, c.typ, paths)
+	if err != nil {
+		return nil, errors.Wrap(err, "get")
+	}
+
+	txs := make([]*Transaction, len(items))
+	for i, item := range items {
+		if item == nil {
+			txs[i] = nil
+			continue
+		}
+
+		txs[i] = item.(*Transaction)
+	}
+
+	return txs, nil
+}
+
 func (c *TransactionCache) Release(ctx context.Context, txid bitcoin.Hash32) {
 	c.cacher.Release(ctx, TransactionPath(txid))
 }
