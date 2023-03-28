@@ -5,8 +5,8 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 
-	"github.com/tokenized/cacher"
 	"github.com/tokenized/pkg/bitcoin"
+	ci "github.com/tokenized/pkg/cacher"
 
 	"github.com/pkg/errors"
 )
@@ -26,7 +26,7 @@ type Caches struct {
 	Responders           *ResponderCache
 }
 
-func NewCaches(cache *cacher.Cache) (*Caches, error) {
+func NewCaches(cache ci.Cacher) (*Caches, error) {
 	result := &Caches{}
 
 	contracts, err := NewContractCache(cache)

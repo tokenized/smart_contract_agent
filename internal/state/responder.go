@@ -8,9 +8,9 @@ import (
 	"reflect"
 	"sync"
 
-	"github.com/tokenized/cacher"
 	"github.com/tokenized/pkg/bitcoin"
 	"github.com/tokenized/pkg/bsor"
+	ci "github.com/tokenized/pkg/cacher"
 	"github.com/tokenized/pkg/peer_channels"
 
 	"github.com/pkg/errors"
@@ -22,7 +22,7 @@ const (
 )
 
 type ResponderCache struct {
-	cacher *cacher.Cache
+	cacher ci.Cacher
 	typ    reflect.Type
 }
 
@@ -33,7 +33,7 @@ type Responder struct {
 	sync.Mutex `bsor:"-"`
 }
 
-func NewResponderCache(cache *cacher.Cache) (*ResponderCache, error) {
+func NewResponderCache(cache ci.Cacher) (*ResponderCache, error) {
 	typ := reflect.TypeOf(&Responder{})
 
 	// Verify item value type is valid for a cache item.
@@ -47,7 +47,7 @@ func NewResponderCache(cache *cacher.Cache) (*ResponderCache, error) {
 	}
 
 	itemInterface := itemValue.Interface()
-	if _, ok := itemInterface.(cacher.Value); !ok {
+	if _, ok := itemInterface.(ci.Value); !ok {
 		return nil, errors.New("Type must implement CacheValue")
 	}
 
@@ -129,7 +129,7 @@ func (r *Responder) IsModified() bool {
 	return r.isModified
 }
 
-func (r *Responder) CacheCopy() cacher.Value {
+func (r *Responder) CacheCopy() ci.Value {
 	return r.Copy()
 }
 

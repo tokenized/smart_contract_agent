@@ -8,9 +8,9 @@ import (
 	"reflect"
 	"sync"
 
-	"github.com/tokenized/cacher"
 	"github.com/tokenized/pkg/bitcoin"
 	"github.com/tokenized/pkg/bsor"
+	ci "github.com/tokenized/pkg/cacher"
 
 	"github.com/pkg/errors"
 )
@@ -21,7 +21,7 @@ const (
 )
 
 type BallotCache struct {
-	cacher *cacher.Cache
+	cacher ci.Cacher
 	typ    reflect.Type
 }
 
@@ -37,7 +37,7 @@ type Ballot struct {
 
 type Ballots map[bitcoin.Hash32]*Ballot
 
-func NewBallotCache(cache *cacher.Cache) (*BallotCache, error) {
+func NewBallotCache(cache ci.Cacher) (*BallotCache, error) {
 	typ := reflect.TypeOf(&Ballot{})
 
 	// Verify item value type is valid for a cache item.
@@ -51,7 +51,7 @@ func NewBallotCache(cache *cacher.Cache) (*BallotCache, error) {
 	}
 
 	itemInterface := itemValue.Interface()
-	if _, ok := itemInterface.(cacher.SetValue); !ok {
+	if _, ok := itemInterface.(ci.SetValue); !ok {
 		return nil, errors.New("Type must implement CacheSetValue")
 	}
 
@@ -79,7 +79,7 @@ func (c *BallotCache) AddMulti(ctx context.Context, contractLockingScript bitcoi
 
 	pathPrefix := ballotPathPrefix(contractLockingScript, voteTxID)
 
-	values := make([]cacher.SetValue, len(ballots))
+	values := make([]ci.SetValue, len(ballots))
 	i := 0
 	for _, ballot := range ballots {
 		values[i] = ballot
@@ -236,7 +236,7 @@ func (b *Ballot) Hash() bitcoin.Hash32 {
 	return LockingScriptHash(b.LockingScript)
 }
 
-func (b *Ballot) CacheSetCopy() cacher.SetValue {
+func (b *Ballot) CacheSetCopy() ci.SetValue {
 	result := &Ballot{
 		Quantity: b.Quantity,
 		Vote:     b.Vote,

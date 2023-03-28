@@ -9,7 +9,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tokenized/cacher"
 	"github.com/tokenized/pkg/bitcoin"
 	"github.com/tokenized/pkg/expanded_tx"
 	"github.com/tokenized/pkg/peer_channels"
@@ -160,7 +159,7 @@ func prepareTestData(ctx context.Context, t testing.TB) *TestData {
 
 	test.scheduler = scheduler.NewScheduler(test.broadcaster)
 
-	test.caches = StartTestCaches(ctx, t, test.store, cacher.DefaultConfig(), time.Second)
+	test.caches = StartTestCaches(ctx, t, test.store, time.Second)
 
 	if test.caches.Transactions == nil {
 		t.Fatalf("Transactions is nil")
@@ -243,9 +242,9 @@ func StopTestAgent(ctx context.Context, t *testing.T, test *TestData) {
 }
 
 func StartTestCaches(ctx context.Context, t testing.TB, store storage.StreamStorage,
-	config cacher.Config, timeout time.Duration) *TestCaches {
+	timeout time.Duration) *TestCaches {
 
-	tc := state.StartTestCaches(ctx, t, store, config, timeout)
+	tc := state.StartTestCaches(ctx, t, store, timeout)
 
 	transactions, err := transactions.NewTransactionCache(tc.Cache)
 	if err != nil {

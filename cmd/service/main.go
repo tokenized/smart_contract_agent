@@ -8,10 +8,10 @@ import (
 	"sync"
 	"syscall"
 
-	"github.com/tokenized/cacher"
 	"github.com/tokenized/config"
 	"github.com/tokenized/logger"
 	"github.com/tokenized/pkg/bitcoin"
+	"github.com/tokenized/pkg/cacher"
 	"github.com/tokenized/pkg/expanded_tx"
 	"github.com/tokenized/pkg/peer_channels"
 	"github.com/tokenized/pkg/storage"
@@ -40,7 +40,6 @@ type Config struct {
 	RequestPeerChannelReadToken *string          `envconfig:"REQUEST_PEER_CHANNEL_READ_TOKEN" json:"request_peer_channel_read_token"`
 
 	Storage storage.Config       `json:"storage"`
-	Cache   cacher.Config        `json:"cache"`
 	SpyNode spyNodeClient.Config `json:"spynode"`
 	Logger  logger.SetupConfig   `json:"logger"`
 }
@@ -98,7 +97,7 @@ func main() {
 
 	scheduler := scheduler.NewScheduler(broadcaster)
 
-	cache := cacher.NewCache(store, cfg.Cache)
+	cache := cacher.NewSimpleCache(store)
 	caches, err := state.NewCaches(cache)
 	if err != nil {
 		logger.Fatal(ctx, "Failed to create caches : %s", err)
@@ -121,17 +120,11 @@ func main() {
 		peerChannelsFactory, peerChannelResponses)
 	spyNode.RegisterHandler(service)
 
-	var spyNodeWait, cacheWait, lockerWait, peerChannelResponseWait, schedulerWait,
+	var spyNodeWait, lockerWait, peerChannelResponseWait, schedulerWait,
 		peerChannelWait sync.WaitGroup
 
 	schedulerThread, schedulerComplete := threads.NewInterruptableThreadComplete("Scheduler",
 		scheduler.Run, &schedulerWait)
-
-	cacheShutdown := make(chan error)
-	cacheThread, cacheComplete := threads.NewInterruptableThreadComplete("Cache",
-		func(ctx context.Context, interrupt <-chan interface{}) error {
-			return cache.Run(ctx, interrupt, cacheShutdown)
-		}, &cacheWait)
 
 	lockerThread, lockerComplete := threads.NewInterruptableThreadComplete("Balance Locker",
 		locker.Run, &lockerWait)
@@ -151,12 +144,8 @@ func main() {
 				cfg.RequestPeerChannelReadToken)
 		}, &peerChannelWait)
 
-	cacheThread.Start(ctx)
-
 	if err := service.Load(ctx); err != nil {
 		service.Release(ctx)
-		cacheThread.Stop(ctx)
-		cacheWait.Wait()
 		logger.Fatal(ctx, "Failed to load service : %s", err)
 	}
 
@@ -179,12 +168,6 @@ func main() {
 	select {
 	case err := <-schedulerComplete:
 		logger.Error(ctx, "Scheduler shutting down : %s", err)
-
-	case err := <-cacheShutdown:
-		logger.Error(ctx, "Cache shutting down : %s", err)
-
-	case err := <-cacheComplete:
-		logger.Error(ctx, "Cache completed : %s", err)
 
 	case err := <-lockerComplete:
 		logger.Error(ctx, "Balance locker completed : %s", err)
@@ -222,9 +205,6 @@ func main() {
 	}
 
 	service.Release(ctx)
-
-	cacheThread.Stop(ctx)
-	cacheWait.Wait()
 }
 
 type SpyNodeBroadcaster struct {

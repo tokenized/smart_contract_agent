@@ -8,9 +8,9 @@ import (
 	"reflect"
 	"sync"
 
-	"github.com/tokenized/cacher"
 	"github.com/tokenized/pkg/bitcoin"
 	"github.com/tokenized/pkg/bsor"
+	ci "github.com/tokenized/pkg/cacher"
 
 	"github.com/pkg/errors"
 )
@@ -24,7 +24,7 @@ const (
 )
 
 type SubscriptionCache struct {
-	cacher *cacher.Cache
+	cacher ci.Cacher
 	typ    reflect.Type
 }
 
@@ -49,7 +49,7 @@ type SubscriptionValue interface {
 	Serialize(w io.Writer) error
 	Deserialize(r io.Reader) error
 
-	CacheSetCopy() cacher.SetValue
+	CacheSetCopy() ci.SetValue
 
 	// All functions will be called by cache while the object is locked.
 	Lock()
@@ -64,7 +64,7 @@ type LockingScriptSubscription struct {
 	sync.Mutex `bsor:"-"`
 }
 
-func NewSubscriptionCache(cache *cacher.Cache) (*SubscriptionCache, error) {
+func NewSubscriptionCache(cache ci.Cacher) (*SubscriptionCache, error) {
 	typ := reflect.TypeOf(&Subscription{})
 
 	// Verify item value type is valid for a cache item.
@@ -78,7 +78,7 @@ func NewSubscriptionCache(cache *cacher.Cache) (*SubscriptionCache, error) {
 	}
 
 	itemInterface := itemValue.Interface()
-	if _, ok := itemInterface.(cacher.SetValue); !ok {
+	if _, ok := itemInterface.(ci.SetValue); !ok {
 		return nil, errors.New("Type must implement CacheSetValue")
 	}
 
@@ -106,7 +106,7 @@ func (c *SubscriptionCache) AddMulti(ctx context.Context, contractLockingScript 
 
 	pathPrefix := subscriptionPathPrefix(contractLockingScript)
 
-	values := make([]cacher.SetValue, len(subscriptions))
+	values := make([]ci.SetValue, len(subscriptions))
 	for i, subscription := range subscriptions {
 		values[i] = subscription
 	}
@@ -252,7 +252,7 @@ func (s *Subscription) Hash() bitcoin.Hash32 {
 	return s.value.Hash()
 }
 
-func (s *Subscription) CacheSetCopy() cacher.SetValue {
+func (s *Subscription) CacheSetCopy() ci.SetValue {
 	return s.value.CacheSetCopy()
 }
 
@@ -315,7 +315,7 @@ func (s *LockingScriptSubscription) ClearModified() {
 	s.isModified = false
 }
 
-func (s *LockingScriptSubscription) CacheSetCopy() cacher.SetValue {
+func (s *LockingScriptSubscription) CacheSetCopy() ci.SetValue {
 	result := &LockingScriptSubscription{
 		LockingScript: make(bitcoin.Script, len(s.LockingScript)),
 	}

@@ -6,7 +6,6 @@ import (
 	"encoding/binary"
 	"sync"
 
-	"github.com/tokenized/channels/wallet"
 	"github.com/tokenized/pkg/bitcoin"
 	"github.com/tokenized/pkg/expanded_tx"
 	"github.com/tokenized/pkg/merkle_proof"
@@ -187,13 +186,13 @@ func (s *Service) addTx(ctx context.Context, txid bitcoin.Hash32,
 	}
 
 	if spyNodeTx.State.Safe {
-		transaction.State = wallet.TxStateSafe
+		transaction.State = transactions.TxStateSafe
 	} else {
 		if spyNodeTx.State.UnSafe {
-			transaction.State |= wallet.TxStateUnsafe
+			transaction.State |= transactions.TxStateUnsafe
 		}
 		if spyNodeTx.State.Cancelled {
-			transaction.State |= wallet.TxStateCancelled
+			transaction.State |= transactions.TxStateCancelled
 		}
 	}
 

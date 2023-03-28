@@ -8,13 +8,13 @@ import (
 	"github.com/tokenized/logger"
 	"github.com/tokenized/pkg/bitcoin"
 	"github.com/tokenized/pkg/expanded_tx"
-	"github.com/tokenized/pkg/txbuilder"
 	"github.com/tokenized/pkg/wire"
 	"github.com/tokenized/smart_contract_agent/internal/platform"
 	"github.com/tokenized/smart_contract_agent/internal/state"
 	"github.com/tokenized/smart_contract_agent/pkg/transactions"
 	"github.com/tokenized/specification/dist/golang/actions"
 	"github.com/tokenized/specification/dist/golang/protocol"
+	"github.com/tokenized/txbuilder"
 
 	"github.com/pkg/errors"
 )

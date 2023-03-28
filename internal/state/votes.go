@@ -8,10 +8,10 @@ import (
 	"reflect"
 	"sync"
 
-	"github.com/tokenized/cacher"
 	"github.com/tokenized/logger"
 	"github.com/tokenized/pkg/bitcoin"
 	"github.com/tokenized/pkg/bsor"
+	ci "github.com/tokenized/pkg/cacher"
 	"github.com/tokenized/pkg/storage"
 	"github.com/tokenized/smart_contract_agent/pkg/locker"
 	"github.com/tokenized/specification/dist/golang/actions"
@@ -26,7 +26,7 @@ const (
 )
 
 type VoteCache struct {
-	cacher *cacher.Cache
+	cacher ci.Cacher
 	typ    reflect.Type
 }
 
@@ -39,7 +39,7 @@ type Vote struct {
 	Vote     *actions.Vote   `bsor:"4" json:"vote"`
 	VoteTxID *bitcoin.Hash32 `bsor:"5" json:"vote_txid"`
 
-	Result     *actions.Result `bsor:"5" json:"result"`
+	Result     *actions.Result `bsor:"6" json:"result"`
 	ResultTxID *bitcoin.Hash32 `bsor:"7" json:"result_txid"`
 
 	ContractWideVote bool      `bsor:"8" json:"contract_wide_vote"`
@@ -53,7 +53,7 @@ type Vote struct {
 	sync.Mutex `bsor:"-"`
 }
 
-func NewVoteCache(cache *cacher.Cache) (*VoteCache, error) {
+func NewVoteCache(cache ci.Cacher) (*VoteCache, error) {
 	typ := reflect.TypeOf(&Vote{})
 
 	// Verify item value type is valid for a cache item.
@@ -67,7 +67,7 @@ func NewVoteCache(cache *cacher.Cache) (*VoteCache, error) {
 	}
 
 	itemInterface := itemValue.Interface()
-	if _, ok := itemInterface.(cacher.Value); !ok {
+	if _, ok := itemInterface.(ci.Value); !ok {
 		return nil, errors.New("Type must implement CacheValue")
 	}
 
@@ -616,7 +616,7 @@ func (v *Vote) IsModified() bool {
 	return v.isModified
 }
 
-func (v *Vote) CacheCopy() cacher.Value {
+func (v *Vote) CacheCopy() ci.Value {
 	result := &Vote{
 		ContractWideVote: v.ContractWideVote,
 		TokenQuantity:    v.TokenQuantity,

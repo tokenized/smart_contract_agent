@@ -3,7 +3,7 @@ package agents
 import (
 	"context"
 
-	"github.com/tokenized/cacher"
+	ci "github.com/tokenized/pkg/cacher"
 	"github.com/tokenized/pkg/peer_channels"
 	"github.com/tokenized/pkg/storage"
 	"github.com/tokenized/smart_contract_agent/internal/state"
@@ -31,7 +31,7 @@ type Factory struct {
 	peerChannelResponses chan PeerChannelResponse
 }
 
-func NewFactory(config Config, store storage.CopyList, cache *cacher.Cache,
+func NewFactory(config Config, store storage.CopyList, cache ci.Cacher,
 	transactions *transactions.TransactionCache,
 	services *contract_services.ContractServicesCache, locker locker.Locker,
 	broadcaster Broadcaster, fetcher Fetcher, headers BlockHeaders, scheduler *scheduler.Scheduler,

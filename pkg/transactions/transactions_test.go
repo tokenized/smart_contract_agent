@@ -4,33 +4,24 @@ import (
 	"context"
 	"math/rand"
 	"testing"
-	"time"
 
-	"github.com/tokenized/cacher"
 	"github.com/tokenized/pkg/bitcoin"
+	ci "github.com/tokenized/pkg/cacher"
 	"github.com/tokenized/pkg/storage"
-	"github.com/tokenized/pkg/txbuilder"
 	"github.com/tokenized/pkg/wire"
+	"github.com/tokenized/txbuilder"
 )
 
 func Test_FetchTxs(t *testing.T) {
 	ctx := context.Background()
 	store := storage.NewMockStorage()
 
-	cacher := cacher.NewCache(store, cacher.DefaultConfig())
+	cacher := ci.NewSimpleCache(store)
 
 	cache, err := NewTransactionCache(cacher)
 	if err != nil {
 		t.Fatalf("Failed to create tx cache : %s", err)
 	}
-
-	shutdown := make(chan error, 1)
-	interrupt := make(chan interface{})
-	cacheComplete := make(chan interface{})
-	go func() {
-		cacher.Run(ctx, interrupt, shutdown)
-		close(cacheComplete)
-	}()
 
 	txCount := 1000
 	t.Logf("Creating %d transactions", txCount)
@@ -90,10 +81,7 @@ func Test_FetchTxs(t *testing.T) {
 
 	t.Logf("Finished retrieving")
 
-	close(interrupt)
-	select {
-	case <-time.After(3 * time.Second):
-		t.Errorf("Cache shutdown timed out")
-	case <-cacheComplete:
+	if !cacher.IsEmpty() {
+		t.Fatalf("Cacher is not empty")
 	}
 }

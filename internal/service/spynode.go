@@ -3,7 +3,6 @@ package service
 import (
 	"context"
 
-	"github.com/tokenized/channels/wallet"
 	"github.com/tokenized/logger"
 	"github.com/tokenized/pkg/bitcoin"
 	"github.com/tokenized/smart_contract_agent/pkg/agents"
@@ -54,22 +53,22 @@ func (s *Service) HandleTxUpdate(ctx context.Context, txUpdate *spynodeClient.Tx
 	transaction.Lock()
 
 	if txUpdate.State.Safe {
-		if transaction.State&wallet.TxStateSafe == 0 {
-			transaction.State = wallet.TxStateSafe
+		if transaction.State&transactions.TxStateSafe == 0 {
+			transaction.State = transactions.TxStateSafe
 			transaction.MarkModified()
 			isModified = true
 		}
 	} else {
 		if txUpdate.State.UnSafe {
-			if transaction.State&wallet.TxStateUnsafe == 0 {
-				transaction.State |= wallet.TxStateUnsafe
+			if transaction.State&transactions.TxStateUnsafe == 0 {
+				transaction.State |= transactions.TxStateUnsafe
 				transaction.MarkModified()
 				isModified = true
 			}
 		}
 		if txUpdate.State.Cancelled {
-			if transaction.State&wallet.TxStateCancelled == 0 {
-				transaction.State |= wallet.TxStateCancelled
+			if transaction.State&transactions.TxStateCancelled == 0 {
+				transaction.State |= transactions.TxStateCancelled
 				transaction.MarkModified()
 				isModified = true
 			}

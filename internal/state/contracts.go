@@ -10,10 +10,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/tokenized/cacher"
 	"github.com/tokenized/logger"
 	"github.com/tokenized/pkg/bitcoin"
 	"github.com/tokenized/pkg/bsor"
+	ci "github.com/tokenized/pkg/cacher"
 	"github.com/tokenized/smart_contract_agent/internal/platform"
 	"github.com/tokenized/specification/dist/golang/actions"
 	"github.com/tokenized/specification/dist/golang/protocol"
@@ -27,7 +27,7 @@ const (
 )
 
 type ContractCache struct {
-	cacher *cacher.Cache
+	cacher ci.Cacher
 	typ    reflect.Type
 }
 
@@ -53,7 +53,7 @@ type Contract struct {
 	sync.Mutex `bsor:"-"`
 }
 
-func NewContractCache(cache *cacher.Cache) (*ContractCache, error) {
+func NewContractCache(cache ci.Cacher) (*ContractCache, error) {
 	typ := reflect.TypeOf(&Contract{})
 
 	// Verify item value type is valid for a cache item.
@@ -67,7 +67,7 @@ func NewContractCache(cache *cacher.Cache) (*ContractCache, error) {
 	}
 
 	itemInterface := itemValue.Interface()
-	if _, ok := itemInterface.(cacher.Value); !ok {
+	if _, ok := itemInterface.(ci.Value); !ok {
 		return nil, errors.New("Type must implement CacheValue")
 	}
 
@@ -245,7 +245,7 @@ func (c *Contract) IsModified() bool {
 	return c.isModified
 }
 
-func (c *Contract) CacheCopy() cacher.Value {
+func (c *Contract) CacheCopy() ci.Value {
 	result := &Contract{
 		InstrumentCount: c.InstrumentCount,
 	}

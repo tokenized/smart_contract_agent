@@ -6,7 +6,7 @@ import (
 	"strconv"
 
 	"github.com/tokenized/pkg/bitcoin"
-	"github.com/tokenized/pkg/txbuilder"
+	"github.com/tokenized/txbuilder"
 
 	"github.com/pkg/errors"
 )

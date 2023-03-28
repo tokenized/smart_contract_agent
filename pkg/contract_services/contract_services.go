@@ -8,10 +8,10 @@ import (
 	"reflect"
 	"sync"
 
-	"github.com/tokenized/cacher"
 	"github.com/tokenized/logger"
 	"github.com/tokenized/pkg/bitcoin"
 	"github.com/tokenized/pkg/bsor"
+	ci "github.com/tokenized/pkg/cacher"
 	"github.com/tokenized/smart_contract_agent/internal/state"
 	"github.com/tokenized/specification/dist/golang/actions"
 
@@ -28,7 +28,7 @@ var (
 )
 
 type ContractServicesCache struct {
-	cacher *cacher.Cache
+	cacher ci.Cacher
 	typ    reflect.Type
 }
 
@@ -48,7 +48,7 @@ type Service struct {
 	PublicKey bitcoin.PublicKey `bsor:"3" json:"public_key"`
 }
 
-func NewContractServicesCache(cache *cacher.Cache) (*ContractServicesCache, error) {
+func NewContractServicesCache(cache ci.Cacher) (*ContractServicesCache, error) {
 	typ := reflect.TypeOf(&ContractServices{})
 
 	// Verify item value type is valid for a cache item.
@@ -62,7 +62,7 @@ func NewContractServicesCache(cache *cacher.Cache) (*ContractServicesCache, erro
 	}
 
 	itemInterface := itemValue.Interface()
-	if _, ok := itemInterface.(cacher.Value); !ok {
+	if _, ok := itemInterface.(ci.Value); !ok {
 		return nil, errors.New("Type must implement CacheValue")
 	}
 
@@ -186,7 +186,7 @@ func (c *ContractServices) IsModified() bool {
 	return c.isModified
 }
 
-func (s *ContractServices) CacheCopy() cacher.Value {
+func (s *ContractServices) CacheCopy() ci.Value {
 	result := &ContractServices{
 		Services: make([]*Service, len(s.Services)),
 	}

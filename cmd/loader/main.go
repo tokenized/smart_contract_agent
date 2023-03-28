@@ -7,11 +7,10 @@ import (
 	"sync"
 	"syscall"
 
-	"github.com/tokenized/cacher"
-	"github.com/tokenized/channels/wallet"
 	"github.com/tokenized/config"
 	"github.com/tokenized/logger"
 	"github.com/tokenized/pkg/bitcoin"
+	"github.com/tokenized/pkg/cacher"
 	"github.com/tokenized/pkg/expanded_tx"
 	"github.com/tokenized/pkg/peer_channels"
 	"github.com/tokenized/pkg/storage"
@@ -40,7 +39,6 @@ type Config struct {
 	Network            bitcoin.Network `default:"mainnet" json:"network" envconfig:"NETWORK"`
 
 	Storage storage.Config     `json:"storage"`
-	Cache   cacher.Config      `json:"cache"`
 	Logger  logger.SetupConfig `json:"logger"`
 }
 
@@ -78,7 +76,7 @@ func main() {
 		logger.Fatal(ctx, "Failed to create storage : %s", err)
 	}
 
-	cache := cacher.NewCache(store, cfg.Cache)
+	cache := cacher.NewSimpleCache(store)
 	caches, err := state.NewCaches(cache)
 	if err != nil {
 		logger.Fatal(ctx, "Failed to create caches : %s", err)
@@ -113,13 +111,7 @@ func main() {
 
 	agentStore.SetAgent(agent)
 
-	var cacheWait, lockerWait, peerChannelResponseWait, loadWait sync.WaitGroup
-
-	cacheShutdown := make(chan error)
-	cacheThread, cacheComplete := threads.NewInterruptableThreadComplete("Cache",
-		func(ctx context.Context, interrupt <-chan interface{}) error {
-			return cache.Run(ctx, interrupt, cacheShutdown)
-		}, &cacheWait)
+	var lockerWait, peerChannelResponseWait, loadWait sync.WaitGroup
 
 	lockerThread, lockerComplete := threads.NewInterruptableThreadComplete("Balance Locker",
 		locker.Run, &lockerWait)
@@ -135,7 +127,6 @@ func main() {
 			return load(ctx, interrupt, agent, transactions, woc)
 		}, &loadWait)
 
-	cacheThread.Start(ctx)
 	lockerThread.Start(ctx)
 	peerChannelResponseThread.Start(ctx)
 	loadThread.Start(ctx)
@@ -151,12 +142,6 @@ func main() {
 	//
 	// Blocking main and waiting for shutdown.
 	select {
-	case err := <-cacheShutdown:
-		logger.Error(ctx, "Cache shutting down : %s", err)
-
-	case err := <-cacheComplete:
-		logger.Error(ctx, "Cache completed : %s", err)
-
 	case err := <-lockerComplete:
 		logger.Error(ctx, "Balance locker completed : %s", err)
 
@@ -184,9 +169,6 @@ func main() {
 	peerChannelResponseWait.Wait()
 
 	agent.Release(ctx)
-
-	cacheThread.Stop(ctx)
-	cacheWait.Wait()
 }
 
 func getTx(ctx context.Context, transactionsCache *transactions.TransactionCache,
@@ -206,7 +188,7 @@ func getTx(ctx context.Context, transactionsCache *transactions.TransactionCache
 
 	newTransaction := &transactions.Transaction{
 		Tx:    gotTx,
-		State: wallet.TxStateSafe, // assume safe because it is history
+		State: transactions.TxStateSafe, // assume safe because it is history
 	}
 	return transactionsCache.Add(ctx, newTransaction)
 }

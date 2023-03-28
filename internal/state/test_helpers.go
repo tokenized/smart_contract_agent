@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tokenized/cacher"
 	"github.com/tokenized/pkg/bitcoin"
+	ci "github.com/tokenized/pkg/cacher"
 	"github.com/tokenized/pkg/expanded_tx"
 	"github.com/tokenized/pkg/storage"
 	"github.com/tokenized/pkg/wire"
@@ -23,14 +23,11 @@ import (
 
 type TestCaches struct {
 	Timeout         time.Duration
-	Cache           *cacher.Cache
+	Cache           ci.Cacher
 	Caches          *Caches
 	Locker          locker.Locker
-	CacheInterrupt  chan interface{}
 	LockerInterrupt chan interface{}
-	CacheComplete   chan error
 	LockerComplete  chan error
-	Shutdown        chan error
 	StartShutdown   chan interface{}
 	Wait            sync.WaitGroup
 
@@ -40,16 +37,13 @@ type TestCaches struct {
 
 // StartTestCaches starts all the caches and wraps them into one interrupt and complete.
 func StartTestCaches(ctx context.Context, t testing.TB, store storage.StreamStorage,
-	config cacher.Config, timeout time.Duration) *TestCaches {
+	timeout time.Duration) *TestCaches {
 
 	result := &TestCaches{
 		Timeout:         timeout,
-		Cache:           cacher.NewCache(store, config),
-		CacheInterrupt:  make(chan interface{}),
+		Cache:           ci.NewSimpleCache(store),
 		LockerInterrupt: make(chan interface{}),
-		CacheComplete:   make(chan error, 1),
 		LockerComplete:  make(chan error, 1),
-		Shutdown:        make(chan error, 1),
 		StartShutdown:   make(chan interface{}),
 	}
 
@@ -62,25 +56,6 @@ func StartTestCaches(ctx context.Context, t testing.TB, store storage.StreamStor
 	locker := locker.NewThreadedLocker(1000)
 
 	result.Locker = locker
-
-	go func() {
-		defer func() {
-			if err := recover(); err != nil {
-				t.Errorf("Cache panic : %s", err)
-				result.CacheComplete <- fmt.Errorf("panic: %s", err)
-			}
-
-			result.Wait.Done()
-			t.Logf("Cache finished")
-		}()
-
-		result.Wait.Add(1)
-		err := result.Cache.Run(ctx, result.CacheInterrupt, result.Shutdown)
-		if err != nil {
-			t.Errorf("Cache returned an error : %s", err)
-		}
-		result.CacheComplete <- err
-	}()
 
 	go func() {
 		defer func() {
@@ -103,23 +78,6 @@ func StartTestCaches(ctx context.Context, t testing.TB, store storage.StreamStor
 
 	go func() {
 		select {
-		case err := <-result.Shutdown:
-			t.Errorf("Cache shutting down : %s", err)
-
-			if err != nil {
-				result.failedLock.Lock()
-				result.failed = err
-				result.failedLock.Unlock()
-			}
-
-		case err, ok := <-result.CacheComplete:
-			if ok && err != nil {
-				t.Errorf("Cache failed : %s", err)
-			} else {
-				// StartShutdown should have been triggered first.
-				t.Errorf("Cache completed prematurely")
-			}
-
 		case <-result.StartShutdown:
 			// t.Logf("Cache start shutdown triggered")
 		}
@@ -141,16 +99,6 @@ func (c *TestCaches) StopTestCaches() {
 	}
 
 	close(c.StartShutdown)
-	close(c.CacheInterrupt)
-	select {
-	case err := <-c.CacheComplete:
-		if err != nil {
-			panic(fmt.Sprintf("Cache failed : %s", err))
-		}
-
-	case <-time.After(c.Timeout):
-		panic("Cache shutdown timed out")
-	}
 }
 
 func (c *TestCaches) IsFailed() error {

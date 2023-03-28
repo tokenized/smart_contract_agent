@@ -7,17 +7,16 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tokenized/channels/wallet"
 	"github.com/tokenized/logger"
 	"github.com/tokenized/pkg/bitcoin"
 	"github.com/tokenized/pkg/expanded_tx"
-	"github.com/tokenized/pkg/txbuilder"
 	"github.com/tokenized/pkg/wire"
 	"github.com/tokenized/smart_contract_agent/internal/state"
 	"github.com/tokenized/smart_contract_agent/pkg/transactions"
 	"github.com/tokenized/specification/dist/golang/actions"
 	"github.com/tokenized/specification/dist/golang/instruments"
 	"github.com/tokenized/specification/dist/golang/protocol"
+	"github.com/tokenized/txbuilder"
 )
 
 func Test_Process(t *testing.T) {
@@ -38,7 +37,7 @@ func Test_Process(t *testing.T) {
 
 	contractOfferTransaction := &transactions.Transaction{
 		Tx:           offerTx,
-		State:        wallet.TxStateSafe,
+		State:        transactions.TxStateSafe,
 		SpentOutputs: outputs,
 	}
 
@@ -86,7 +85,7 @@ func Test_Process(t *testing.T) {
 
 	contractFormationTransaction := &transactions.Transaction{
 		Tx:           tx,
-		State:        wallet.TxStateSafe,
+		State:        transactions.TxStateSafe,
 		SpentOutputs: outputs,
 	}
 
@@ -152,7 +151,7 @@ func Test_Process(t *testing.T) {
 
 	instrumentDefinitionTransaction := &transactions.Transaction{
 		Tx:           definitionTx,
-		State:        wallet.TxStateSafe,
+		State:        transactions.TxStateSafe,
 		SpentOutputs: outputs,
 	}
 
@@ -211,7 +210,7 @@ func Test_Process(t *testing.T) {
 
 	instrumentCreationTx := &transactions.Transaction{
 		Tx:           tx,
-		State:        wallet.TxStateSafe,
+		State:        transactions.TxStateSafe,
 		SpentOutputs: outputs,
 	}
 
@@ -371,7 +370,7 @@ func Test_Process(t *testing.T) {
 
 		transferTransaction := &transactions.Transaction{
 			Tx:           transferTx,
-			State:        wallet.TxStateSafe,
+			State:        transactions.TxStateSafe,
 			SpentOutputs: outputs,
 		}
 
@@ -452,7 +451,7 @@ func Test_Process(t *testing.T) {
 
 		settlementTx := &transactions.Transaction{
 			Tx:           tx,
-			State:        wallet.TxStateSafe,
+			State:        transactions.TxStateSafe,
 			SpentOutputs: outputs,
 		}
 
@@ -554,7 +553,7 @@ func Test_Process(t *testing.T) {
 
 		transferTransaction := &transactions.Transaction{
 			Tx:           transferTx,
-			State:        wallet.TxStateSafe,
+			State:        transactions.TxStateSafe,
 			SpentOutputs: outputs,
 		}
 
@@ -635,7 +634,7 @@ func Test_Process(t *testing.T) {
 
 		settlementTx := &transactions.Transaction{
 			Tx:           tx,
-			State:        wallet.TxStateSafe,
+			State:        transactions.TxStateSafe,
 			SpentOutputs: outputs,
 		}
 

@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/tokenized/channels/wallet"
 	"github.com/tokenized/logger"
 	"github.com/tokenized/pkg/bitcoin"
 	"github.com/tokenized/pkg/expanded_tx"
@@ -247,7 +246,7 @@ func (a *Agent) UpdateTransaction(ctx context.Context, transaction *transactions
 	txState := transaction.State
 	transaction.Unlock()
 
-	if txState&wallet.TxStateSafe != 0 {
+	if txState&transactions.TxStateSafe != 0 {
 		transaction.Lock()
 		if !transaction.SetIsProcessing(contractHash) {
 			transaction.Unlock()
@@ -263,7 +262,7 @@ func (a *Agent) UpdateTransaction(ctx context.Context, transaction *transactions
 		return nil
 	}
 
-	if txState&wallet.TxStateUnsafe != 0 || txState&wallet.TxStateCancelled != 0 {
+	if txState&transactions.TxStateUnsafe != 0 || txState&transactions.TxStateCancelled != 0 {
 		transaction.Lock()
 		if !transaction.SetIsProcessing(contractHash) {
 			transaction.Unlock()

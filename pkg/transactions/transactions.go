@@ -6,12 +6,12 @@ import (
 	"fmt"
 	"io"
 	"reflect"
+	"strings"
 	"sync"
 
-	"github.com/tokenized/cacher"
-	"github.com/tokenized/channels/wallet"
 	"github.com/tokenized/pkg/bitcoin"
 	"github.com/tokenized/pkg/bsor"
+	ci "github.com/tokenized/pkg/cacher"
 	"github.com/tokenized/pkg/expanded_tx"
 	"github.com/tokenized/pkg/merkle_proof"
 	"github.com/tokenized/pkg/wire"
@@ -23,6 +23,11 @@ import (
 )
 
 const (
+	TxStatePending   = TxState(0) // Initial time period to see double spend attempts has not passed.
+	TxStateSafe      = TxState(1) // No conflicting txs seen for initial time period.
+	TxStateUnsafe    = TxState(2) // Conflicting tx seen, but not confirmed.
+	TxStateCancelled = TxState(4) // Conflicting tx confirmed.
+
 	txVersion = uint8(0)
 	txPath    = "txs"
 )
@@ -33,8 +38,10 @@ var (
 	endian = binary.LittleEndian
 )
 
+type TxState uint8
+
 type TransactionCache struct {
-	cacher *cacher.Cache
+	cacher ci.Cacher
 	typ    reflect.Type
 }
 
@@ -46,7 +53,7 @@ type Processed struct {
 
 type Transaction struct {
 	Tx           *wire.MsgTx               `bsor:"1" json:"tx"`
-	State        wallet.TxState            `bsor:"2" json:"state,omitempty"`
+	State        TxState                   `bsor:"2" json:"state,omitempty"`
 	MerkleProofs merkle_proof.MerkleProofs `bsor:"3" json:"merkle_proofs,omitempty"`
 	SpentOutputs expanded_tx.Outputs       `bsor:"4" json:"spent_outputs,omitempty"` // outputs being spent by inputs in Tx
 
@@ -63,7 +70,7 @@ type Transaction struct {
 	sync.Mutex   `bsor:"-"`
 }
 
-func NewTransactionCache(cache *cacher.Cache) (*TransactionCache, error) {
+func NewTransactionCache(cache ci.Cacher) (*TransactionCache, error) {
 	typ := reflect.TypeOf(&Transaction{})
 
 	// Verify item value type is valid for a cache item.
@@ -77,7 +84,7 @@ func NewTransactionCache(cache *cacher.Cache) (*TransactionCache, error) {
 	}
 
 	itemInterface := itemValue.Interface()
-	if _, ok := itemInterface.(cacher.Value); !ok {
+	if _, ok := itemInterface.(ci.Value); !ok {
 		return nil, errors.New("Type must implement CacheValue")
 	}
 
@@ -443,7 +450,7 @@ func (tx *Transaction) IsModified() bool {
 	return tx.isModified
 }
 
-func (t *Transaction) CacheCopy() cacher.Value {
+func (t *Transaction) CacheCopy() ci.Value {
 	result := &Transaction{
 		State:        t.State,
 		MerkleProofs: t.MerkleProofs.Copy(),
@@ -624,4 +631,58 @@ func (r Processed) Copy() Processed {
 		copy(result.ResponseTxID[:], r.ResponseTxID[:])
 	}
 	return result
+}
+
+func (v TxState) MarshalText() ([]byte, error) {
+	s := v.String()
+	if len(s) == 0 {
+		return nil, fmt.Errorf("Unknown TxState value \"%d\"", uint8(v))
+	}
+
+	return []byte(s), nil
+}
+
+func (v *TxState) UnmarshalText(text []byte) error {
+	return v.SetString(string(text))
+}
+
+func (v *TxState) SetString(s string) error {
+	parts := strings.Split(s, "|")
+	value := TxStatePending
+	for _, part := range parts {
+		switch s {
+		case "pending":
+			value |= TxStatePending
+		case "safe":
+			value |= TxStateSafe
+		case "unsafe":
+			value |= TxStateUnsafe
+		case "cancelled":
+			value |= TxStateCancelled
+		default:
+			*v = 0
+			return fmt.Errorf("Unknown TxState value \"%s\"", part)
+		}
+	}
+
+	*v = value
+	return nil
+}
+
+func (v TxState) String() string {
+	var values []string
+	if v&TxStatePending != 0 {
+		values = append(values, "pending")
+	}
+	if v&TxStateSafe != 0 {
+		values = append(values, "safe")
+	}
+	if v&TxStateUnsafe != 0 {
+		values = append(values, "unsafe")
+	}
+	if v&TxStateCancelled != 0 {
+		values = append(values, "cancelled")
+	}
+
+	return strings.Join(values, "|")
 }

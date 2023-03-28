@@ -15,12 +15,12 @@ import (
 	"github.com/tokenized/pkg/bitcoin"
 	"github.com/tokenized/pkg/expanded_tx"
 	"github.com/tokenized/pkg/peer_channels"
-	"github.com/tokenized/pkg/txbuilder"
 	"github.com/tokenized/smart_contract_agent/internal/state"
 	"github.com/tokenized/smart_contract_agent/pkg/client"
 	"github.com/tokenized/smart_contract_agent/pkg/transactions"
 	"github.com/tokenized/specification/dist/golang/actions"
 	"github.com/tokenized/specification/dist/golang/protocol"
+	"github.com/tokenized/txbuilder"
 
 	"github.com/google/uuid"
 )

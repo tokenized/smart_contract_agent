@@ -8,9 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tokenized/cacher"
-	"github.com/tokenized/config"
 	"github.com/tokenized/pkg/bitcoin"
+	ci "github.com/tokenized/pkg/cacher"
 	"github.com/tokenized/pkg/storage"
 	"github.com/tokenized/specification/dist/golang/actions"
 	"github.com/tokenized/specification/dist/golang/instruments"
@@ -66,9 +65,7 @@ func Test_Contracts(t *testing.T) {
 
 	_, contractLockingScript, contractAddress := MockKey()
 
-	cacherConfig := cacher.DefaultConfig()
-	cacherConfig.Expiration = config.Duration{time.Millisecond * 50}
-	cacher := cacher.NewCache(store, cacherConfig)
+	cacher := ci.NewSimpleCache(store)
 
 	cache, err := NewContractCache(cacher)
 	if err != nil {
@@ -79,14 +76,6 @@ func Test_Contracts(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create instrument cache : %s", err)
 	}
-
-	shutdown := make(chan error, 1)
-	interrupt := make(chan interface{})
-	cacheComplete := make(chan interface{})
-	go func() {
-		cacher.Run(ctx, interrupt, shutdown)
-		close(cacheComplete)
-	}()
 
 	// Create contract
 	contract := &Contract{
@@ -223,10 +212,7 @@ func Test_Contracts(t *testing.T) {
 
 	cache.Release(ctx, contractLockingScript)
 
-	close(interrupt)
-	select {
-	case <-time.After(time.Second):
-		t.Errorf("Cache shutdown timed out")
-	case <-cacheComplete:
+	if !cacher.IsEmpty() {
+		t.Fatalf("Cacher is not empty")
 	}
 }

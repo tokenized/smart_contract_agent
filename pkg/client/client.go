@@ -3,7 +3,6 @@ package client
 import (
 	"github.com/tokenized/channels"
 	channelsExpandedTx "github.com/tokenized/channels/expanded_tx"
-	channelsWallet "github.com/tokenized/channels/wallet"
 	"github.com/tokenized/pkg/bitcoin"
 	"github.com/tokenized/pkg/expanded_tx"
 	"github.com/tokenized/pkg/peer_channels"
@@ -90,7 +89,7 @@ func WrapTxIDResponse(txid bitcoin.Hash32, response *channels.Response,
 
 	var signature *channels.Signature
 	if key != nil {
-		hash := channelsWallet.RandomHash()
+		hash := channels.RandomHash()
 		signature = channels.NewSignature(*key, &hash, false)
 	}
 

@@ -8,9 +8,9 @@ import (
 	"reflect"
 	"sync"
 
-	"github.com/tokenized/cacher"
 	"github.com/tokenized/pkg/bitcoin"
 	"github.com/tokenized/pkg/bsor"
+	ci "github.com/tokenized/pkg/cacher"
 	"github.com/tokenized/smart_contract_agent/internal/platform"
 	"github.com/tokenized/specification/dist/golang/actions"
 
@@ -30,7 +30,7 @@ const (
 )
 
 type BalanceCache struct {
-	cacher *cacher.Cache
+	cacher ci.Cacher
 	typ    reflect.Type
 }
 
@@ -64,7 +64,7 @@ type BalanceAdjustment struct {
 	SettledQuantity uint64          `bsor:"5" json:"settled_quantity,omitempty"`
 }
 
-func NewBalanceCache(cache *cacher.Cache) (*BalanceCache, error) {
+func NewBalanceCache(cache ci.Cacher) (*BalanceCache, error) {
 	typ := reflect.TypeOf(&Balance{})
 
 	// Verify item value type is valid for a cache item.
@@ -78,7 +78,7 @@ func NewBalanceCache(cache *cacher.Cache) (*BalanceCache, error) {
 	}
 
 	itemInterface := itemValue.Interface()
-	if _, ok := itemInterface.(cacher.SetValue); !ok {
+	if _, ok := itemInterface.(ci.SetValue); !ok {
 		return nil, errors.New("Type must implement CacheSetValue")
 	}
 
@@ -106,7 +106,7 @@ func (c *BalanceCache) AddMulti(ctx context.Context, contractLockingScript bitco
 
 	pathPrefix := balancePathPrefix(contractLockingScript, instrumentCode)
 
-	values := make([]cacher.SetValue, len(balances))
+	values := make([]ci.SetValue, len(balances))
 	for i, balance := range balances {
 		values[i] = balance
 	}
@@ -622,7 +622,7 @@ func (b *Balance) Hash() bitcoin.Hash32 {
 	return LockingScriptHash(b.LockingScript)
 }
 
-func (b *Balance) CacheSetCopy() cacher.SetValue {
+func (b *Balance) CacheSetCopy() ci.SetValue {
 	result := &Balance{
 		Quantity:    b.Quantity,
 		Timestamp:   b.Timestamp,

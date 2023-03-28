@@ -8,9 +8,9 @@ import (
 	"reflect"
 	"sync"
 
-	"github.com/tokenized/cacher"
 	"github.com/tokenized/pkg/bitcoin"
 	"github.com/tokenized/pkg/bsor"
+	ci "github.com/tokenized/pkg/cacher"
 	"github.com/tokenized/specification/dist/golang/actions"
 	"github.com/tokenized/specification/dist/golang/instruments"
 
@@ -23,7 +23,7 @@ const (
 )
 
 type InstrumentCache struct {
-	cacher *cacher.Cache
+	cacher ci.Cacher
 	typ    reflect.Type
 }
 
@@ -45,7 +45,7 @@ type Instrument struct {
 	sync.Mutex `bsor:"-"`
 }
 
-func NewInstrumentCache(cache *cacher.Cache) (*InstrumentCache, error) {
+func NewInstrumentCache(cache ci.Cacher) (*InstrumentCache, error) {
 	typ := reflect.TypeOf(&Instrument{})
 
 	// Verify item value type is valid for a cache item.
@@ -59,7 +59,7 @@ func NewInstrumentCache(cache *cacher.Cache) (*InstrumentCache, error) {
 	}
 
 	itemInterface := itemValue.Interface()
-	if _, ok := itemInterface.(cacher.Value); !ok {
+	if _, ok := itemInterface.(ci.Value); !ok {
 		return nil, errors.New("Type must implement CacheValue")
 	}
 
@@ -217,7 +217,7 @@ func (i *Instrument) IsModified() bool {
 	return i.isModified
 }
 
-func (i *Instrument) CacheCopy() cacher.Value {
+func (i *Instrument) CacheCopy() ci.Value {
 	result := &Instrument{}
 
 	copy(result.InstrumentType[:], i.InstrumentType[:])

@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tokenized/cacher"
 	"github.com/tokenized/pkg/bitcoin"
+	ci "github.com/tokenized/pkg/cacher"
 	"github.com/tokenized/pkg/storage"
 )
 
@@ -28,20 +28,12 @@ func Test_Balances(t *testing.T) {
 	var instrumentCode InstrumentCode
 	rand.Read(instrumentCode[:])
 
-	cacher := cacher.NewCache(store, cacher.DefaultConfig())
+	cacher := ci.NewSimpleCache(store)
 
 	cache, err := NewBalanceCache(cacher)
 	if err != nil {
 		t.Fatalf("Failed to create balance cache : %s", err)
 	}
-
-	shutdown := make(chan error, 1)
-	interrupt := make(chan interface{})
-	cacheComplete := make(chan interface{})
-	go func() {
-		cacher.Run(ctx, interrupt, shutdown)
-		close(cacheComplete)
-	}()
 
 	for j := 0; j < 100; j++ {
 		var txid bitcoin.Hash32
@@ -181,10 +173,7 @@ func Test_Balances(t *testing.T) {
 		cache.Release(ctx, contractLockingScript, instrumentCode, gotBalance2)
 	}
 
-	close(interrupt)
-	select {
-	case <-time.After(time.Second):
-		t.Errorf("Cache shutdown timed out")
-	case <-cacheComplete:
+	if !cacher.IsEmpty() {
+		t.Fatalf("Cacher is not empty")
 	}
 }

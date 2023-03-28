@@ -12,7 +12,6 @@ import (
 	"github.com/tokenized/pkg/bitcoin"
 	"github.com/tokenized/pkg/expanded_tx"
 	"github.com/tokenized/pkg/json"
-	"github.com/tokenized/pkg/txbuilder"
 	"github.com/tokenized/pkg/wire"
 	"github.com/tokenized/smart_contract_agent/internal/state"
 	"github.com/tokenized/smart_contract_agent/pkg/scheduler"
@@ -21,6 +20,7 @@ import (
 	"github.com/tokenized/specification/dist/golang/messages"
 	"github.com/tokenized/specification/dist/golang/protocol"
 	"github.com/tokenized/threads"
+	"github.com/tokenized/txbuilder"
 
 	"github.com/pkg/errors"
 )

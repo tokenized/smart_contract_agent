@@ -4,10 +4,9 @@ import (
 	"context"
 	"math/rand"
 	"testing"
-	"time"
 
-	"github.com/tokenized/cacher"
 	"github.com/tokenized/pkg/bitcoin"
+	ci "github.com/tokenized/pkg/cacher"
 	"github.com/tokenized/pkg/storage"
 )
 
@@ -25,20 +24,12 @@ func Test_RecoveryTransactions(t *testing.T) {
 		t.Fatalf("Failed to create locking script : %s", err)
 	}
 
-	cacher := cacher.NewCache(store, cacher.DefaultConfig())
+	cacher := ci.NewSimpleCache(store)
 
 	cache, err := NewRecoveryTransactionsCache(cacher)
 	if err != nil {
 		t.Fatalf("Failed to create recovery transactions cache : %s", err)
 	}
-
-	shutdown := make(chan error, 1)
-	interrupt := make(chan interface{})
-	cacheComplete := make(chan interface{})
-	go func() {
-		cacher.Run(ctx, interrupt, shutdown)
-		close(cacheComplete)
-	}()
 
 	var txids []bitcoin.Hash32
 	var outputIndexes [][]int
@@ -154,10 +145,7 @@ func Test_RecoveryTransactions(t *testing.T) {
 	got.Unlock()
 	cache.Release(ctx, contractLockingScript)
 
-	close(interrupt)
-	select {
-	case <-time.After(time.Second):
-		t.Errorf("Cache shutdown timed out")
-	case <-cacheComplete:
+	if !cacher.IsEmpty() {
+		t.Fatalf("Cacher is not empty")
 	}
 }

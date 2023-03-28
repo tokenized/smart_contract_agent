@@ -8,9 +8,9 @@ import (
 	"reflect"
 	"sync"
 
-	"github.com/tokenized/cacher"
 	"github.com/tokenized/pkg/bitcoin"
 	"github.com/tokenized/pkg/bsor"
+	ci "github.com/tokenized/pkg/cacher"
 
 	"github.com/pkg/errors"
 )
@@ -21,7 +21,7 @@ const (
 )
 
 type RecoveryTransactionsCache struct {
-	cacher *cacher.Cache
+	cacher ci.Cacher
 	typ    reflect.Type
 }
 
@@ -41,7 +41,7 @@ type RecoveryTransaction struct {
 	OutputIndexes []int          `bsor:"2" json:"output_indexes"`
 }
 
-func NewRecoveryTransactionsCache(cache *cacher.Cache) (*RecoveryTransactionsCache, error) {
+func NewRecoveryTransactionsCache(cache ci.Cacher) (*RecoveryTransactionsCache, error) {
 	typ := reflect.TypeOf(&RecoveryTransactions{})
 
 	// Verify item value type is valid for a cache item.
@@ -55,7 +55,7 @@ func NewRecoveryTransactionsCache(cache *cacher.Cache) (*RecoveryTransactionsCac
 	}
 
 	itemInterface := itemValue.Interface()
-	if _, ok := itemInterface.(cacher.Value); !ok {
+	if _, ok := itemInterface.(ci.Value); !ok {
 		return nil, errors.New("Type must implement CacheValue")
 	}
 
@@ -170,7 +170,7 @@ func (txs *RecoveryTransactions) IsModified() bool {
 	return txs.isModified
 }
 
-func (txs *RecoveryTransactions) CacheCopy() cacher.Value {
+func (txs *RecoveryTransactions) CacheCopy() ci.Value {
 	return txs.Copy()
 }
 
