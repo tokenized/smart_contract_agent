@@ -242,7 +242,6 @@ func createContractOfferTx(ctx context.Context, adminKey bitcoin.Key, outpoint *
 	if err != nil {
 		return nil, errors.Wrap(err, "estimate funding")
 	}
-	println("Estimated response tx fee:", responseFee)
 
 	if err := tx.AddValueToOutput(0, responseFee+contractOffer.ContractFee); err != nil {
 		return nil, errors.Wrap(err, "add funding value")
@@ -278,8 +277,6 @@ func createContractOfferTx(ctx context.Context, adminKey bitcoin.Key, outpoint *
 			Tx: atx,
 		})
 	}
-
-	println("Expanded Tx:", etx.String())
 
 	return etx, nil
 }

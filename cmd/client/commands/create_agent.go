@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"os"
 	"os/signal"
@@ -170,21 +169,12 @@ func handleOperatorResponseMessages(ctx context.Context, peerChannelsClient peer
 		}
 
 		if response.ID == nil {
-			println("Missing response ID")
-			js, _ := json.MarshalIndent(response, "", "  ")
-			println("Response:", string(js))
 			continue
 		}
 
 		if !bytes.Equal(response.ID[:], id[:]) {
-			println("Wrong response ID: want", id.String())
-			js, _ := json.MarshalIndent(response, "", "  ")
-			println("Response:", string(js))
 			continue
 		}
-
-		js, _ := json.MarshalIndent(response, "", "  ")
-		println("Response:", string(js))
 
 		if signedTx, ok := response.Msg.(*contract_operator.SignedTx); ok {
 			fmt.Printf("Expanded Tx: %s\n", signedTx.Tx)

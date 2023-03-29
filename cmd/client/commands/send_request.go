@@ -186,17 +186,9 @@ func handleAgentResponseMessages(ctx context.Context, peerChannelsClient peer_ch
 
 		if response.TxID != nil {
 			if response.TxID.Equal(&txid) {
-				if response.Response != nil {
-					println("Received response :", response.Response.Error())
-				} else {
-					println("Received empty response")
-				}
-
 				return nil
 			}
 		} else if response.Tx != nil {
-			println("Received tx :", response.Tx.String())
-
 			for _, txin := range response.Tx.Tx.TxIn {
 				if txin.PreviousOutPoint.Hash.Equal(&txid) {
 					return nil

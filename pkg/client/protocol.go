@@ -13,6 +13,8 @@ var (
 	ProtocolID = envelope.ProtocolID("TKN-SCA") // Protocol ID for Tokenized Smart Contract Agent
 )
 
+// Protocol is only functional to parse the response code above since there are no protocol specific
+// message structures.
 type Protocol struct{}
 
 func NewProtocol() *Protocol {
