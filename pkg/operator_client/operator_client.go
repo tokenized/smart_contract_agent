@@ -19,12 +19,12 @@ type ResponseHandler interface {
 	RegisterForResponse(channelID string, id uuid.UUID) <-chan peer_channels.Message
 }
 
-func NewClient(peerChannelFactory *peer_channels.Factory,
+func NewClient(peerChannelsFactory *peer_channels.Factory,
 	operatorPublicKey bitcoin.PublicKey, requestPeerChannel peer_channels.Channel,
 	clientKey bitcoin.Key, responsePeerChannel peer_channels.Channel,
 	responseHandler ResponseHandler, responseTimeout time.Duration) (*PeerChannelsClient, error) {
 
-	requestPeerChannelsClient, err := peerChannelFactory.NewClient(requestPeerChannel.String())
+	requestPeerChannelsClient, err := peerChannelsFactory.NewClient(requestPeerChannel.String())
 	if err != nil {
 		return nil, errors.Wrap(err, "peer channels client")
 	}

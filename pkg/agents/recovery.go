@@ -13,50 +13,37 @@ import (
 	"github.com/pkg/errors"
 )
 
-func (a *Agent) addRecoveryRequests(ctx context.Context, txid bitcoin.Hash32,
-	requestActions []Action) (bool, error) {
-
-	if len(requestActions) == 0 {
-		return false, nil // no requests
-	}
-
-	lockingScript := a.LockingScript()
-
-	config := a.Config()
-	if !config.RecoveryMode {
-		return false, nil
-	}
+func (a *Agent) addRecoveryRequest(ctx context.Context, agentLockingScript bitcoin.Script,
+	txid bitcoin.Hash32, outputIndex int) (bool, error) {
 
 	recoveryTx := &state.RecoveryTransaction{
 		TxID:          txid,
-		OutputIndexes: make([]int, len(requestActions)),
-	}
-
-	for i, action := range requestActions {
-		recoveryTx.OutputIndexes[i] = action.OutputIndex
+		OutputIndexes: []int{outputIndex},
 	}
 
 	newRecoveryTxs := &state.RecoveryTransactions{
 		Transactions: []*state.RecoveryTransaction{recoveryTx},
 	}
 
-	recoveryTxs, err := a.caches.RecoveryTransactions.Add(ctx, lockingScript, newRecoveryTxs)
+	recoveryTxs, err := a.caches.RecoveryTransactions.Add(ctx, agentLockingScript, newRecoveryTxs)
 	if err != nil {
 		return false, errors.Wrap(err, "get recovery txs")
 	}
-	defer a.caches.RecoveryTransactions.Release(ctx, lockingScript)
+	defer a.caches.RecoveryTransactions.Release(ctx, agentLockingScript)
 
-	if recoveryTxs != newRecoveryTxs {
-		recoveryTxs.Lock()
-		recoveryTxs.Append(recoveryTx)
-		recoveryTxs.Unlock()
+	if recoveryTxs == newRecoveryTxs {
+		return true, nil
 	}
 
-	return true, nil
+	recoveryTxs.Lock()
+	appended := recoveryTxs.Append(recoveryTx)
+	recoveryTxs.Unlock()
+
+	return appended, nil
 }
 
-func (a *Agent) removeRecoveryRequest(ctx context.Context, txid bitcoin.Hash32,
-	outputIndex int) (bool, error) {
+func (a *Agent) removeRecoveryRequest(ctx context.Context, requestTxID bitcoin.Hash32,
+	outputIndex int, responseTxID bitcoin.Hash32) (bool, error) {
 
 	lockingScript := a.LockingScript()
 
@@ -76,15 +63,8 @@ func (a *Agent) removeRecoveryRequest(ctx context.Context, txid bitcoin.Hash32,
 	defer a.caches.RecoveryTransactions.Release(ctx, lockingScript)
 
 	recoveryTxs.Lock()
-	result := recoveryTxs.RemoveOutput(txid, outputIndex)
+	result := recoveryTxs.RemoveOutput(requestTxID, outputIndex)
 	recoveryTxs.Unlock()
-
-	if result {
-		logger.InfoWithFields(ctx, []logger.Field{
-			logger.Stringer("request_txid", txid),
-			logger.Int("request_output_index", outputIndex),
-		}, "Removed recovery request")
-	}
 
 	return result, nil
 }

@@ -118,7 +118,7 @@ func (a *Agent) processTransfer(ctx context.Context, transaction *transactions.T
 
 	// Verify expiry.
 	if transfer.OfferExpiry != 0 && now > transfer.OfferExpiry {
-		logger.WarnWithFields(ctx, []logger.Field{
+		logger.InfoWithFields(ctx, []logger.Field{
 			logger.Timestamp("expiry", int64(transfer.OfferExpiry)),
 			logger.Timestamp("now", int64(now)),
 		}, "Transfer offer expired")
@@ -372,15 +372,15 @@ func (a *Agent) processSettlement(ctx context.Context, transaction *transactions
 		return errors.Wrap(err, "apply settlements")
 	}
 
-	transaction.Lock()
-	etx, err := a.transactions.ExpandedTx(ctx, transaction)
-	transaction.Unlock()
-	if err != nil {
-		return errors.Wrap(err, "expand tx")
-	}
-
 	if transferTxID != nil {
-		if _, err := a.addResponseTxID(ctx, *transferTxID, transaction.GetTxID()); err != nil {
+		transaction.Lock()
+		etx, err := a.transactions.ExpandedTx(ctx, transaction)
+		transaction.Unlock()
+		if err != nil {
+			return errors.Wrap(err, "expand tx")
+		}
+
+		if _, err := a.addResponseTxID(ctx, *transferTxID, etx.TxID()); err != nil {
 			return errors.Wrap(err, "add response txid")
 		}
 
@@ -552,7 +552,7 @@ func (a *Agent) applySettlements(ctx context.Context, transaction *transactions.
 		for i, balance := range balances {
 			addedBalance := addedBalances[i]
 			if balance == addedBalance {
-				logger.WarnWithFields(instrumentCtx, []logger.Field{
+				logger.InfoWithFields(instrumentCtx, []logger.Field{
 					logger.Timestamp("timestamp", int64(addedBalance.Timestamp)),
 					logger.Timestamp("existing_timestamp", int64(timestamp)),
 					logger.Stringer("locking_script", balance.LockingScript),
@@ -563,7 +563,7 @@ func (a *Agent) applySettlements(ctx context.Context, transaction *transactions.
 
 			// If the balance doesn't match then it already existed and must be updated.
 			if timestamp < addedBalance.Timestamp {
-				logger.WarnWithFields(instrumentCtx, []logger.Field{
+				logger.InfoWithFields(instrumentCtx, []logger.Field{
 					logger.Timestamp("timestamp", int64(addedBalance.Timestamp)),
 					logger.Timestamp("old_timestamp", int64(timestamp)),
 					logger.Stringer("locking_script", balance.LockingScript),
@@ -575,7 +575,7 @@ func (a *Agent) applySettlements(ctx context.Context, transaction *transactions.
 
 			// Update balance
 			if addedBalance.Settle(*transferTxID, txid, timestamp) {
-				logger.WarnWithFields(instrumentCtx, []logger.Field{
+				logger.InfoWithFields(instrumentCtx, []logger.Field{
 					logger.Timestamp("timestamp", int64(addedBalance.Timestamp)),
 					logger.Timestamp("existing_timestamp", int64(timestamp)),
 					logger.Stringer("locking_script", balance.LockingScript),
@@ -585,7 +585,7 @@ func (a *Agent) applySettlements(ctx context.Context, transaction *transactions.
 				continue
 			}
 
-			logger.WarnWithFields(instrumentCtx, []logger.Field{
+			logger.InfoWithFields(instrumentCtx, []logger.Field{
 				logger.Timestamp("timestamp", int64(addedBalance.Timestamp)),
 				logger.Timestamp("existing_timestamp", int64(timestamp)),
 				logger.Stringer("locking_script", balance.LockingScript),

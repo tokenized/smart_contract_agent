@@ -126,8 +126,15 @@ func (a *Agent) addResponseTxID(ctx context.Context,
 		}, "Added response txid")
 	}
 
-	if _, err := a.removeRecoveryRequest(ctx, requestTxID, requestOutputIndex); err != nil {
+	if wasRemoved, err := a.removeRecoveryRequest(ctx, requestTxID, requestOutputIndex,
+		responseTxID); err != nil {
 		return false, errors.Wrap(err, "recovery request")
+	} else if wasRemoved {
+		logger.InfoWithFields(ctx, []logger.Field{
+			logger.Stringer("request_txid", requestTxID),
+			logger.Stringer("response_txid", responseTxID),
+			logger.Int("request_output_index", requestOutputIndex),
+		}, "Removed recovery request")
 	}
 
 	return result, nil

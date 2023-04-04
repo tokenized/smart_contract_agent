@@ -288,14 +288,13 @@ func clearIsProcessing(transaction *transactions.Transaction, contract state.Con
 func (a *Agent) Process(ctx context.Context, transaction *transactions.Transaction,
 	actionList []Action) error {
 
-	ctx = logger.ContextWithLogFields(ctx, logger.Stringer("trace", uuid.New()))
+	txCtx := logger.ContextWithLogFields(ctx, logger.Stringer("trace", uuid.New()))
 
 	txid := transaction.GetTxID()
 	agentLockingScript := a.LockingScript()
 
 	var relevantActions []Action
-	var requestActions []Action
-	var responseActions []Action
+	containsRequest := false
 	for _, action := range actionList {
 		if !action.IsRelevant(agentLockingScript) {
 			continue
@@ -303,42 +302,20 @@ func (a *Agent) Process(ctx context.Context, transaction *transactions.Transacti
 
 		relevantActions = append(relevantActions, action)
 
-		if IsRequest(action.Action) {
-			requestActions = append(requestActions, action)
-		} else {
-			responseActions = append(responseActions, action)
+		if !containsRequest && IsRequest(action.Action) {
+			containsRequest = true
 		}
 	}
 
-	if inRecovery, err := a.addRecoveryRequests(ctx, txid, requestActions); err != nil {
-		return errors.Wrap(err, "recovery request")
-	} else if inRecovery {
-		var actionCodes []string
-		for _, a := range requestActions {
-			actionCodes = append(actionCodes, a.Action.Code())
-		}
-		logger.InfoWithFields(ctx, []logger.Field{
-			logger.Stringer("txid", txid),
-			logger.Stringer("contract_locking_script", agentLockingScript),
-			logger.Strings("actions", actionCodes),
-		}, "Saving transaction requests for recovery")
-
-		if len(responseActions) == 0 {
-			return nil
-		}
-
-		// Process only the responses
-		relevantActions = responseActions
-	}
-
-	logger.InfoWithFields(ctx, []logger.Field{
+	logger.InfoWithFields(txCtx, []logger.Field{
 		logger.Stringer("txid", txid),
 		logger.Stringer("contract_locking_script", agentLockingScript),
 	}, "Processing transaction")
 
-	minFeeRate := a.Config().MinFeeRate
+	config := a.Config()
+	minFeeRate := config.MinFeeRate
 	var feeRate float32
-	if len(requestActions) > 0 {
+	if containsRequest {
 		transaction.Lock()
 		fee, err := transaction.CalculateFee()
 		if err != nil {
@@ -352,25 +329,25 @@ func (a *Agent) Process(ctx context.Context, transaction *transactions.Transacti
 	}
 
 	for i, action := range relevantActions {
-		if !a.IsActive() {
-			etx, err := a.createRejection(ctx, transaction, action.OutputIndex,
-				platform.NewRejectError(actions.RejectionsInactive, ""))
-			if err != nil {
-				return errors.Wrap(err, "create rejection")
-			}
-
-			if etx != nil {
-				if err := a.BroadcastTx(ctx, etx, nil); err != nil {
-					return errors.Wrap(err, "broadcast")
-				}
-			}
-
-			continue
-		}
-
 		if IsRequest(action.Action) {
+			if !a.IsActive() {
+				etx, err := a.createRejection(txCtx, transaction, action.OutputIndex,
+					platform.NewRejectError(actions.RejectionsInactive, ""))
+				if err != nil {
+					return errors.Wrap(err, "create rejection")
+				}
+
+				if etx != nil {
+					if err := a.BroadcastTx(txCtx, etx, nil); err != nil {
+						return errors.Wrap(err, "broadcast")
+					}
+				}
+
+				continue
+			}
+
 			if feeRate < minFeeRate {
-				etx, err := a.createRejection(ctx, transaction, action.OutputIndex,
+				etx, err := a.createRejection(txCtx, transaction, action.OutputIndex,
 					platform.NewRejectError(actions.RejectionsInsufficientTxFeeFunding,
 						fmt.Sprintf("fee rate %.4f, minimum %.4f", feeRate, minFeeRate)))
 				if err != nil {
@@ -378,7 +355,7 @@ func (a *Agent) Process(ctx context.Context, transaction *transactions.Transacti
 				}
 
 				if etx != nil {
-					if err := a.BroadcastTx(ctx, etx, nil); err != nil {
+					if err := a.BroadcastTx(txCtx, etx, nil); err != nil {
 						return errors.Wrap(err, "broadcast")
 					}
 				}
@@ -387,8 +364,8 @@ func (a *Agent) Process(ctx context.Context, transaction *transactions.Transacti
 			}
 		}
 
-		if err := a.processAction(ctx, transaction, txid, action.Action,
-			action.OutputIndex); err != nil {
+		if err := a.processAction(ctx, agentLockingScript, transaction, txid, action.Action,
+			action.OutputIndex, config.RecoveryMode); err != nil {
 			return errors.Wrapf(err, "process action %d: %s", i, action.Action.Code())
 		}
 	}
@@ -400,7 +377,7 @@ func (a *Agent) Process(ctx context.Context, transaction *transactions.Transacti
 func (a *Agent) ProcessUnsafe(ctx context.Context, transaction *transactions.Transaction,
 	actionList []Action) error {
 
-	ctx = logger.ContextWithLogFields(ctx, logger.Stringer("trace", uuid.New()))
+	ctx = logger.ContextWithLogFields(ctx, logger.Stringer("tx_trace", uuid.New()))
 
 	txid := transaction.GetTxID()
 	agentLockingScript := a.LockingScript()
@@ -437,8 +414,8 @@ func (a *Agent) ProcessUnsafe(ctx context.Context, transaction *transactions.Tra
 		}
 
 		// If it isn't a request then we can process it like normal.
-		if err := a.processAction(ctx, transaction, txid, action.Action,
-			action.OutputIndex); err != nil {
+		if err := a.processAction(ctx, agentLockingScript, transaction, txid, action.Action,
+			action.OutputIndex, false); err != nil {
 			return errors.Wrapf(err, "process action %d: %s", i, action.Action.Code())
 		}
 	}
@@ -446,8 +423,11 @@ func (a *Agent) ProcessUnsafe(ctx context.Context, transaction *transactions.Tra
 	return nil
 }
 
-func (a *Agent) processAction(ctx context.Context, transaction *transactions.Transaction,
-	txid bitcoin.Hash32, action actions.Action, outputIndex int) error {
+func (a *Agent) processAction(ctx context.Context, agentLockingScript bitcoin.Script,
+	transaction *transactions.Transaction, txid bitcoin.Hash32, action actions.Action,
+	outputIndex int, inRecovery bool) error {
+
+	ctx = logger.ContextWithLogFields(ctx, logger.Stringer("action_trace", uuid.New()))
 	start := time.Now()
 
 	processed := transaction.ContractProcessed(a.ContractHash(), outputIndex)
@@ -459,6 +439,29 @@ func (a *Agent) processAction(ctx context.Context, transaction *transactions.Tra
 			logger.String("action_name", action.TypeName()),
 			logger.Stringer("response_txid", processed[0].ResponseTxID),
 		}, "Action already processed")
+		return nil
+	}
+
+	if inRecovery && IsRequest(action) {
+		if added, err := a.addRecoveryRequest(ctx, agentLockingScript, txid,
+			outputIndex); err != nil {
+			return errors.Wrap(err, "recovery request")
+		} else if added {
+			logger.InfoWithFields(ctx, []logger.Field{
+				logger.Stringer("txid", txid),
+				logger.Stringer("contract_locking_script", agentLockingScript),
+				logger.String("action", action.Code()),
+				logger.Int("output_index", outputIndex),
+			}, "Saved transaction request for recovery")
+		} else {
+			logger.InfoWithFields(ctx, []logger.Field{
+				logger.Stringer("txid", txid),
+				logger.Stringer("contract_locking_script", agentLockingScript),
+				logger.String("action", action.Code()),
+				logger.Int("output_index", outputIndex),
+			}, "Transaction request already saved for recovery")
+		}
+
 		return nil
 	}
 
@@ -585,10 +588,6 @@ func (a *Agent) processAction(ctx context.Context, transaction *transactions.Tra
 
 	logger.InfoWithFields(ctx, []logger.Field{
 		logger.MillisecondsFromNano("elapsed_ms", time.Since(start).Nanoseconds()),
-		logger.Stringer("txid", txid),
-		logger.Int("output_index", outputIndex),
-		logger.String("action_code", action.Code()),
-		logger.String("action_name", action.TypeName()),
 	}, "Processed action")
 
 	if responseEtx != nil {

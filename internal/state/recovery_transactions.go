@@ -99,15 +99,34 @@ func RecoveryTxsPath(lockingScript bitcoin.Script) string {
 	return fmt.Sprintf("%s/%s", CalculateContractHash(lockingScript), recoveryTxsPath)
 }
 
-func (txs *RecoveryTransactions) Append(tx *RecoveryTransaction) {
+func (txs *RecoveryTransactions) Append(tx *RecoveryTransaction) bool {
 	for _, t := range txs.Transactions {
 		if t.TxID.Equal(&tx.TxID) {
-			return // already have this tx
+			// Already have this tx, so append any indexes
+			appended := false
+			for _, newIndex := range tx.OutputIndexes {
+				found := false
+				for _, existingIndex := range t.OutputIndexes {
+					if existingIndex == newIndex {
+						found = true
+						break
+					}
+				}
+
+				if !found {
+					t.OutputIndexes = append(t.OutputIndexes, newIndex)
+					txs.isModified = true
+					appended = true
+				}
+			}
+
+			return appended
 		}
 	}
 
 	txs.Transactions = append(txs.Transactions, tx)
 	txs.isModified = true
+	return true
 }
 
 func (txs *RecoveryTransactions) Remove(txid bitcoin.Hash32) bool {
