@@ -1,12 +1,12 @@
 module github.com/tokenized/smart_contract_agent
 
-go 1.18
+go 1.15
 
 require (
 	github.com/google/uuid v1.3.0
 	github.com/pkg/errors v0.9.1
 	github.com/spf13/cobra v0.0.5
-	github.com/tokenized/channels v0.0.0-20230330163353-e208f16abec9
+	github.com/tokenized/channels v0.0.0-20230405133817-0853abf5a7de
 	github.com/tokenized/config v0.2.2-0.20220902160347-43a4340c357e
 	github.com/tokenized/envelope v1.0.1-0.20221221033430-6a7f30b2e671
 	github.com/tokenized/logger v0.1.3-0.20230110032957-7357f78dfcc2
@@ -15,24 +15,4 @@ require (
 	github.com/tokenized/spynode v0.2.2-0.20230124155202-46a1d2e3bbbc
 	github.com/tokenized/threads v0.1.1
 	github.com/tokenized/txbuilder v0.0.0-20230307163317-5e6181ad5aef
-)
-
-require (
-	github.com/FactomProject/basen v0.0.0-20150613233007-fe3947df716e // indirect
-	github.com/FactomProject/btcutilecc v0.0.0-20130527213604-d3a63a5752ec // indirect
-	github.com/aws/aws-sdk-go v1.35.3 // indirect
-	github.com/btcsuite/btcd v0.20.1-beta // indirect
-	github.com/btcsuite/btcutil v1.0.2 // indirect
-	github.com/dgryski/go-bitstream v0.0.0-20180413035011-3522498ce2c8 // indirect
-	github.com/golang/protobuf v1.4.2 // indirect
-	github.com/gomodule/redigo v1.8.2 // indirect
-	github.com/gorilla/websocket v1.4.2 // indirect
-	github.com/inconshreveable/mousetrap v1.0.0 // indirect
-	github.com/jmespath/go-jmespath v0.4.0 // indirect
-	github.com/kelseyhightower/envconfig v1.4.0 // indirect
-	github.com/spf13/pflag v1.0.3 // indirect
-	github.com/tokenized/metrics v0.0.3-0.20220902162538-53aae6612608 // indirect
-	github.com/tyler-smith/go-bip32 v0.0.0-20170922074101-2c9cfd177564 // indirect
-	golang.org/x/crypto v0.0.0-20200510223506-06a226fb4e37 // indirect
-	google.golang.org/protobuf v1.23.0 // indirect
 )

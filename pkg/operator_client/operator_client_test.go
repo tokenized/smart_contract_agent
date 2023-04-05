@@ -89,7 +89,7 @@ func Test_RequestNewAgent(t *testing.T) {
 	mockOperator := NewMockOperator(peerChannelFactory, operatorKey, clientKey.PublicKey(),
 		requestPeerChannelFull.ID, 1000)
 
-	operatorListener := peer_channels_listener.NewPeerChannelsListener[any](peerChannelsClient,
+	operatorListener := peer_channels_listener.NewPeerChannelsListener(peerChannelsClient,
 		requestAccount.Token, 100, mockOperator.HandleMessage, nil)
 
 	operatorListenerInterrupt := make(chan interface{})
@@ -178,7 +178,7 @@ func Test_SignContractOffer(t *testing.T) {
 	mockOperator := NewMockOperator(peerChannelFactory, operatorKey, clientKey.PublicKey(),
 		requestPeerChannelFull.ID, 1000)
 
-	operatorListener := peer_channels_listener.NewPeerChannelsListener[any](peerChannelsClient,
+	operatorListener := peer_channels_listener.NewPeerChannelsListener(peerChannelsClient,
 		requestAccount.Token, 100, mockOperator.HandleMessage, nil)
 
 	operatorListenerInterrupt := make(chan interface{})

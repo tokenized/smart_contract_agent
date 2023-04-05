@@ -72,8 +72,10 @@ github.com/kelseyhightower/envconfig v1.4.0 h1:Im6hONhd3pLkfDFsbRgu68RDNkGF1r3dv
 github.com/kelseyhightower/envconfig v1.4.0/go.mod h1:cccZRl6mQpaq41TPp5QxidR+Sa3axMbJDNb//FQX6Gg=
 github.com/kisielk/gotool v1.0.0/go.mod h1:XhKaO+MFFWcvkIS/tQcRk01m1F5IRFswLeQ+oQHNcck=
 github.com/kkdai/bstream v0.0.0-20161212061736-f391b8402d23/go.mod h1:J+Gs4SYgM6CZQHDETBtE9HaSEkGmuNXF86RwHhHUvq4=
+github.com/kr/pretty v0.1.0 h1:L/CwN0zerZDmRFUapSPitk6f+Q3+0za1rQkzVuMiMFI=
 github.com/kr/pretty v0.1.0/go.mod h1:dAy3ld7l9f0ibDNOQOHHMYYIIbhfbHSm3C4ZsoJORNo=
 github.com/kr/pty v1.1.1/go.mod h1:pFQYn66WHrOpPYNljwOMqo10TkYh1fy3cYio2l3bCsQ=
+github.com/kr/text v0.1.0 h1:45sCR5RtlFHMR4UwH9sdQ5TC8v0qDQCHnXt+kaKSTVE=
 github.com/kr/text v0.1.0/go.mod h1:4Jbv+DJW3UT/LiOwJeYQe1efqtUx/iVham/4vfdArNI=
 github.com/magiconair/properties v1.8.0/go.mod h1:PppfXfuXeibc/6YijjN8zIbojt8czPbwD3XqdrwzmxQ=
 github.com/mitchellh/go-homedir v1.1.0/go.mod h1:SfyaCUpYCn1Vlf4IUYiD9fPX4A5wJrkLzIz1N1q0pr0=
@@ -106,8 +108,8 @@ github.com/stretchr/testify v1.4.0/go.mod h1:j7eGeouHqKxXV5pUuKE4zz7dFj8WfuZ+81P
 github.com/stretchr/testify v1.5.1 h1:nOGnQDM7FYENwehXlg/kFVnos3rEvtKTjRvOWSzb6H4=
 github.com/stretchr/testify v1.5.1/go.mod h1:5W2xD1RspED5o8YsWQXVCued0rvSQ+mT+I5cxcmMvtA=
 github.com/tokenized/channels v0.0.0-20230104015307-4714f95d816d/go.mod h1:KLZJ0mpn/DOr1bj2C9BnSUUBP6AfLTzWNWdeHkVd31U=
-github.com/tokenized/channels v0.0.0-20230330163353-e208f16abec9 h1:+pLQDpCMtXQfaR2QUY6ClwBSte/DYpOifQOAYstoD/o=
-github.com/tokenized/channels v0.0.0-20230330163353-e208f16abec9/go.mod h1:Bj5EIqbH/OWbGjMMs19aNkY2HvPxiJGAuQgNQNUgmtU=
+github.com/tokenized/channels v0.0.0-20230405133817-0853abf5a7de h1:0KwLR/UeAkPNFKNLWbjQ9kL8l+KiEz13GSiuu5EF49s=
+github.com/tokenized/channels v0.0.0-20230405133817-0853abf5a7de/go.mod h1:Nga9wjwKpuXa8KJgAX5L+RoZ4U5hyNca/Pr4tmyT904=
 github.com/tokenized/config v0.2.1/go.mod h1:+8nT8o80nFsxk7Qt5utgfAkEIFNHFtb26hD56hMlSZE=
 github.com/tokenized/config v0.2.2-0.20220902160347-43a4340c357e h1:YQOhB7sz1qmDzL0qyai4pwjUiqKwgKzrMb+izsVEn/0=
 github.com/tokenized/config v0.2.2-0.20220902160347-43a4340c357e/go.mod h1:DFvDBKoS5+kT3QRJ/6zvhWXNuzuV3gG+ZfWa/ZVpJlc=
@@ -131,11 +133,13 @@ github.com/tokenized/pkg v0.4.1-0.20230307162611-0310b5d4f827/go.mod h1:4YaWQp72
 github.com/tokenized/pkg v0.4.1-0.20230328011452-4ee721be41e4 h1:t1IKB33Pr2CWddYtIYFRHY4Sd4zOnIAN9PVo+5+8rdM=
 github.com/tokenized/pkg v0.4.1-0.20230328011452-4ee721be41e4/go.mod h1:4YaWQp72hr/U+Iu8RqlvlPckYluEzZZ13WCbaYlBUDE=
 github.com/tokenized/specification v1.1.2-0.20220902163651-058d13f0a70f/go.mod h1:oGIczii95Lb/C8kVkHEC0eAaIXhAzhM6HOAr33d4kkc=
+github.com/tokenized/specification v1.1.2-0.20230307164923-84f38b808c03/go.mod h1:wcVyEGm/w4k0U3liLAPF1wqY8uUV5rDVb/Op3g6QKhU=
 github.com/tokenized/specification v1.1.2-0.20230324182754-c6004b3822da h1:4hgjHfyp9U7DgWmASbRuC6sgKwXS86fM5tOiq2AfBow=
 github.com/tokenized/specification v1.1.2-0.20230324182754-c6004b3822da/go.mod h1:wcVyEGm/w4k0U3liLAPF1wqY8uUV5rDVb/Op3g6QKhU=
 github.com/tokenized/spynode v0.2.2-0.20230124155202-46a1d2e3bbbc h1:jn9raZP+Gj1lbdKmivX0lKIYYuaMjlbTAC3+OHEVD6w=
 github.com/tokenized/spynode v0.2.2-0.20230124155202-46a1d2e3bbbc/go.mod h1:EpS65grDrChjqtGUM2ewlInUvTPi57+qIVe5AJUbhPM=
 github.com/tokenized/threads v0.1.1-0.20220902155404-d844f8ac41b5/go.mod h1:Dii75FyJFZwaFWPai5CrczSZpF8vqznaCtkiwDx/WEg=
+github.com/tokenized/threads v0.1.1-0.20221115220050-91bea32c8aa2/go.mod h1:Dii75FyJFZwaFWPai5CrczSZpF8vqznaCtkiwDx/WEg=
 github.com/tokenized/threads v0.1.1 h1:Z4jh+s5G8usC8iyNcxqpTb8EJTTbmbwhGCb1hzqzX34=
 github.com/tokenized/threads v0.1.1/go.mod h1:sMkqkLpotr6YrmaYi7tUhgaAOP0wDQIH7rj7/C2K3og=
 github.com/tokenized/txbuilder v0.0.0-20230307163317-5e6181ad5aef h1:TiJbX9t1zcMPflL81aercjZdsaohtrt0V7y9tiUW/Ks=
@@ -188,6 +192,7 @@ google.golang.org/protobuf v1.21.0/go.mod h1:47Nbq4nVaFHyn7ilMalzfO3qCViNmqZ2kzi
 google.golang.org/protobuf v1.23.0 h1:4MY060fB1DLGMB/7MBTLnwQUY6+F09GEiz6SsrNqyzM=
 google.golang.org/protobuf v1.23.0/go.mod h1:EGpADcykh3NcUnDUJcl1+ZksZNG86OlYog2l/sGQquU=
 gopkg.in/check.v1 v0.0.0-20161208181325-20d25e280405/go.mod h1:Co6ibVJAznAaIkqp8huTwlJQCZ016jof/cbN4VW5Yz0=
+gopkg.in/check.v1 v1.0.0-20180628173108-788fd7840127 h1:qIbj1fsPNlZgppZ+VLlY7N33q108Sa+fhmuc+sWQYwY=
 gopkg.in/check.v1 v1.0.0-20180628173108-788fd7840127/go.mod h1:Co6ibVJAznAaIkqp8huTwlJQCZ016jof/cbN4VW5Yz0=
 gopkg.in/errgo.v2 v2.1.0/go.mod h1:hNsd1EY+bozCKY1Ytp96fpM3vjJbqLJn88ws8XvfDNI=
 gopkg.in/fsnotify.v1 v1.4.7/go.mod h1:Tz8NjZHkW78fSQdbUxIjBTcgA1z1m8ZHf0WmKUhAMys=
