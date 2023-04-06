@@ -39,7 +39,7 @@ type Config struct {
 	IsTest                  bool            `default:"true" envconfig:"IS_TEST" json:"is_test"`
 	FeeRate                 float32         `default:"0.05" envconfig:"FEE_RATE" json:"fee_rate"`
 	DustFeeRate             float32         `default:"0.0" envconfig:"DUST_FEE_RATE" json:"dust_fee_rate"`
-	MinFeeRate              float32         `default:"0.05" envconfig:"MIN_FEE_RATE" json:"min_fee_rate"`
+	MinFeeRate              float64         `default:"0.05" envconfig:"MIN_FEE_RATE" json:"min_fee_rate"`
 	MultiContractExpiration config.Duration `default:"10s" envconfig:"MULTI_CONTRACT_EXPIRATION" json:"multi_contract_expiration"`
 	RecoveryMode            bool            `default:"false" envconfig:"RECOVERY_MODE" json:"recovery_mode"`
 }

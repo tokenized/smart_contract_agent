@@ -314,7 +314,7 @@ func (a *Agent) Process(ctx context.Context, transaction *transactions.Transacti
 
 	config := a.Config()
 	minFeeRate := config.MinFeeRate
-	var feeRate float32
+	var feeRate float64
 	if containsRequest {
 		transaction.Lock()
 		fee, err := transaction.CalculateFee()
@@ -325,47 +325,12 @@ func (a *Agent) Process(ctx context.Context, transaction *transactions.Transacti
 		size := transaction.Size()
 		transaction.Unlock()
 
-		feeRate = float32(fee) / float32(size)
+		feeRate = float64(fee) / float64(size)
 	}
 
 	for i, action := range relevantActions {
-		if IsRequest(action.Action) {
-			if !a.IsActive() {
-				etx, err := a.createRejection(txCtx, transaction, action.OutputIndex,
-					platform.NewRejectError(actions.RejectionsInactive, ""))
-				if err != nil {
-					return errors.Wrap(err, "create rejection")
-				}
-
-				if etx != nil {
-					if err := a.BroadcastTx(txCtx, etx, nil); err != nil {
-						return errors.Wrap(err, "broadcast")
-					}
-				}
-
-				continue
-			}
-
-			if feeRate < minFeeRate {
-				etx, err := a.createRejection(txCtx, transaction, action.OutputIndex,
-					platform.NewRejectError(actions.RejectionsInsufficientTxFeeFunding,
-						fmt.Sprintf("fee rate %.4f, minimum %.4f", feeRate, minFeeRate)))
-				if err != nil {
-					return errors.Wrap(err, "create rejection")
-				}
-
-				if etx != nil {
-					if err := a.BroadcastTx(txCtx, etx, nil); err != nil {
-						return errors.Wrap(err, "broadcast")
-					}
-				}
-
-				continue
-			}
-		}
-
 		if err := a.processAction(ctx, agentLockingScript, transaction, txid, action.Action,
-			action.OutputIndex, config.RecoveryMode); err != nil {
+			action.OutputIndex, config.RecoveryMode, feeRate, minFeeRate); err != nil {
 			return errors.Wrapf(err, "process action %d: %s", i, action.Action.Code())
 		}
 	}
@@ -415,7 +380,7 @@ func (a *Agent) ProcessUnsafe(ctx context.Context, transaction *transactions.Tra
 
 		// If it isn't a request then we can process it like normal.
 		if err := a.processAction(ctx, agentLockingScript, transaction, txid, action.Action,
-			action.OutputIndex, false); err != nil {
+			action.OutputIndex, false, 1.0, 0.0); err != nil {
 			return errors.Wrapf(err, "process action %d: %s", i, action.Action.Code())
 		}
 	}
@@ -425,7 +390,7 @@ func (a *Agent) ProcessUnsafe(ctx context.Context, transaction *transactions.Tra
 
 func (a *Agent) processAction(ctx context.Context, agentLockingScript bitcoin.Script,
 	transaction *transactions.Transaction, txid bitcoin.Hash32, action actions.Action,
-	outputIndex int, inRecovery bool) error {
+	outputIndex int, inRecovery bool, feeRate, minFeeRate float64) error {
 
 	ctx = logger.ContextWithLogFields(ctx, logger.Stringer("action_trace", uuid.New()))
 	start := time.Now()
@@ -463,6 +428,41 @@ func (a *Agent) processAction(ctx context.Context, agentLockingScript bitcoin.Sc
 		}
 
 		return nil
+	}
+
+	if IsRequest(action) {
+		if !a.IsActive() {
+			etx, err := a.createRejection(ctx, transaction, outputIndex,
+				platform.NewRejectError(actions.RejectionsInactive, ""))
+			if err != nil {
+				return errors.Wrap(err, "create rejection")
+			}
+
+			if etx != nil {
+				if err := a.BroadcastTx(ctx, etx, nil); err != nil {
+					return errors.Wrap(err, "broadcast")
+				}
+			}
+
+			return nil
+		}
+
+		if feeRate < minFeeRate {
+			etx, err := a.createRejection(ctx, transaction, outputIndex,
+				platform.NewRejectError(actions.RejectionsInsufficientTxFeeFunding,
+					fmt.Sprintf("fee rate %.4f, minimum %.4f", feeRate, minFeeRate)))
+			if err != nil {
+				return errors.Wrap(err, "create rejection")
+			}
+
+			if etx != nil {
+				if err := a.BroadcastTx(ctx, etx, nil); err != nil {
+					return errors.Wrap(err, "broadcast")
+				}
+			}
+
+			return nil
+		}
 	}
 
 	logger.InfoWithFields(ctx, []logger.Field{
