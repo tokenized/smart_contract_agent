@@ -121,8 +121,7 @@ func (s *Service) handleTx(ctx context.Context, transaction *transactions.Transa
 	agentLockingScript := s.agent.LockingScript()
 	isRelevant := false
 	for _, action := range actionList {
-		if contractFormation, ok := action.Action.(*actions.ContractFormation); ok &&
-			len(action.AgentLockingScripts) > 0 {
+		if contractFormation, ok := action.Action.(*actions.ContractFormation); ok {
 			if err := s.services.Update(ctx, action.AgentLockingScripts[0], contractFormation,
 				txid); err != nil {
 				logger.ErrorWithFields(ctx, []logger.Field{
