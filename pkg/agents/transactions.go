@@ -288,7 +288,8 @@ func clearIsProcessing(transaction *transactions.Transaction, contract state.Con
 func (a *Agent) Process(ctx context.Context, transaction *transactions.Transaction,
 	actionList []Action) error {
 
-	txCtx := logger.ContextWithLogFields(ctx, logger.Stringer("trace", uuid.New()))
+	trace := uuid.New()
+	txCtx := logger.ContextWithLogFields(ctx, logger.Stringer("tx_trace", trace))
 
 	txid := transaction.GetTxID()
 	agentLockingScript := a.LockingScript()
@@ -330,7 +331,7 @@ func (a *Agent) Process(ctx context.Context, transaction *transactions.Transacti
 
 	for i, action := range relevantActions {
 		if err := a.processAction(ctx, agentLockingScript, transaction, txid, action.Action,
-			action.OutputIndex, config.RecoveryMode, feeRate, minFeeRate); err != nil {
+			action.OutputIndex, config.RecoveryMode, feeRate, minFeeRate, trace); err != nil {
 			return errors.Wrapf(err, "process action %d: %s", i, action.Action.Code())
 		}
 	}
@@ -342,7 +343,8 @@ func (a *Agent) Process(ctx context.Context, transaction *transactions.Transacti
 func (a *Agent) ProcessUnsafe(ctx context.Context, transaction *transactions.Transaction,
 	actionList []Action) error {
 
-	ctx = logger.ContextWithLogFields(ctx, logger.Stringer("tx_trace", uuid.New()))
+	trace := uuid.New()
+	ctx = logger.ContextWithLogFields(ctx, logger.Stringer("tx_trace", trace))
 
 	txid := transaction.GetTxID()
 	agentLockingScript := a.LockingScript()
@@ -365,7 +367,7 @@ func (a *Agent) ProcessUnsafe(ctx context.Context, transaction *transactions.Tra
 				return nil
 			}
 
-			etx, err := a.createRejection(ctx, transaction, action.OutputIndex,
+			etx, err := a.createRejection(ctx, transaction, action.OutputIndex, -1,
 				platform.NewRejectError(actions.RejectionsDoubleSpend, ""))
 			if err != nil {
 				return errors.Wrap(err, "create rejection")
@@ -380,7 +382,7 @@ func (a *Agent) ProcessUnsafe(ctx context.Context, transaction *transactions.Tra
 
 		// If it isn't a request then we can process it like normal.
 		if err := a.processAction(ctx, agentLockingScript, transaction, txid, action.Action,
-			action.OutputIndex, false, 1.0, 0.0); err != nil {
+			action.OutputIndex, false, 1.0, 0.0, trace); err != nil {
 			return errors.Wrapf(err, "process action %d: %s", i, action.Action.Code())
 		}
 	}
@@ -390,7 +392,7 @@ func (a *Agent) ProcessUnsafe(ctx context.Context, transaction *transactions.Tra
 
 func (a *Agent) processAction(ctx context.Context, agentLockingScript bitcoin.Script,
 	transaction *transactions.Transaction, txid bitcoin.Hash32, action actions.Action,
-	outputIndex int, inRecovery bool, feeRate, minFeeRate float64) error {
+	outputIndex int, inRecovery bool, feeRate, minFeeRate float64, trace uuid.UUID) error {
 
 	ctx = logger.ContextWithLogFields(ctx, logger.Stringer("action_trace", uuid.New()))
 	start := time.Now()
@@ -398,6 +400,8 @@ func (a *Agent) processAction(ctx context.Context, agentLockingScript bitcoin.Sc
 	processed := transaction.ContractProcessed(a.ContractHash(), outputIndex)
 	if len(processed) > 0 {
 		logger.InfoWithFields(ctx, []logger.Field{
+			logger.Stringer("tx_trace", trace), // link tx processing to action processing
+			logger.Stringer("contract_locking_script", agentLockingScript),
 			logger.Stringer("txid", txid),
 			logger.Int("output_index", outputIndex),
 			logger.String("action_code", action.Code()),
@@ -413,15 +417,17 @@ func (a *Agent) processAction(ctx context.Context, agentLockingScript bitcoin.Sc
 			return errors.Wrap(err, "recovery request")
 		} else if added {
 			logger.InfoWithFields(ctx, []logger.Field{
-				logger.Stringer("txid", txid),
+				logger.Stringer("tx_trace", trace), // link tx processing to action processing
 				logger.Stringer("contract_locking_script", agentLockingScript),
+				logger.Stringer("txid", txid),
 				logger.String("action", action.Code()),
 				logger.Int("output_index", outputIndex),
 			}, "Saved transaction request for recovery")
 		} else {
 			logger.InfoWithFields(ctx, []logger.Field{
-				logger.Stringer("txid", txid),
+				logger.Stringer("tx_trace", trace), // link tx processing to action processing
 				logger.Stringer("contract_locking_script", agentLockingScript),
+				logger.Stringer("txid", txid),
 				logger.String("action", action.Code()),
 				logger.Int("output_index", outputIndex),
 			}, "Transaction request already saved for recovery")
@@ -432,7 +438,10 @@ func (a *Agent) processAction(ctx context.Context, agentLockingScript bitcoin.Sc
 
 	if IsRequest(action) {
 		if !a.IsActive() {
-			etx, err := a.createRejection(ctx, transaction, outputIndex,
+			// link tx processing to action processing
+			ctx = logger.ContextWithLogFields(ctx, logger.Stringer("tx_trace", trace))
+
+			etx, err := a.createRejection(ctx, transaction, outputIndex, -1,
 				platform.NewRejectError(actions.RejectionsInactive, ""))
 			if err != nil {
 				return errors.Wrap(err, "create rejection")
@@ -448,7 +457,10 @@ func (a *Agent) processAction(ctx context.Context, agentLockingScript bitcoin.Sc
 		}
 
 		if feeRate < minFeeRate {
-			etx, err := a.createRejection(ctx, transaction, outputIndex,
+			// link tx processing to action processing
+			ctx = logger.ContextWithLogFields(ctx, logger.Stringer("tx_trace", trace))
+
+			etx, err := a.createRejection(ctx, transaction, outputIndex, -1,
 				platform.NewRejectError(actions.RejectionsInsufficientTxFeeFunding,
 					fmt.Sprintf("fee rate %.4f, minimum %.4f", feeRate, minFeeRate)))
 			if err != nil {
@@ -466,6 +478,8 @@ func (a *Agent) processAction(ctx context.Context, agentLockingScript bitcoin.Sc
 	}
 
 	logger.InfoWithFields(ctx, []logger.Field{
+		logger.Stringer("tx_trace", trace), // link tx processing to action processing
+		logger.Stringer("contract_locking_script", agentLockingScript),
 		logger.Stringer("txid", txid),
 		logger.Int("output_index", outputIndex),
 		logger.String("action_code", action.Code()),
@@ -476,7 +490,7 @@ func (a *Agent) processAction(ctx context.Context, agentLockingScript bitcoin.Sc
 
 	if err := action.Validate(); err != nil {
 		if isRequest {
-			etx, err := a.createRejection(ctx, transaction, outputIndex,
+			etx, err := a.createRejection(ctx, transaction, outputIndex, -1,
 				platform.NewRejectError(actions.RejectionsMsgMalformed, err.Error()))
 			if err != nil {
 				return errors.Wrap(err, "create rejection")
@@ -598,14 +612,30 @@ func (a *Agent) processAction(ctx context.Context, agentLockingScript bitcoin.Sc
 
 	if processError != nil {
 		if rejectError, ok := errors.Cause(processError).(platform.RejectError); ok {
-			etx, err := a.createRejection(ctx, transaction, outputIndex, rejectError)
-			if err != nil {
-				return errors.Wrap(err, "create rejection")
-			}
+			switch act := action.(type) {
+			case *actions.Message:
+				etx, err := a.createMessageRejection(ctx, transaction, act, outputIndex,
+					rejectError)
+				if err != nil {
+					return errors.Wrap(err, "create rejection")
+				}
 
-			if etx != nil {
-				if err := a.BroadcastTx(ctx, etx, nil); err != nil {
-					return errors.Wrap(err, "broadcast")
+				if etx != nil {
+					if err := a.BroadcastTx(ctx, etx, nil); err != nil {
+						return errors.Wrap(err, "broadcast")
+					}
+				}
+
+			default:
+				etx, err := a.createRejection(ctx, transaction, outputIndex, -1, rejectError)
+				if err != nil {
+					return errors.Wrap(err, "create rejection")
+				}
+
+				if etx != nil {
+					if err := a.BroadcastTx(ctx, etx, nil); err != nil {
+						return errors.Wrap(err, "broadcast")
+					}
 				}
 			}
 

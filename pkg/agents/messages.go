@@ -122,6 +122,7 @@ func (a *Agent) processMessage(ctx context.Context, transaction *transactions.Tr
 	}
 
 	logger.InfoWithFields(ctx, []logger.Field{
+		logger.Uint32("message_code", message.MessageCode),
 		logger.String("message_type", payload.TypeName()),
 	}, "Message type")
 
@@ -141,6 +142,9 @@ func (a *Agent) processMessage(ctx context.Context, transaction *transactions.Tr
 		if processErr != nil {
 			processErr = errors.Wrap(processErr, "signature request")
 		}
+
+	default:
+		logger.Warn(ctx, "Unsupported message type")
 	}
 
 	return responseEtx, processErr
@@ -167,4 +171,44 @@ func (a *Agent) processNonRelevantMessage(ctx context.Context, transaction *tran
 	defer a.transactions.Release(ctx, firstInput.PreviousOutPoint.Hash)
 
 	return nil
+}
+
+// Determine how exactly to send this rejection. If it is the master contract of a multi-contract
+// transfer then we respond to the initial request. Otherwise we respond to the current request,
+// which is just contract to contract.
+func (a *Agent) createMessageRejection(ctx context.Context, transaction *transactions.Transaction,
+	message *actions.Message, outputIndex int,
+	rejectError platform.RejectError) (*expanded_tx.ExpandedTx, error) {
+
+	payload, err := messages.Deserialize(message.MessageCode, message.MessagePayload)
+	if err != nil {
+		logger.Warn(ctx, "Failed to deserialize message payload : %s", err)
+		return nil, nil
+	}
+
+	logger.InfoWithFields(ctx, []logger.Field{
+		logger.Uint32("message_code", message.MessageCode),
+		logger.String("message_type", payload.TypeName()),
+	}, "Message type")
+
+	var etx *expanded_tx.ExpandedTx
+	switch p := payload.(type) {
+	case *messages.SettlementRequest:
+		etx, err = a.createSettlementRequestRejection(ctx, transaction, outputIndex, p, rejectError)
+		if err != nil {
+			err = errors.Wrap(err, "settlement request")
+		}
+
+	case *messages.SignatureRequest:
+		etx, err = a.createSignatureRequestRejection(ctx, transaction, outputIndex, p, rejectError)
+		if err != nil {
+			err = errors.Wrap(err, "signature request")
+		}
+
+	default:
+		logger.Warn(ctx, "Unsupported message type")
+		err = nil
+	}
+
+	return etx, err
 }

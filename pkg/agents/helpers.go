@@ -186,10 +186,7 @@ func buildExpandedTx(tx *wire.MsgTx, ancestors []*wire.MsgTx) (*expanded_tx.Expa
 	for _, txin := range tx.TxIn {
 		parentTx := etx.Ancestors.GetTx(txin.PreviousOutPoint.Hash)
 		if parentTx != nil {
-			ptx := parentTx.GetTx()
-			if ptx == nil {
-				continue // already have this ancestor
-			}
+			continue // already have this ancestor
 		}
 
 		found := false

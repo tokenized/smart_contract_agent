@@ -147,7 +147,7 @@ func (a *Agent) processRejection(ctx context.Context, transaction *transactions.
 
 			if transferContracts != nil && transferContracts.IsFirstContract() {
 				etx, rerr := a.createRejection(ctx, transferTransaction, transferOutputIndex,
-					rejectError)
+					-1, rejectError)
 				if rerr != nil {
 					return nil, errors.Wrap(rerr, "reject")
 				}
@@ -163,7 +163,7 @@ func (a *Agent) processRejection(ctx context.Context, transaction *transactions.
 
 	if transferContracts.IsFirstContract() {
 		// This is the first contract so create a reject for the transfer itself.
-		etx, rerr := a.createRejection(ctx, transferTransaction, transferOutputIndex,
+		etx, rerr := a.createRejection(ctx, transferTransaction, transferOutputIndex, -1,
 			platform.NewRejectErrorWithOutputIndex(int(rejection.RejectionCode), rejection.Message,
 				transferContracts.FirstContractOutputIndex))
 		if rerr != nil {
@@ -275,9 +275,10 @@ func (a *Agent) traceToTransfer(ctx context.Context,
 	return a.traceToTransfer(ctx, previousTxID)
 }
 
-// createRejection creates a reject message transaction that spends the specified output and contains
-// the specified reject code.
-func (a *Agent) createRejection(ctx context.Context, transaction *transactions.Transaction, outputIndex int,
+// createRejection creates a reject message transaction that spends the specified output and
+// contains the specified reject code.
+func (a *Agent) createRejection(ctx context.Context, transaction *transactions.Transaction,
+	actionOutputIndex, responseOutputIndex int,
 	rejectError error) (*expanded_tx.ExpandedTx, error) {
 
 	var reject *platform.RejectError
@@ -295,7 +296,26 @@ func (a *Agent) createRejection(ctx context.Context, transaction *transactions.T
 
 	txid := transaction.TxID()
 
-	if reject != nil && reject.OutputIndex != -1 {
+	inputFound := false
+	if !inputFound && responseOutputIndex != -1 {
+		outpoint := wire.OutPoint{
+			Hash:  txid,
+			Index: uint32(responseOutputIndex),
+		}
+		output := transaction.Output(responseOutputIndex)
+
+		if !output.LockingScript.Equal(agentLockingScript) {
+			return nil, errors.New("Reject output index locking script is wrong")
+		}
+
+		if err := rejectTx.AddInput(outpoint, output.LockingScript, output.Value); err != nil {
+			transaction.Unlock()
+			return nil, errors.Wrap(err, "add response input")
+		}
+		inputFound = true
+	}
+
+	if !inputFound && reject != nil && reject.OutputIndex != -1 {
 		// Add input spending output flagged for response.
 		outpoint := wire.OutPoint{
 			Hash:  txid,
@@ -303,32 +323,33 @@ func (a *Agent) createRejection(ctx context.Context, transaction *transactions.T
 		}
 		output := transaction.Output(reject.OutputIndex)
 
-		if output.LockingScript.Equal(agentLockingScript) {
-			if err := rejectTx.AddInput(outpoint, output.LockingScript, output.Value); err != nil {
-				transaction.Unlock()
-				return nil, errors.Wrap(err, "add response input")
-			}
+		if !output.LockingScript.Equal(agentLockingScript) {
+			return nil, errors.New("Reject output index locking script is wrong")
 		}
+
+		if err := rejectTx.AddInput(outpoint, output.LockingScript, output.Value); err != nil {
+			transaction.Unlock()
+			return nil, errors.Wrap(err, "add response input")
+		}
+		inputFound = true
 	}
 
-	// Find any other outputs with the contract locking script.
-	outputCount := transaction.OutputCount()
-	for i := 0; i < outputCount; i++ {
-		if reject != nil && i == reject.OutputIndex {
-			continue
-		}
+	if !inputFound {
+		// Find any other outputs with the contract locking script.
+		outputCount := transaction.OutputCount()
+		for i := 0; i < outputCount; i++ {
+			output := transaction.Output(i)
+			if output.LockingScript.Equal(agentLockingScript) {
+				outpoint := wire.OutPoint{
+					Hash:  transaction.TxID(),
+					Index: uint32(i),
+				}
 
-		output := transaction.Output(i)
-		if output.LockingScript.Equal(agentLockingScript) {
-			outpoint := wire.OutPoint{
-				Hash:  transaction.TxID(),
-				Index: uint32(i),
-			}
-
-			if err := rejectTx.AddInput(outpoint, output.LockingScript, output.Value); err != nil &&
-				errors.Cause(err) != txbuilder.ErrDuplicateInput {
-				transaction.Unlock()
-				return nil, errors.Wrap(err, "add input")
+				if err := rejectTx.AddInput(outpoint, output.LockingScript,
+					output.Value); err != nil && errors.Cause(err) != txbuilder.ErrDuplicateInput {
+					transaction.Unlock()
+					return nil, errors.Wrap(err, "add input")
+				}
 			}
 		}
 	}
@@ -414,9 +435,9 @@ func (a *Agent) createRejection(ctx context.Context, transaction *transactions.T
 	// Set locking script of largest input to receive any bitcoin change. Assume it is the main
 	// funding and is the best option to receive any extra bitcoin.
 	inputCount := transaction.InputCount()
-	var refundInputValue uint64
-	var refundScript bitcoin.Script
 	if reject == nil || len(reject.ReceiverLockingScript) == 0 {
+		var refundInputValue uint64
+		var refundScript bitcoin.Script
 		for i := 0; i < inputCount; i++ {
 			inputOutput, err := transaction.InputOutput(i)
 			if err != nil {
@@ -429,18 +450,20 @@ func (a *Agent) createRejection(ctx context.Context, transaction *transactions.T
 				refundScript = inputOutput.LockingScript
 			}
 		}
+
+		if refundInputValue == 0 {
+			if err := rejectTx.SetChangeLockingScript(agentLockingScript, ""); err != nil {
+				return nil, errors.Wrap(err, "set change locking script")
+			}
+		} else if err := rejectTx.SetChangeLockingScript(refundScript, ""); err != nil {
+			return nil, errors.Wrap(err, "set change locking script")
+		}
 	} else {
-		refundScript = reject.ReceiverLockingScript
+		if err := rejectTx.SetChangeLockingScript(reject.ReceiverLockingScript, ""); err != nil {
+			return nil, errors.Wrap(err, "set change locking script")
+		}
 	}
 	transaction.Unlock()
-
-	if refundInputValue == 0 {
-		return nil, errors.New("No refund input found")
-	}
-
-	if err := rejectTx.SetChangeLockingScript(refundScript, ""); err != nil {
-		return nil, errors.Wrap(err, "set change locking script")
-	}
 
 	if _, err := rejectTx.Sign([]bitcoin.Key{a.Key()}); err != nil {
 		if errors.Cause(err) == txbuilder.ErrInsufficientValue {
@@ -464,7 +487,7 @@ func (a *Agent) createRejection(ctx context.Context, transaction *transactions.T
 	rejectTransaction.Unlock()
 
 	transaction.Lock()
-	transaction.AddResponseTxID(a.ContractHash(), outputIndex, rejectTxID)
+	transaction.AddResponseTxID(a.ContractHash(), actionOutputIndex, rejectTxID)
 	tx := transaction.Tx.Copy()
 	transaction.Unlock()
 

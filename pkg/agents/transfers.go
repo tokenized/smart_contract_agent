@@ -668,6 +668,19 @@ func (c TransferContracts) IsPriorContract(lockingScript bitcoin.Script) bool {
 	return false
 }
 
+func (c TransferContracts) PriorContractLockingScript() bitcoin.Script {
+	var priorLockingScript bitcoin.Script
+	for i, ls := range c.LockingScripts {
+		if i == c.CurrentIndex {
+			return priorLockingScript
+		}
+
+		priorLockingScript = ls.Copy() // copy to ensure there is no iterator problem
+	}
+
+	return nil
+}
+
 // IsFinalContract returns true if the current contract is the final contract to process this
 // transfer.
 func (c TransferContracts) IsFinalContract() bool {
@@ -680,6 +693,27 @@ func (c TransferContracts) IsFirstContract() bool {
 
 func (c TransferContracts) IsMultiContract() bool {
 	return len(c.LockingScripts) > 1
+}
+
+func (c TransferContracts) IsFinalResponseOutput(outputIndex int) bool {
+	for _, index := range c.OutputIndexes {
+		if index == outputIndex {
+			return true
+		}
+	}
+
+	return false
+}
+
+func (c TransferContracts) CurrentOutputIndex() int {
+	currentLockingScript := c.LockingScripts[c.CurrentIndex]
+	for i, output := range c.Outputs {
+		if output.LockingScript.Equal(currentLockingScript) {
+			return c.OutputIndexes[i]
+		}
+	}
+
+	return -1
 }
 
 // parseContracts returns the previous, next, and full list of contracts in the order that they

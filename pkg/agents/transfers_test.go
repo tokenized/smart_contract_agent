@@ -1738,7 +1738,7 @@ func Test_Transfers_Multi_Expire(t *testing.T) {
 	config := DefaultConfig()
 	config.MultiContractExpiration.Duration = time.Millisecond * 250
 
-	scheduler := scheduler.NewScheduler(broadcaster2)
+	scheduler := scheduler.NewScheduler(broadcaster1)
 	_, feeLockingScript, _ := state.MockKey()
 
 	schedulerInterrupt := make(chan interface{})
@@ -1983,8 +1983,6 @@ func Test_Transfers_Multi_Expire(t *testing.T) {
 		js, _ := json.MarshalIndent(message, "", "  ")
 		t.Logf("Message : %s", js)
 
-		time.Sleep(time.Millisecond * 300)
-
 		if err := agent2.Process(ctx, transaction, []Action{{
 			AgentLockingScripts: []bitcoin.Script{contractLockingScript2},
 			OutputIndex:         transferScriptOutputIndex,
@@ -2020,6 +2018,45 @@ func Test_Transfers_Multi_Expire(t *testing.T) {
 			t.Fatalf("Failed to add transaction : %s", err)
 		}
 
+		t.Logf("Sleeping to wait for expiration")
+		time.Sleep(time.Millisecond * 300)
+
+		agent1ResponseTxReject := broadcaster1.GetLastTx()
+		broadcaster1.ClearTxs()
+		if agent1ResponseTxReject == nil {
+			t.Fatalf("No agent 1 response tx reject")
+		}
+
+		t.Logf("Agent 1 response tx reject : %s", agent1ResponseTxReject)
+
+		// Find signature request action
+		var messageReject *actions.Rejection
+		for _, txout := range agent1ResponseTxReject.Tx.TxOut {
+			action, err := protocol.Deserialize(txout.LockingScript, true)
+			if err != nil {
+				continue
+			}
+
+			if a, ok := action.(*actions.Rejection); ok {
+				messageReject = a
+			}
+		}
+
+		if messageReject == nil {
+			t.Fatalf("Missing message reject action")
+		}
+
+		if messageReject.RejectionCode != actions.RejectionsTransferExpired {
+			t.Fatalf("Wrong response message rejection code : got %d, want %d",
+				messageReject.RejectionCode, actions.RejectionsTransferExpired)
+		} else {
+			t.Logf("Response message is transfer expired rejection")
+		}
+
+		js, _ = json.MarshalIndent(messageReject, "", "  ")
+		t.Logf("Rejection Message : %s", js)
+
+		t.Logf("Processing settlement request")
 		if err := agent1.Process(ctx, messageTransaction, []Action{{
 			AgentLockingScripts: []bitcoin.Script{contractLockingScript1},
 			OutputIndex:         messageScriptOutputIndex,
@@ -2076,6 +2113,9 @@ func Test_Transfers_Multi_Expire(t *testing.T) {
 			t.Logf("Response 2 message is signature request")
 		}
 
+		js, _ = json.MarshalIndent(message2, "", "  ")
+		t.Logf("Signature Request Message : %s", js)
+
 		messagePayload, err := messages.Deserialize(message2.MessageCode, message2.MessagePayload)
 		if err != nil {
 			t.Fatalf("Failed to deserialize message payload : %s", err)
@@ -2128,6 +2168,7 @@ func Test_Transfers_Multi_Expire(t *testing.T) {
 			t.Fatalf("Failed to add transaction : %s", err)
 		}
 
+		t.Logf("Processing signature request")
 		if err := agent2.Process(ctx, message2Transaction, []Action{{
 			AgentLockingScripts: []bitcoin.Script{contractLockingScript2},
 			OutputIndex:         message2ScriptOutputIndex,
@@ -2152,39 +2193,8 @@ func Test_Transfers_Multi_Expire(t *testing.T) {
 
 		agent1ResponseTx3 := broadcaster1.GetLastTx()
 		broadcaster1.ClearTxs()
-		if agent1ResponseTx3 == nil {
-			t.Fatalf("No agent 1 response tx 3")
-		}
-
-		t.Logf("Agent 1 response tx 3 : %s", agent1ResponseTx3)
-
-		var rejection *actions.Rejection
-		for _, txout := range agent1ResponseTx3.Tx.TxOut {
-			action, err := protocol.Deserialize(txout.LockingScript, true)
-			if err != nil {
-				continue
-			}
-
-			if a, ok := action.(*actions.Rejection); ok {
-				rejection = a
-			}
-		}
-
-		if rejection == nil {
-			t.Fatalf("Missing rejection action")
-		}
-
-		rejectData := actions.RejectionsData(rejection.RejectionCode)
-		if rejectData != nil {
-			t.Logf("Rejection code : %s", rejectData.Label)
-		}
-
-		js, _ = json.MarshalIndent(rejection, "", "  ")
-		t.Logf("Rejection : %s", js)
-
-		if rejection.RejectionCode != actions.RejectionsTransferExpired {
-			t.Errorf("Wrong reject code : got %d, want %d", rejection.RejectionCode,
-				actions.RejectionsTransferExpired)
+		if agent1ResponseTx3 != nil {
+			t.Fatalf("Agent 1 response tx 3 should be nil")
 		}
 
 		test.caches.Transactions.Release(ctx, message2Transaction.GetTxID())
@@ -2458,7 +2468,7 @@ func Test_Transfers_Multi_Reject_First(t *testing.T) {
 	StopTestAgent(ctx, t, test)
 }
 
-// Test_Transfers_Multi_Reject_First is a multi-contract transfer that is rejected by the first
+// Test_Transfers_Multi_Reject_Second is a multi-contract transfer that is rejected by the second
 // contract agent.
 func Test_Transfers_Multi_Reject_Second(t *testing.T) {
 	ctx := logger.ContextWithLogger(context.Background(), true, true, "")

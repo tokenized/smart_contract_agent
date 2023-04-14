@@ -46,9 +46,14 @@ type TransactionCache struct {
 }
 
 type Processed struct {
-	Contract     state.ContractHash `bsor:"1" json:"contract"`
-	OutputIndex  int                `bsor:"2" json:"output_index"`
-	ResponseTxID *bitcoin.Hash32    `bsor:"3" json:"response_txid"`
+	// Contract is the hash of the contract that responded.
+	Contract state.ContractHash `bsor:"1" json:"contract"`
+
+	// OutputIndex is the index of the output containing the action that was responded to.
+	OutputIndex int `bsor:"2" json:"output_index"`
+
+	// ResponseTxID is the txid of the response.
+	ResponseTxID *bitcoin.Hash32 `bsor:"3" json:"response_txid"`
 }
 
 type Transaction struct {

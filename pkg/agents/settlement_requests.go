@@ -257,6 +257,7 @@ func (a *Agent) processSettlementRequest(ctx context.Context, transaction *trans
 		if err := settlement.Validate(); err != nil {
 			allBalances.Revert(transferTxID)
 			etx, rerr := a.createRejection(ctx, transferTransaction, transferOutputIndex,
+				transferContracts.CurrentOutputIndex(),
 				platform.NewRejectError(actions.RejectionsMsgMalformed, err.Error()))
 			if rerr != nil {
 				return nil, errors.Wrap(rerr, "reject")
@@ -478,10 +479,40 @@ func (a *Agent) createSettlementRequest(ctx context.Context,
 		fundingOutput = transferContracts.BoomerangOutput
 	}
 
+	rejectTransaction := currentTransaction
+	rejectActionOutputIndex := 0
+	rejectOutputIndex := -1
+	if transferContracts.IsFirstContract() {
+		config := a.Config()
+		transferOutputIndex := 0
+		transferTransaction.Lock()
+		transferTxOutputCount := transferTransaction.OutputCount()
+		for i := 0; i < transferTxOutputCount; i++ {
+			txout := transferTransaction.Output(i)
+
+			action, err := protocol.Deserialize(txout.LockingScript, config.IsTest)
+			if err != nil {
+				continue
+			}
+
+			if _, ok := action.(*actions.Transfer); ok {
+				transferOutputIndex = i
+				break
+			}
+		}
+		transferTransaction.Unlock()
+
+		rejectTransaction = transferTransaction
+		rejectActionOutputIndex = transferOutputIndex
+		rejectOutputIndex = transferContracts.CurrentOutputIndex()
+	} else {
+		rejectActionOutputIndex = currentOutputIndex
+	}
+
 	logger.InfoWithFields(ctx, []logger.Field{
 		logger.Int("funding_index", fundingIndex),
 		logger.Uint64("funding_value", fundingOutput.Value),
-	}, "Funding settlement request with output")
+	}, "Sending settlement request")
 
 	if !fundingOutput.LockingScript.Equal(agentLockingScript) {
 		return nil, fmt.Errorf("Wrong locking script for funding output")
@@ -549,7 +580,8 @@ func (a *Agent) createSettlementRequest(ctx context.Context,
 	if _, err := messageTx.Sign([]bitcoin.Key{a.Key()}); err != nil {
 		if errors.Cause(err) == txbuilder.ErrInsufficientValue {
 			logger.Warn(ctx, "Insufficient tx funding : %s", err)
-			etx, rerr := a.createRejection(ctx, currentTransaction, currentOutputIndex,
+			etx, rerr := a.createRejection(ctx, rejectTransaction, rejectActionOutputIndex,
+				rejectOutputIndex,
 				platform.NewRejectError(actions.RejectionsInsufficientTxFeeFunding, err.Error()))
 			if rerr != nil {
 				return nil, errors.Wrap(rerr, "reject")
@@ -605,6 +637,91 @@ func (a *Agent) createSettlementRequest(ctx context.Context,
 		task := NewCancelPendingTransferTask(expireTime, a.agentStore, agentLockingScript,
 			transferTxID)
 		a.scheduler.Schedule(ctx, task)
+	}
+
+	return etx, nil
+}
+
+func (a *Agent) createSettlementRequestRejection(ctx context.Context,
+	transaction *transactions.Transaction, outputIndex int,
+	settlementRequest *messages.SettlementRequest,
+	rejectError platform.RejectError) (*expanded_tx.ExpandedTx, error) {
+
+	agentLockingScript := a.LockingScript()
+
+	config := a.Config()
+
+	newTransferTxID, err := bitcoin.NewHash32(settlementRequest.TransferTxId)
+	if err != nil {
+		logger.Warn(ctx, "Invalid transfer txid in settlement request : %s", err)
+		return nil, platform.NewRejectError(actions.RejectionsMsgMalformed, "transfer txid invalid")
+	}
+	transferTxID := *newTransferTxID
+
+	transferTransaction, err := a.transactions.Get(ctx, transferTxID)
+	if err != nil {
+		return nil, errors.Wrap(err, "get transfer tx")
+	}
+
+	if transferTransaction == nil {
+		logger.WarnWithFields(ctx, []logger.Field{
+			logger.Stringer("transfer_txid", transferTxID),
+		}, "Transfer tx not found")
+	}
+	defer a.transactions.Release(ctx, transferTxID)
+
+	var transfer *actions.Transfer
+	var transferOutputIndex int
+	transferTransaction.Lock()
+	outputCount := transferTransaction.OutputCount()
+	for i := 0; i < outputCount; i++ {
+		output := transferTransaction.Output(i)
+		action, err := protocol.Deserialize(output.LockingScript, config.IsTest)
+		if err != nil {
+			continue
+		}
+
+		tfr, ok := action.(*actions.Transfer)
+		if ok {
+			transferOutputIndex = i
+			transfer = tfr
+			break
+		}
+	}
+	transferTransaction.Unlock()
+
+	if transfer == nil {
+		logger.WarnWithFields(ctx, []logger.Field{
+			logger.Stringer("transfer_txid", transferTxID),
+		}, "Transfer action not found in transfer transaction")
+		return nil, platform.NewRejectError(actions.RejectionsMsgMalformed,
+			"transfer tx missing transfer")
+	}
+
+	transferContracts, err := parseTransferContracts(transferTransaction, transfer,
+		agentLockingScript)
+	if err != nil {
+		return nil, errors.Wrap(err, "parse contracts")
+	}
+
+	if transferContracts.IsFirstContract() {
+		// Create rejection of initial transfer request.
+		etx, err := a.createRejection(ctx, transferTransaction, transferOutputIndex,
+			transferContracts.CurrentOutputIndex(), rejectError)
+		if err != nil {
+			return nil, errors.Wrap(err, "create transfer rejection")
+		}
+
+		return etx, nil
+	}
+
+	// Create rejection of the settlement request to the previous contract.
+	rejectError.ReceiverLockingScript = transferContracts.PriorContractLockingScript()
+	rejectError.OutputIndex = -1
+
+	etx, err := a.createRejection(ctx, transaction, outputIndex, -1, rejectError)
+	if err != nil {
+		return nil, errors.Wrap(err, "create settlement request rejection")
 	}
 
 	return etx, nil
