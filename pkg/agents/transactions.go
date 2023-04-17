@@ -605,6 +605,9 @@ func (a *Agent) processAction(ctx context.Context, agentLockingScript bitcoin.Sc
 	}, "Processed action")
 
 	if responseEtx != nil {
+		logger.InfoWithFields(ctx, []logger.Field{
+			logger.Stringer("response_txid", responseEtx.TxID()),
+		}, "Broadcasting response")
 		if err := a.BroadcastTx(ctx, responseEtx, nil); err != nil {
 			return errors.Wrap(err, "broadcast")
 		}
@@ -621,6 +624,9 @@ func (a *Agent) processAction(ctx context.Context, agentLockingScript bitcoin.Sc
 				}
 
 				if etx != nil {
+					logger.InfoWithFields(ctx, []logger.Field{
+						logger.Stringer("response_txid", etx.TxID()),
+					}, "Broadcasting response")
 					if err := a.BroadcastTx(ctx, etx, nil); err != nil {
 						return errors.Wrap(err, "broadcast")
 					}
@@ -633,6 +639,9 @@ func (a *Agent) processAction(ctx context.Context, agentLockingScript bitcoin.Sc
 				}
 
 				if etx != nil {
+					logger.InfoWithFields(ctx, []logger.Field{
+						logger.Stringer("response_txid", etx.TxID()),
+					}, "Broadcasting response")
 					if err := a.BroadcastTx(ctx, etx, nil); err != nil {
 						return errors.Wrap(err, "broadcast")
 					}
