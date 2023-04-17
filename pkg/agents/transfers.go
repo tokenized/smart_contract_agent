@@ -40,6 +40,9 @@ func (a *Agent) processTransfer(ctx context.Context, transaction *transactions.T
 
 	if !transferContracts.IsFirstContract() {
 		logger.Info(ctx, "Waiting for settlement request message to process transfer")
+		// TODO Add scheduled task to cancel after multi-contract expiration time by spending the
+		// contract's output and taking the action fee. The reject should be sent to the requesting
+		// parties. --ce
 		return nil, nil // Wait for settlement request message
 	}
 

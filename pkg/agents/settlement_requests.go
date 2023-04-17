@@ -719,6 +719,7 @@ func (a *Agent) createSettlementRequestRejection(ctx context.Context,
 	rejectError.ReceiverLockingScript = transferContracts.PriorContractLockingScript()
 	rejectError.OutputIndex = -1
 
+	// TODO This should also spend the contract's output from the transfer transaction. --ce
 	etx, err := a.createRejection(ctx, transaction, outputIndex, -1, rejectError)
 	if err != nil {
 		return nil, errors.Wrap(err, "create settlement request rejection")

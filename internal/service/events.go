@@ -45,7 +45,10 @@ func (s *Service) LoadEvents(ctx context.Context) error {
 }
 
 func (s *Service) SaveEvents(ctx context.Context) error {
-	tasks := s.scheduler.ListTasks()
+	tasks, err := s.scheduler.ListTasks(ctx)
+	if err != nil {
+		return errors.Wrap(err, "list tasks")
+	}
 
 	var events scheduler.Events
 	for _, task := range tasks {

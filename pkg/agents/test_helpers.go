@@ -157,7 +157,7 @@ func prepareTestData(ctx context.Context, t testing.TB) *TestData {
 		headers:                      state.NewMockHeaders(),
 	}
 
-	test.scheduler = scheduler.NewScheduler(test.broadcaster)
+	test.scheduler = scheduler.NewScheduler(test.broadcaster, time.Second)
 
 	test.caches = StartTestCaches(ctx, t, test.store, time.Second)
 

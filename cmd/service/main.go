@@ -38,6 +38,7 @@ type Config struct {
 	Agents                      agents.Config    `json:"agents"`
 	FeeAddress                  bitcoin.Address  `envconfig:"FEE_ADDRESS" json:"fee_address"`
 	RequestPeerChannelReadToken *string          `envconfig:"REQUEST_PEER_CHANNEL_READ_TOKEN" json:"request_peer_channel_read_token"`
+	ChannelTimeout              config.Duration  `default:"1s" envconfig:"CHANNEL_TIMEOUT" json:"channel_timeout"`
 
 	Storage storage.Config       `json:"storage"`
 	SpyNode spyNodeClient.Config `json:"spynode"`
@@ -95,7 +96,7 @@ func main() {
 
 	broadcaster := NewSpyNodeBroadcaster(spyNode)
 
-	scheduler := scheduler.NewScheduler(broadcaster)
+	scheduler := scheduler.NewScheduler(broadcaster, cfg.ChannelTimeout.Duration)
 
 	cache := cacher.NewSimpleCache(store)
 	caches, err := state.NewCaches(cache)
