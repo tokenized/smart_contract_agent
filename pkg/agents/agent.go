@@ -74,8 +74,9 @@ type AgentData struct {
 }
 
 type Agent struct {
-	data     AgentData
-	dataLock sync.Mutex
+	data           AgentData
+	dataIsModified bool
+	dataLock       sync.Mutex
 
 	config         atomic.Value
 	channelTimeout atomic.Value
@@ -172,6 +173,24 @@ func (a *Agent) Release(ctx context.Context) {
 	a.caches.Contracts.Release(ctx, a.LockingScript())
 }
 
+func (a *Agent) Data() AgentData {
+	a.dataLock.Lock()
+	defer a.dataLock.Unlock()
+
+	return a.data.Copy()
+}
+
+func (a *Agent) GetModifiedData() (AgentData, bool) {
+	a.dataLock.Lock()
+	defer a.dataLock.Unlock()
+
+	data := a.data.Copy()
+	isModified := a.dataIsModified
+	a.dataIsModified = false
+
+	return data, isModified
+}
+
 func (a *Agent) Key() bitcoin.Key {
 	a.dataLock.Lock()
 	defer a.dataLock.Unlock()
@@ -227,6 +246,9 @@ func (a *Agent) SetAdminLockingScript(lockingScript bitcoin.Script) {
 	a.dataLock.Lock()
 	defer a.dataLock.Unlock()
 
+	if !a.data.AdminLockingScript.Equal(lockingScript) {
+		a.dataIsModified = true
+	}
 	a.data.AdminLockingScript = lockingScript.Copy()
 }
 
@@ -321,6 +343,24 @@ func (a *Agent) ActionIsSupported(action actions.Action) bool {
 	default:
 		return false
 	}
+}
+
+func (d AgentData) Copy() AgentData {
+	result := AgentData{
+		Key:                d.Key.Copy(),
+		LockingScript:      d.LockingScript.Copy(),
+		ContractFee:        d.ContractFee,
+		FeeLockingScript:   d.FeeLockingScript.Copy(),
+		AdminLockingScript: d.AdminLockingScript.Copy(),
+		IsActive:           d.IsActive,
+	}
+
+	if d.RequestPeerChannel != nil {
+		c := d.RequestPeerChannel.Copy()
+		result.RequestPeerChannel = &c
+	}
+
+	return result
 }
 
 func (a *AgentData) Serialize(w io.Writer) error {
