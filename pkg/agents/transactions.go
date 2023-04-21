@@ -614,38 +614,42 @@ func (a *Agent) processAction(ctx context.Context, agentLockingScript bitcoin.Sc
 	}
 
 	if processError != nil {
-		if rejectError, ok := errors.Cause(processError).(platform.RejectError); ok && isRequest {
-			switch act := action.(type) {
-			case *actions.Message:
-				etx, err := a.createMessageRejection(ctx, transaction, act, outputIndex,
-					rejectError)
-				if err != nil {
-					return errors.Wrap(err, "create rejection")
-				}
+		if rejectError, ok := errors.Cause(processError).(platform.RejectError); ok {
+			if isRequest {
+				switch act := action.(type) {
+				case *actions.Message:
+					etx, err := a.createMessageRejection(ctx, transaction, act, outputIndex,
+						rejectError)
+					if err != nil {
+						return errors.Wrap(err, "create rejection")
+					}
 
-				if etx != nil {
-					logger.InfoWithFields(ctx, []logger.Field{
-						logger.Stringer("response_txid", etx.TxID()),
-					}, "Broadcasting response")
-					if err := a.BroadcastTx(ctx, etx, nil); err != nil {
-						return errors.Wrap(err, "broadcast")
+					if etx != nil {
+						logger.InfoWithFields(ctx, []logger.Field{
+							logger.Stringer("response_txid", etx.TxID()),
+						}, "Broadcasting response")
+						if err := a.BroadcastTx(ctx, etx, nil); err != nil {
+							return errors.Wrap(err, "broadcast")
+						}
+					}
+
+				default:
+					etx, err := a.createRejection(ctx, transaction, outputIndex, -1, rejectError)
+					if err != nil {
+						return errors.Wrap(err, "create rejection")
+					}
+
+					if etx != nil {
+						logger.InfoWithFields(ctx, []logger.Field{
+							logger.Stringer("response_txid", etx.TxID()),
+						}, "Broadcasting response")
+						if err := a.BroadcastTx(ctx, etx, nil); err != nil {
+							return errors.Wrap(err, "broadcast")
+						}
 					}
 				}
-
-			default:
-				etx, err := a.createRejection(ctx, transaction, outputIndex, -1, rejectError)
-				if err != nil {
-					return errors.Wrap(err, "create rejection")
-				}
-
-				if etx != nil {
-					logger.InfoWithFields(ctx, []logger.Field{
-						logger.Stringer("response_txid", etx.TxID()),
-					}, "Broadcasting response")
-					if err := a.BroadcastTx(ctx, etx, nil); err != nil {
-						return errors.Wrap(err, "broadcast")
-					}
-				}
+			} else {
+				logger.Error(ctx, "Received reject from response processing : %s", processError)
 			}
 
 			return nil
