@@ -9,6 +9,7 @@ import (
 	"github.com/tokenized/logger"
 	"github.com/tokenized/pkg/bitcoin"
 	"github.com/tokenized/pkg/expanded_tx"
+	"github.com/tokenized/pkg/peer_channels"
 	"github.com/tokenized/pkg/wire"
 	"github.com/tokenized/smart_contract_agent/internal/platform"
 	"github.com/tokenized/smart_contract_agent/pkg/headers"
@@ -788,6 +789,16 @@ func (a *Agent) processContractFormation(ctx context.Context, transaction *trans
 				logger.Stringer("admin_locking_script", adminLockingScript),
 			}, "Setting admin locking script")
 			a.SetAdminLockingScript(adminLockingScript)
+		}
+	}
+
+	if len(formation.RequestPeerChannel) > 0 {
+		requestPeerChannel, err := peer_channels.ParseChannel(formation.RequestPeerChannel)
+		if err == nil {
+			logger.InfoWithFields(ctx, []logger.Field{
+				logger.Stringer("request_peer_channel", requestPeerChannel),
+			}, "Setting request peer channel")
+			a.SetRequestPeerChannel(requestPeerChannel)
 		}
 	}
 

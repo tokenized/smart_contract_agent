@@ -235,6 +235,34 @@ func (a *Agent) RequestPeerChannel() *peer_channels.Channel {
 	return &c
 }
 
+func (a *Agent) SetRequestPeerChannel(requestPeerChannel *peer_channels.Channel) {
+	a.dataLock.Lock()
+	defer a.dataLock.Unlock()
+
+	if a.data.RequestPeerChannel == nil && requestPeerChannel == nil {
+		return // no change
+	}
+
+	if a.data.RequestPeerChannel == nil && requestPeerChannel != nil {
+		a.dataIsModified = true
+		c := requestPeerChannel.Copy()
+		a.data.RequestPeerChannel = &c
+		return
+	}
+
+	if a.data.RequestPeerChannel != nil && requestPeerChannel == nil {
+		a.dataIsModified = true
+		a.data.RequestPeerChannel = nil
+		return
+	}
+
+	if a.data.RequestPeerChannel.String() != requestPeerChannel.String() {
+		a.dataIsModified = true
+		c := requestPeerChannel.Copy()
+		a.data.RequestPeerChannel = &c
+	}
+}
+
 func (a *Agent) AdminLockingScript() bitcoin.Script {
 	a.dataLock.Lock()
 	defer a.dataLock.Unlock()
