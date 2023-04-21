@@ -189,9 +189,6 @@ func main() {
 	peerChannelThread.Stop(ctx)
 	peerChannelWait.Wait()
 
-	schedulerThread.Stop(ctx)
-	schedulerWait.Wait()
-
 	spyNodeThread.Stop(ctx)
 	spyNodeWait.Wait()
 
@@ -204,6 +201,10 @@ func main() {
 	if err := service.Save(ctx); err != nil {
 		logger.Error(ctx, "Failed to save service : %s", err)
 	}
+
+	// This needs to be stopped after the service save so that the service save can list the tasks.
+	schedulerThread.Stop(ctx)
+	schedulerWait.Wait()
 
 	service.Release(ctx)
 }
