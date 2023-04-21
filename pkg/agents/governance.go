@@ -692,7 +692,7 @@ func (a *Agent) processBallotCast(ctx context.Context, transaction *transactions
 		VoteTxId:  voteTxID.Bytes(),
 		Vote:      ballotCast.Vote,
 		Quantity:  quantity,
-		Timestamp: a.Now(),
+		Timestamp: now,
 	}
 
 	if err := ballotCounted.Validate(); err != nil {

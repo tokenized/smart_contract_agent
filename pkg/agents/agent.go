@@ -31,6 +31,8 @@ var (
 
 	ErrNotImplemented = errors.New("Not Implemented")
 
+	ErrTimeout = errors.New("Timeout")
+
 	agentDataVersion = uint8(0)
 	endian           = binary.LittleEndian
 )
@@ -41,6 +43,7 @@ type Config struct {
 	DustFeeRate             float32         `default:"0.0" envconfig:"DUST_FEE_RATE" json:"dust_fee_rate"`
 	MinFeeRate              float64         `default:"0.05" envconfig:"MIN_FEE_RATE" json:"min_fee_rate"`
 	MultiContractExpiration config.Duration `default:"10s" envconfig:"MULTI_CONTRACT_EXPIRATION" json:"multi_contract_expiration"`
+	ChannelTimeout          config.Duration `default:"10s" envconfig:"CHANNEL_TIMEOUT" json:"channel_timeout"`
 	RecoveryMode            bool            `default:"false" envconfig:"RECOVERY_MODE" json:"recovery_mode"`
 }
 
@@ -51,6 +54,7 @@ func DefaultConfig() Config {
 		DustFeeRate:             0.00,
 		MinFeeRate:              0.05,
 		MultiContractExpiration: config.NewDuration(time.Hour),
+		ChannelTimeout:          config.NewDuration(10 * time.Second),
 		RecoveryMode:            false,
 	}
 }
@@ -73,7 +77,8 @@ type Agent struct {
 	data     AgentData
 	dataLock sync.Mutex
 
-	config atomic.Value
+	config         atomic.Value
+	channelTimeout atomic.Value
 
 	contract *state.Contract
 
@@ -150,6 +155,7 @@ func NewAgent(ctx context.Context, data AgentData, config Config, caches *state.
 	}
 
 	result.config.Store(config)
+	result.channelTimeout.Store(config.ChannelTimeout.Duration)
 
 	return result, nil
 }
@@ -248,6 +254,10 @@ func (a *Agent) Config() Config {
 
 func (a *Agent) SetConfig(config Config) {
 	a.config.Store(config)
+}
+
+func (a *Agent) ChannelTimeout() time.Duration {
+	return a.channelTimeout.Load().(time.Duration)
 }
 
 func (a *Agent) Now() uint64 {

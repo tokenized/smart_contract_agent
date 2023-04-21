@@ -155,7 +155,7 @@ func (a *Agent) processInstrumentDefinition(ctx context.Context, transaction *tr
 	}
 
 	if err := a.updateAdminBalance(ctx, agentLockingScript, contract.Formation.AdminAddress,
-		transaction, creation, txid, 0, &now); err != nil {
+		transaction, creation, txid, 0, true, &now); err != nil {
 		return nil, errors.Wrap(err, "update admin balance")
 	}
 	creation.Timestamp = now // now might have changed while locking balance
@@ -197,7 +197,8 @@ func (a *Agent) processInstrumentDefinition(ctx context.Context, transaction *tr
 	if _, err := creationTx.Sign([]bitcoin.Key{a.Key()}); err != nil {
 		if errors.Cause(err) == txbuilder.ErrInsufficientValue {
 			logger.Warn(ctx, "Insufficient tx funding : %s", err)
-			return nil, platform.NewRejectError(actions.RejectionsInsufficientTxFeeFunding, err.Error())
+			return nil, platform.NewRejectError(actions.RejectionsInsufficientTxFeeFunding,
+				err.Error())
 		}
 
 		return nil, errors.Wrap(err, "sign")
@@ -394,20 +395,7 @@ func (a *Agent) processInstrumentModification(ctx context.Context, transaction *
 	}
 
 	// Copy creation to prevent modification of the original.
-	copyScript, err := protocol.Serialize(instrument.Creation, config.IsTest)
-	if err != nil {
-		return nil, errors.Wrap(err, "serialize instrument creation")
-	}
-
-	action, err := protocol.Deserialize(copyScript, config.IsTest)
-	if err != nil {
-		return nil, errors.Wrap(err, "deserialize instrument creation")
-	}
-
-	creation, ok := action.(*actions.InstrumentCreation)
-	if !ok {
-		return nil, errors.New("InstrumentCreation script is wrong type")
-	}
+	creation := instrument.Creation.Copy()
 
 	if err := applyInstrumentAmendments(creation, contractPermissions, votingSystemsCount,
 		modification.Amendments, proposed, proposalType, votingSystem); err != nil {
@@ -424,7 +412,7 @@ func (a *Agent) processInstrumentModification(ctx context.Context, transaction *
 	}
 
 	if err := a.updateAdminBalance(ctx, agentLockingScript, adminAddressBytes, transaction,
-		creation, txid, previousAuthorizedTokenQty, &now); err != nil {
+		creation, txid, previousAuthorizedTokenQty, true, &now); err != nil {
 		return nil, errors.Wrap(err, "update admin balance")
 	}
 	creation.Timestamp = now // now might have changed while locking balance
@@ -506,8 +494,9 @@ func (a *Agent) processInstrumentModification(ctx context.Context, transaction *
 	return etx, nil
 }
 
-func (a *Agent) processInstrumentCreation(ctx context.Context, transaction *transactions.Transaction,
-	creation *actions.InstrumentCreation, outputIndex int) error {
+func (a *Agent) processInstrumentCreation(ctx context.Context,
+	transaction *transactions.Transaction, creation *actions.InstrumentCreation,
+	outputIndex int) error {
 
 	// First input must be the agent's locking script
 	transaction.Lock()
@@ -585,19 +574,21 @@ func (a *Agent) processInstrumentCreation(ctx context.Context, transaction *tran
 			logger.Timestamp("timestamp", int64(creation.Timestamp)),
 			logger.Timestamp("existing_timestamp", int64(instrument.Creation.Timestamp)),
 		}, "Older instrument creation")
+
 		return nil
 	} else if creation.Timestamp == instrument.Creation.Timestamp {
 		logger.InfoWithFields(ctx, []logger.Field{
 			logger.Timestamp("timestamp", int64(creation.Timestamp)),
 		}, "Already processed instrument creation")
+
 		return nil
 	} else {
 		logger.InfoWithFields(ctx, []logger.Field{
 			logger.Timestamp("timestamp", int64(creation.Timestamp)),
 			logger.Timestamp("previous_timestamp", int64(instrument.Creation.Timestamp)),
 		}, "Updating instrument creation")
-		previousAuthorizedTokenQty = instrument.Creation.AuthorizedTokenQty
 
+		previousAuthorizedTokenQty = instrument.Creation.AuthorizedTokenQty
 		instrument.Creation = creation
 		instrument.CreationTxID = &txid
 		instrument.MarkModified()
@@ -627,12 +618,10 @@ func (a *Agent) processInstrumentCreation(ctx context.Context, transaction *tran
 		adminAddressBytes = ra.Bytes()
 	}
 
-	now := a.Now()
 	if err := a.updateAdminBalance(ctx, agentLockingScript, adminAddressBytes, transaction,
-		creation, txid, previousAuthorizedTokenQty, &now); err != nil {
+		creation, txid, previousAuthorizedTokenQty, false, &creation.Timestamp); err != nil {
 		return errors.Wrap(err, "admin balance")
 	}
-	creation.Timestamp = now // now might have changed while locking balance
 
 	transaction.Lock()
 	transaction.SetProcessed(a.ContractHash(), outputIndex)
@@ -643,7 +632,7 @@ func (a *Agent) processInstrumentCreation(ctx context.Context, transaction *tran
 
 func (a *Agent) updateAdminBalance(ctx context.Context, contractLockingScript bitcoin.Script,
 	adminAddress []byte, transaction *transactions.Transaction, creation *actions.InstrumentCreation,
-	txid bitcoin.Hash32, previousAuthorizedTokenQty uint64, now *uint64) error {
+	txid bitcoin.Hash32, previousAuthorizedTokenQty uint64, updateNow bool, now *uint64) error {
 
 	if previousAuthorizedTokenQty == creation.AuthorizedTokenQty {
 		return nil // no admin balance update
@@ -662,60 +651,78 @@ func (a *Agent) updateAdminBalance(ctx context.Context, contractLockingScript bi
 	var instrumentCode state.InstrumentCode
 	copy(instrumentCode[:], creation.InstrumentCode)
 
-	balance := &state.Balance{
+	newBalance := &state.Balance{
 		LockingScript: adminLockingScript,
 		Quantity:      creation.AuthorizedTokenQty,
 		Timestamp:     creation.Timestamp,
 		TxID:          &txid,
 	}
 
-	addedBalance, err := a.caches.Balances.Add(ctx, contractLockingScript, instrumentCode, balance)
+	balance, err := a.caches.Balances.Add(ctx, contractLockingScript, instrumentCode, newBalance)
 	if err != nil {
 		return errors.Wrap(err, "get balance")
 	}
-	defer a.caches.Balances.Release(ctx, contractLockingScript, instrumentCode, balance)
+	defer a.caches.Balances.Release(ctx, contractLockingScript, instrumentCode, newBalance)
 
-	if addedBalance != balance {
+	if balance != newBalance { // balance was pre-existing
 		// A single balance lock doesn't need to use the balance locker since it isn't
 		// susceptible to the group deadlock.
-		addedBalance.Lock()
-		defer addedBalance.Unlock()
+		balance.Lock()
+		defer balance.Unlock()
 
-		if previousAuthorizedTokenQty < creation.AuthorizedTokenQty {
-			increase := creation.AuthorizedTokenQty - previousAuthorizedTokenQty
-
+		if !updateNow && balance.Timestamp > *now {
 			logger.InfoWithFields(ctx, []logger.Field{
 				logger.Stringer("admin_locking_script", adminLockingScript),
-				logger.Uint64("admin_balance", addedBalance.Quantity),
-				logger.Uint64("increase", increase),
-			}, "Increasing admin balance")
+				logger.Uint64("admin_balance", balance.Quantity),
+				logger.Timestamp("admin_balance_timestamp", int64(balance.Timestamp)),
+			}, "Admin balance more recent than update action")
+		} else {
+			if previousAuthorizedTokenQty < creation.AuthorizedTokenQty {
+				increase := creation.AuthorizedTokenQty - previousAuthorizedTokenQty
 
-			addedBalance.Quantity += increase
-		} else { // if previousAuthorizedTokenQty > creation.AuthorizedTokenQty
-			reduction := previousAuthorizedTokenQty - creation.AuthorizedTokenQty
-			if reduction > addedBalance.Quantity {
-				logger.ErrorWithFields(ctx, []logger.Field{
+				logger.InfoWithFields(ctx, []logger.Field{
 					logger.Stringer("admin_locking_script", adminLockingScript),
-					logger.Uint64("admin_balance", addedBalance.Quantity),
+					logger.Uint64("admin_balance", balance.Quantity),
+					logger.Uint64("increase", increase),
+					logger.Uint64("new_admin_balance", balance.Quantity+increase),
+				}, "Increasing admin balance")
+
+				balance.Quantity += increase
+			} else { // if previousAuthorizedTokenQty > creation.AuthorizedTokenQty
+				reduction := previousAuthorizedTokenQty - creation.AuthorizedTokenQty
+				if reduction > balance.Quantity {
+					logger.WarnWithFields(ctx, []logger.Field{
+						logger.Stringer("admin_locking_script", adminLockingScript),
+						logger.Uint64("admin_balance", balance.Quantity),
+						logger.Uint64("reduction", reduction),
+						logger.Uint64("previous_authorized_quantity", previousAuthorizedTokenQty),
+						logger.Uint64("new_authorized_quantity", creation.AuthorizedTokenQty),
+					}, "Authorized token quantity reduction more than admin balance")
+
+					return platform.NewRejectError(actions.RejectionsInsufficientQuantity,
+						fmt.Sprintf("admin balance %d below authorized quantity decrease %d",
+							balance.Quantity, reduction))
+				}
+
+				logger.InfoWithFields(ctx, []logger.Field{
+					logger.Stringer("admin_locking_script", adminLockingScript),
+					logger.Uint64("admin_balance", balance.Quantity),
 					logger.Uint64("reduction", reduction),
-					logger.Uint64("previous_authorized_quantity", previousAuthorizedTokenQty),
-					logger.Uint64("new_authorized_quantity", creation.AuthorizedTokenQty),
-				}, "Authorized token quantity reduction more than admin balance")
-				return nil
+					logger.Uint64("new_admin_balance", balance.Quantity-reduction),
+				}, "Decreasing admin balance")
+
+				balance.Quantity -= reduction
 			}
 
-			logger.InfoWithFields(ctx, []logger.Field{
-				logger.Stringer("admin_locking_script", adminLockingScript),
-				logger.Uint64("admin_balance", addedBalance.Quantity),
-				logger.Uint64("reduction", reduction),
-			}, "Decreasing admin balance")
-
-			addedBalance.Quantity -= reduction
+			if updateNow {
+				// Ensure we mark the response action with a timestamp that is consitent with the
+				// balance update.
+				*now = a.Now()
+			}
+			balance.Timestamp = *now
+			balance.TxID = &txid
+			balance.MarkModified()
 		}
-
-		addedBalance.Timestamp = *now
-		addedBalance.TxID = &txid
-		addedBalance.MarkModified()
 	} else {
 		logger.InfoWithFields(ctx, []logger.Field{
 			logger.Stringer("admin_locking_script", adminLockingScript),

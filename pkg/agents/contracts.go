@@ -243,6 +243,9 @@ func (a *Agent) processContractOffer(ctx context.Context, transaction *transacti
 	contract.MarkModified()
 
 	if isNewAdminLockingScript {
+		logger.InfoWithFields(ctx, []logger.Field{
+			logger.Stringer("admin_locking_script", adminLockingScript),
+		}, "Updating admin locking script")
 		a.SetAdminLockingScript(adminLockingScript)
 	}
 
@@ -690,6 +693,9 @@ func (a *Agent) processContractAmendment(ctx context.Context, transaction *trans
 	contract.MarkModified()
 
 	if isNewAdminLockingScript {
+		logger.InfoWithFields(ctx, []logger.Field{
+			logger.Stringer("admin_locking_script", adminLockingScript),
+		}, "Updating admin locking script")
 		a.SetAdminLockingScript(adminLockingScript)
 	}
 
@@ -778,6 +784,9 @@ func (a *Agent) processContractFormation(ctx context.Context, transaction *trans
 	if err == nil {
 		adminLockingScript, err := adminAddress.LockingScript()
 		if err == nil {
+			logger.InfoWithFields(ctx, []logger.Field{
+				logger.Stringer("admin_locking_script", adminLockingScript),
+			}, "Setting admin locking script")
 			a.SetAdminLockingScript(adminLockingScript)
 		}
 	}

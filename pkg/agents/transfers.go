@@ -232,7 +232,7 @@ func (a *Agent) processTransfer(ctx context.Context, transaction *transactions.T
 	if transferContracts.IsMultiContract() {
 		// Send a settlement request to the next contract.
 		etx, err := a.createSettlementRequest(ctx, transaction, transaction, outputIndex, transfer,
-			transferContracts, allBalances, settlement)
+			transferContracts, allBalances, settlement, now)
 		if err != nil {
 			return etx, errors.Wrap(err, "send settlement request")
 		}
@@ -460,7 +460,9 @@ func (a *Agent) applySettlements(ctx context.Context, transaction *transactions.
 		if int(instrumentSettlement.ContractIndex) >= transaction.InputCount() {
 			logger.Error(instrumentCtx, "Invalid settlement contract index: %d >= %d",
 				instrumentSettlement.ContractIndex, transaction.InputCount())
-			return transferTxID, lockingScripts, nil
+			return transferTxID, lockingScripts,
+				platform.NewRejectError(actions.RejectionsMsgMalformed,
+					"contract index"+instrumentID)
 		}
 
 		if transferTxID == nil {
@@ -487,8 +489,9 @@ func (a *Agent) applySettlements(ctx context.Context, transaction *transactions.
 		}
 
 		if instrument == nil {
-			logger.Error(instrumentCtx, "Instrument not found: %s", instrumentCode)
-			return transferTxID, lockingScripts, nil
+			logger.Warn(instrumentCtx, "Instrument not found")
+			return transferTxID, lockingScripts,
+				platform.NewRejectError(actions.RejectionsInstrumentNotFound, instrumentID)
 		}
 		a.caches.Instruments.Release(instrumentCtx, agentLockingScript, instrumentCode)
 

@@ -3,6 +3,7 @@ package agents
 import (
 	"bytes"
 	"context"
+	"time"
 
 	"github.com/tokenized/channels"
 	channelsExpandedTx "github.com/tokenized/channels/expanded_tx"
@@ -228,12 +229,18 @@ func (a *Agent) RemoveResponder(ctx context.Context, requestTxID bitcoin.Hash32,
 
 func (a *Agent) AddResponse(ctx context.Context, requestTxID bitcoin.Hash32,
 	lockingScripts []bitcoin.Script, isContractWide bool, etx *expanded_tx.ExpandedTx) error {
-	a.peerChannelResponses <- PeerChannelResponse{
+
+	select {
+	case a.peerChannelResponses <- PeerChannelResponse{
 		RequestTxID:        requestTxID,
 		LockingScripts:     lockingScripts,
 		Etx:                etx,
 		AgentLockingScript: a.LockingScript(),
+	}:
+	case <-time.After(a.ChannelTimeout()):
+		return errors.Wrap(ErrTimeout, "peer channel response")
 	}
+
 	return nil
 }
 

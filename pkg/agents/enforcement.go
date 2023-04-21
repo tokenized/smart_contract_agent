@@ -1060,7 +1060,7 @@ func (a *Agent) processFreeze(ctx context.Context, transaction *transactions.Tra
 
 		logger.InfoWithFields(ctx, []logger.Field{
 			logger.Stringer("contract_locking_script", agentLockingScript),
-			logger.Timestamp("timestamp", int64(a.Now())),
+			logger.Timestamp("timestamp", int64(freeze.Timestamp)),
 		}, "Contract freeze")
 
 		contract.Freeze(txid, freeze.FreezePeriod, freeze.Timestamp)
@@ -1093,7 +1093,7 @@ func (a *Agent) processFreeze(ctx context.Context, transaction *transactions.Tra
 		if isFull {
 			logger.InfoWithFields(ctx, []logger.Field{
 				logger.String("instrument_id", instrumentID),
-				logger.Timestamp("timestamp", int64(a.Now())),
+				logger.Timestamp("timestamp", int64(freeze.Timestamp)),
 			}, "Instrument freeze")
 
 			instrument.Freeze(txid, freeze.FreezePeriod, freeze.Timestamp)
@@ -1251,7 +1251,7 @@ func (a *Agent) processThaw(ctx context.Context, transaction *transactions.Trans
 
 		logger.InfoWithFields(ctx, []logger.Field{
 			logger.Stringer("contract_locking_script", agentLockingScript),
-			logger.Timestamp("timestamp", int64(a.Now())),
+			logger.Timestamp("timestamp", int64(freeze.Timestamp)),
 		}, "Contract thaw")
 
 		contract := a.Contract()
@@ -1269,7 +1269,7 @@ func (a *Agent) processThaw(ctx context.Context, transaction *transactions.Trans
 
 			logger.InfoWithFields(ctx, []logger.Field{
 				logger.String("instrument_id", instrumentID),
-				logger.Timestamp("timestamp", int64(a.Now())),
+				logger.Timestamp("timestamp", int64(freeze.Timestamp)),
 			}, "Instrument thaw")
 
 			instrument, err := a.caches.Instruments.Get(ctx, agentLockingScript, instrumentCode)

@@ -27,6 +27,7 @@ func (a *Agent) processSettlementRequest(ctx context.Context, transaction *trans
 	senderLockingScript, senderUnlockingScript bitcoin.Script) (*expanded_tx.ExpandedTx, error) {
 
 	agentLockingScript := a.LockingScript()
+	now := a.Now()
 
 	config := a.Config()
 	settlementTx := txbuilder.NewTxBuilder(config.FeeRate, config.DustFeeRate)
@@ -111,7 +112,7 @@ func (a *Agent) processSettlementRequest(ctx context.Context, transaction *trans
 		return nil, platform.NewRejectError(actions.RejectionsSignatureNotSigHashAll, "")
 	}
 
-	if err := a.CheckContractIsAvailable(a.Now()); err != nil {
+	if err := a.CheckContractIsAvailable(now); err != nil {
 		return nil, platform.NewDefaultRejectError(err)
 	}
 
@@ -190,7 +191,6 @@ func (a *Agent) processSettlementRequest(ctx context.Context, transaction *trans
 
 	lockerResponseChannel := a.locker.AddRequest(allBalances)
 	lockerResponse := <-lockerResponseChannel
-	var now uint64
 	switch v := lockerResponse.(type) {
 	case uint64:
 		now = v
@@ -381,7 +381,7 @@ func (a *Agent) processSettlementRequest(ctx context.Context, transaction *trans
 		})
 
 	etx, err := a.createSettlementRequest(ctx, transaction, transferTransaction, outputIndex,
-		transfer, transferContracts, allBalances, settlement)
+		transfer, transferContracts, allBalances, settlement, now)
 	if err != nil {
 		allBalances.Revert(transferTxID)
 		return nil, errors.Wrap(err, "send settlement request")
@@ -452,7 +452,7 @@ func (a *Agent) buildExternalSettlement(ctx context.Context, settlementTx *txbui
 func (a *Agent) createSettlementRequest(ctx context.Context,
 	currentTransaction, transferTransaction *transactions.Transaction, currentOutputIndex int,
 	transfer *actions.Transfer, transferContracts *TransferContracts, balances state.BalanceSet,
-	settlement *actions.Settlement) (*expanded_tx.ExpandedTx, error) {
+	settlement *actions.Settlement, now uint64) (*expanded_tx.ExpandedTx, error) {
 
 	if len(transferContracts.NextLockingScript) == 0 {
 		return nil, errors.New("Next locking script missing for send settlement request")
@@ -536,7 +536,7 @@ func (a *Agent) createSettlementRequest(ctx context.Context,
 	}
 
 	settlementRequest := &messages.SettlementRequest{
-		Timestamp:    a.Now(),
+		Timestamp:    now,
 		TransferTxId: transferTransaction.GetTxID().Bytes(),
 		Settlement:   settlementScript,
 	}

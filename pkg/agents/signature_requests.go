@@ -25,6 +25,7 @@ func (a *Agent) processSignatureRequest(ctx context.Context, transaction *transa
 	senderLockingScript, senderUnlockingScript bitcoin.Script) (*expanded_tx.ExpandedTx, error) {
 
 	agentLockingScript := a.LockingScript()
+	now := a.Now()
 
 	// Deserialize payload transaction.
 	tx := &wire.MsgTx{}
@@ -199,7 +200,7 @@ func (a *Agent) processSignatureRequest(ctx context.Context, transaction *transa
 		return nil, platform.NewRejectError(actions.RejectionsSignatureNotSigHashAll, "")
 	}
 
-	if err := a.CheckContractIsAvailable(a.Now()); err != nil {
+	if err := a.CheckContractIsAvailable(now); err != nil {
 		return nil, platform.NewDefaultRejectError(err)
 	}
 
@@ -243,7 +244,6 @@ func (a *Agent) processSignatureRequest(ctx context.Context, transaction *transa
 
 	lockerResponseChannel := a.locker.AddRequest(allBalances)
 	lockerResponse := <-lockerResponseChannel
-	var now uint64
 	switch v := lockerResponse.(type) {
 	case uint64:
 		now = v

@@ -614,7 +614,7 @@ func (a *Agent) processAction(ctx context.Context, agentLockingScript bitcoin.Sc
 	}
 
 	if processError != nil {
-		if rejectError, ok := errors.Cause(processError).(platform.RejectError); ok {
+		if rejectError, ok := errors.Cause(processError).(platform.RejectError); ok && isRequest {
 			switch act := action.(type) {
 			case *actions.Message:
 				etx, err := a.createMessageRejection(ctx, transaction, act, outputIndex,
