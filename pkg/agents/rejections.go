@@ -355,9 +355,8 @@ func (a *Agent) createRejection(ctx context.Context, transaction *transactions.T
 	}
 
 	if len(rejectTx.MsgTx.TxIn) == 0 {
-		logger.Warn(ctx, "No contract outputs found for rejection")
 		transaction.Unlock()
-		return nil, nil
+		return nil, errors.New("No agent outputs for rejection")
 	}
 
 	if reject == nil || len(reject.ReceiverLockingScript) == 0 {

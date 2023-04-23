@@ -479,36 +479,6 @@ func (a *Agent) createSettlementRequest(ctx context.Context,
 		fundingOutput = transferContracts.BoomerangOutput
 	}
 
-	rejectTransaction := currentTransaction
-	rejectActionOutputIndex := 0
-	rejectOutputIndex := -1
-	if transferContracts.IsFirstContract() {
-		config := a.Config()
-		transferOutputIndex := 0
-		transferTransaction.Lock()
-		transferTxOutputCount := transferTransaction.OutputCount()
-		for i := 0; i < transferTxOutputCount; i++ {
-			txout := transferTransaction.Output(i)
-
-			action, err := protocol.Deserialize(txout.LockingScript, config.IsTest)
-			if err != nil {
-				continue
-			}
-
-			if _, ok := action.(*actions.Transfer); ok {
-				transferOutputIndex = i
-				break
-			}
-		}
-		transferTransaction.Unlock()
-
-		rejectTransaction = transferTransaction
-		rejectActionOutputIndex = transferOutputIndex
-		rejectOutputIndex = transferContracts.CurrentOutputIndex()
-	} else {
-		rejectActionOutputIndex = currentOutputIndex
-	}
-
 	logger.InfoWithFields(ctx, []logger.Field{
 		logger.Int("funding_index", fundingIndex),
 		logger.Uint64("funding_value", fundingOutput.Value),
@@ -580,14 +550,8 @@ func (a *Agent) createSettlementRequest(ctx context.Context,
 	if _, err := messageTx.Sign([]bitcoin.Key{a.Key()}); err != nil {
 		if errors.Cause(err) == txbuilder.ErrInsufficientValue {
 			logger.Warn(ctx, "Insufficient tx funding : %s", err)
-			etx, rerr := a.createRejection(ctx, rejectTransaction, rejectActionOutputIndex,
-				rejectOutputIndex,
-				platform.NewRejectError(actions.RejectionsInsufficientTxFeeFunding, err.Error()))
-			if rerr != nil {
-				return nil, errors.Wrap(rerr, "reject")
-			}
-
-			return etx, nil
+			return nil, platform.NewRejectError(actions.RejectionsInsufficientTxFeeFunding,
+				err.Error())
 		}
 
 		return nil, errors.Wrap(err, "sign")
