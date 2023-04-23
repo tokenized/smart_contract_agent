@@ -124,7 +124,7 @@ func (a *Agent) ProcessRecoveryRequests(ctx context.Context, interrupt <-chan in
 func (a *Agent) processRecoveryRequest(ctx context.Context,
 	request *state.RecoveryTransaction) error {
 
-	transaction, err := a.transactions.Get(ctx, request.TxID)
+	transaction, err := a.transactions.GetTxWithAncestors(ctx, request.TxID)
 	if err != nil {
 		return errors.Wrap(err, "get tx")
 	}
