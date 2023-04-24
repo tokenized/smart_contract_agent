@@ -284,7 +284,7 @@ func (a *Agent) buildBitcoinTransfer(ctx context.Context, transferTransaction *t
 			return platform.NewRejectError(actions.RejectionsMsgMalformed, err.Error())
 		}
 
-		if sender.Quantity >= output.Value {
+		if sender.Quantity > output.Value {
 			return platform.NewRejectError(actions.RejectionsInsufficientValue,
 				"sender input value less than quantity")
 		}
@@ -310,15 +310,15 @@ func (a *Agent) buildBitcoinTransfer(ctx context.Context, transferTransaction *t
 
 		if receiver.Quantity > quantity {
 			return platform.NewRejectError(actions.RejectionsInsufficientValue,
-				"sender quantity less than receiver")
+				"send quantity less than receiver")
 		}
 
 		quantity -= receiver.Quantity
 	}
 
 	if quantity != 0 {
-		return platform.NewRejectError(actions.RejectionsInsufficientValue,
-			"sender quantity more than receiver")
+		return platform.NewRejectError(actions.RejectionsMsgMalformed,
+			"sender quantity doesn't match receiver")
 	}
 
 	return nil
