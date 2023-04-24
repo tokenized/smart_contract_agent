@@ -35,8 +35,11 @@ type Config struct {
 	AgentData agents.AgentData `json:"agent_data"`
 	Agents    agents.Config    `json:"agents"`
 
-	WhatsOnChainAPIKey string          `envconfig:"WOC_API_KEY" json:"api_key" masked:"true"`
-	Network            bitcoin.Network `default:"mainnet" json:"network" envconfig:"NETWORK"`
+	WhatsOnChainAPIKey         string          `envconfig:"WOC_API_KEY" json:"api_key" masked:"true"`
+	WhatsOnChainDialTimeout    config.Duration `envconfig:"WOC_DIAL_TIMEOUT" json:"woc_dial_timeout"`
+	WhatsOnChainRequestTimeout config.Duration `envconfig:"WOC_REQUEST_TIMEOUT" json:"woc_request_timeout"`
+
+	Network bitcoin.Network `default:"mainnet" json:"network" envconfig:"NETWORK"`
 
 	Storage storage.Config     `json:"storage"`
 	Logger  logger.SetupConfig `json:"logger"`
@@ -68,7 +71,8 @@ func main() {
 		logger.JSON("config", maskedConfig),
 	}, "Config")
 
-	woc := whatsonchain.NewService(cfg.WhatsOnChainAPIKey, cfg.Network)
+	woc := whatsonchain.NewService(cfg.WhatsOnChainAPIKey, cfg.Network,
+		cfg.WhatsOnChainDialTimeout.Duration, cfg.WhatsOnChainRequestTimeout.Duration)
 
 	store, err := storage.CreateStreamStorage(cfg.Storage.Bucket, cfg.Storage.Root,
 		cfg.Storage.MaxRetries, cfg.Storage.RetryDelay)
