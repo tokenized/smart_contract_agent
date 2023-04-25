@@ -289,7 +289,7 @@ func (a *Agent) buildBitcoinTransfer(ctx context.Context, transferTransaction *t
 				"sender input value less than quantity")
 		}
 
-		quantity += output.Value
+		quantity += sender.Quantity
 	}
 
 	for i, receiver := range instrumentTransfer.InstrumentReceivers {

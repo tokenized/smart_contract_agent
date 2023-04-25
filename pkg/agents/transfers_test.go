@@ -1728,6 +1728,225 @@ func Test_Transfers_Multi_Basic(t *testing.T) {
 	StopTestAgent(ctx, t, test)
 }
 
+func Test_Transfers_Bitcoin(t *testing.T) {
+	ctx := logger.ContextWithLogger(context.Background(), true, true, "")
+	test := StartTestData(ctx, t)
+
+	broadcaster := state.NewMockTxBroadcaster()
+
+	contractKey, contractLockingScript, adminKey, adminLockingScript, contract1, instrument := state.MockInstrument(ctx,
+		&test.caches.TestCaches)
+	_, feeLockingScript, _ := state.MockKey()
+
+	bitcoinKey, bitcoinLockingScript, _ := state.MockKey()
+
+	agentData := AgentData{
+		Key:              contractKey,
+		LockingScript:    contractLockingScript,
+		ContractFee:      contract1.Formation.ContractFee,
+		FeeLockingScript: feeLockingScript,
+		IsActive:         true,
+	}
+
+	agent, err := NewAgent(ctx, agentData, DefaultConfig(), test.caches.Caches,
+		test.caches.Transactions, test.caches.Services, test.locker, test.store, broadcaster, nil,
+		nil, nil, nil, test.peerChannelsFactory, test.peerChannelResponses)
+	if err != nil {
+		t.Fatalf("Failed to create agent : %s", err)
+	}
+
+	var receiver1Keys, receiver2Keys []bitcoin.Key
+	var receiver1LockingScripts, receiver2LockingScripts []bitcoin.Script
+	var receiver1Quantities, receiver2Quantities []uint64
+	for i := 0; i < 10; i++ {
+		instrumentTransfer := &actions.InstrumentTransferField{
+			ContractIndex:  0,
+			InstrumentType: string(instrument.InstrumentType[:]),
+			InstrumentCode: instrument.InstrumentCode[:],
+		}
+
+		bitcoinTransfer := &actions.InstrumentTransferField{
+			ContractIndex:  0,
+			InstrumentType: protocol.BSVInstrumentID,
+		}
+
+		transfer := &actions.Transfer{
+			Instruments: []*actions.InstrumentTransferField{
+				instrumentTransfer,
+				bitcoinTransfer,
+			},
+		}
+
+		tx := txbuilder.NewTxBuilder(0.05, 0.0)
+
+		var spentOutputs []*expanded_tx.Output
+
+		// Add admin as sender
+		instrumentQuantity := uint64(mathRand.Intn(1000)) + 1
+		receiver1Quantities = append(receiver1Quantities, instrumentQuantity)
+
+		instrumentTransfer.InstrumentSenders = append(instrumentTransfer.InstrumentSenders,
+			&actions.QuantityIndexField{
+				Quantity: instrumentQuantity,
+				Index:    uint32(len(tx.MsgTx.TxIn)),
+			})
+
+		// Add input
+		outpoint1 := state.MockOutPoint(adminLockingScript, 1)
+		spentOutputs = append(spentOutputs, &expanded_tx.Output{
+			LockingScript: adminLockingScript,
+			Value:         1,
+		})
+
+		if err := tx.AddInput(*outpoint1, adminLockingScript, 1); err != nil {
+			t.Fatalf("Failed to add input : %s", err)
+		}
+
+		bitcoinQuantity := uint64(mathRand.Intn(1000)) + 1
+		receiver2Quantities = append(receiver2Quantities, bitcoinQuantity)
+
+		bitcoinTransfer.InstrumentSenders = append(bitcoinTransfer.InstrumentSenders,
+			&actions.QuantityIndexField{
+				Quantity: bitcoinQuantity,
+				Index:    uint32(len(tx.MsgTx.TxIn)),
+			})
+
+		outpoint2 := state.MockOutPoint(bitcoinLockingScript, bitcoinQuantity+5)
+		spentOutputs = append(spentOutputs, &expanded_tx.Output{
+			LockingScript: bitcoinLockingScript,
+			Value:         bitcoinQuantity + 5,
+		})
+
+		if err := tx.AddInput(*outpoint2, bitcoinLockingScript, bitcoinQuantity+5); err != nil {
+			t.Fatalf("Failed to add input : %s", err)
+		}
+
+		// Add receivers
+		key, lockingScript, ra := state.MockKey()
+		receiver1Keys = append(receiver1Keys, key)
+		receiver1LockingScripts = append(receiver1LockingScripts, lockingScript)
+
+		instrumentTransfer.InstrumentReceivers = append(instrumentTransfer.InstrumentReceivers,
+			&actions.InstrumentReceiverField{
+				Address:  ra.Bytes(),
+				Quantity: instrumentQuantity,
+			})
+
+		key, lockingScript, ra = state.MockKey()
+		receiver2Keys = append(receiver2Keys, key)
+		receiver2LockingScripts = append(receiver2LockingScripts, lockingScript)
+
+		bitcoinTransfer.InstrumentReceivers = append(bitcoinTransfer.InstrumentReceivers,
+			&actions.InstrumentReceiverField{
+				Address:  ra.Bytes(),
+				Quantity: bitcoinQuantity,
+			})
+
+		// Add contract outputs
+		if err := tx.AddOutput(contractLockingScript, 240+bitcoinQuantity, false,
+			false); err != nil {
+			t.Fatalf("Failed to add contract output : %s", err)
+		}
+
+		// Add action output
+		transferScript, err := protocol.Serialize(transfer, true)
+		if err != nil {
+			t.Fatalf("Failed to serialize transfer action : %s", err)
+		}
+
+		transferScriptOutputIndex := len(tx.Outputs)
+		if err := tx.AddOutput(transferScript, 0, false, false); err != nil {
+			t.Fatalf("Failed to add transfer action output : %s", err)
+		}
+
+		// Add funding
+		fundingKey, fundingLockingScript, _ := state.MockKey()
+		fundingOutpoint := state.MockOutPoint(fundingLockingScript, 1000)
+		spentOutputs = append(spentOutputs, &expanded_tx.Output{
+			LockingScript: fundingLockingScript,
+			Value:         1000,
+		})
+
+		if err := tx.AddInput(*fundingOutpoint, fundingLockingScript, 1000); err != nil {
+			t.Fatalf("Failed to add input : %s", err)
+		}
+
+		_, changeLockingScript, _ := state.MockKey()
+		tx.SetChangeLockingScript(changeLockingScript, "")
+
+		if _, err := tx.Sign([]bitcoin.Key{adminKey, bitcoinKey, fundingKey}); err != nil {
+			t.Fatalf("Failed to sign tx : %s", err)
+		}
+
+		t.Logf("Created tx : %s", tx.String(bitcoin.MainNet))
+
+		js, _ := json.MarshalIndent(transfer, "", "  ")
+		t.Logf("Transfer : %s", js)
+
+		addTransaction := &transactions.Transaction{
+			Tx:           tx.MsgTx,
+			SpentOutputs: spentOutputs,
+		}
+
+		transaction, err := test.caches.Transactions.Add(ctx, addTransaction)
+		if err != nil {
+			t.Fatalf("Failed to add transaction : %s", err)
+		}
+
+		if err := agent.Process(ctx, transaction, []Action{{
+			AgentLockingScripts: []bitcoin.Script{contractLockingScript},
+			OutputIndex:         transferScriptOutputIndex,
+			Action:              transfer,
+		}}); err != nil {
+			t.Fatalf("Failed to process transfer transaction : %s", err)
+		}
+
+		test.caches.Transactions.Release(ctx, transaction.GetTxID())
+
+		agentResponseTx := broadcaster.GetLastTx()
+		broadcaster.ClearTxs()
+		if agentResponseTx == nil {
+			t.Fatalf("No agent 1 response tx 1")
+		}
+
+		t.Logf("Agent response tx 1 : %s", agentResponseTx)
+
+		var settlement *actions.Settlement
+		for _, txout := range agentResponseTx.Tx.TxOut {
+			action, err := protocol.Deserialize(txout.LockingScript, true)
+			if err != nil {
+				continue
+			}
+
+			if a, ok := action.(*actions.Settlement); ok {
+				settlement = a
+			}
+
+			if m, ok := action.(*actions.Rejection); ok {
+				rejectData := actions.RejectionsData(m.RejectionCode)
+				if rejectData != nil {
+					t.Errorf("Rejection Code : %s", rejectData.Label)
+				}
+
+				js, _ := json.MarshalIndent(m, "", "  ")
+				t.Errorf("Rejection : %s", js)
+			}
+		}
+
+		if settlement == nil {
+			t.Fatalf("Missing settlement action")
+		}
+
+		js, _ = json.MarshalIndent(settlement, "", "  ")
+		t.Logf("Settlement : %s", js)
+	}
+
+	agent.Release(ctx)
+	test.caches.Caches.Instruments.Release(ctx, contractLockingScript, instrument.InstrumentCode)
+	test.caches.Caches.Contracts.Release(ctx, contractLockingScript)
+	StopTestAgent(ctx, t, test)
+}
+
 func Test_Transfers_Multi_Expire(t *testing.T) {
 	ctx := logger.ContextWithLogger(context.Background(), true, true, "")
 	test := StartTestData(ctx, t)
