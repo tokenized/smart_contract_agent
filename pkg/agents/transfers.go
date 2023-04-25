@@ -980,7 +980,11 @@ func (a *Agent) initiateInstrumentTransferBalances(ctx context.Context,
 	}
 
 	if !transfersPermitted && !onlyFromAdmin && !onlyToAdmin {
-		logger.Warn(ctx, "Transfers not permitted")
+		logger.WarnWithFields(ctx, []logger.Field{
+			logger.Stringer("admin_locking_script", adminLockingScript),
+			logger.Bool("only_from_admin", onlyFromAdmin),
+			logger.Bool("only_to_admin", onlyToAdmin),
+		}, "Transfers not permitted")
 		return nil, nil, nil, platform.NewRejectErrorWithOutputIndex(actions.RejectionsInstrumentNotPermitted,
 			"", int(instrumentTransfer.ContractIndex))
 	}

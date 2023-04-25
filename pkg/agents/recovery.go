@@ -9,7 +9,6 @@ import (
 	"github.com/tokenized/smart_contract_agent/internal/state"
 	"github.com/tokenized/threads"
 
-	"github.com/google/uuid"
 	"github.com/pkg/errors"
 )
 
@@ -70,8 +69,6 @@ func (a *Agent) removeRecoveryRequest(ctx context.Context, requestTxID bitcoin.H
 }
 
 func (a *Agent) ProcessRecoveryRequests(ctx context.Context, interrupt <-chan interface{}) error {
-	ctx = logger.ContextWithLogFields(ctx, logger.Stringer("recovery", uuid.New()))
-
 	agentLockingScript := a.LockingScript()
 	recoveryTxs, err := a.caches.RecoveryTransactions.Get(ctx, agentLockingScript)
 	if err != nil {
