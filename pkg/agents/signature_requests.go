@@ -163,7 +163,7 @@ func (a *Agent) processSignatureRequest(ctx context.Context, transaction *transa
 				logger.String("action_code", transfer.Code()),
 				logger.String("action_name", transfer.TypeName()),
 				logger.Stringer("response_txid", processed.ResponseTxID),
-			}, "Action already processed. Not canceling")
+			}, "Action already processed")
 			return nil, nil
 		}
 	}

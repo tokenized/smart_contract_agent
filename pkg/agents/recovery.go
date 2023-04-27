@@ -110,6 +110,12 @@ func (a *Agent) ProcessRecoveryRequests(ctx context.Context, interrupt <-chan in
 			return errors.Wrapf(err, "process recovery request: %s", request.TxID)
 		}
 
+		logger.InfoWithFields(ctx, []logger.Field{
+			logger.Stringer("contract_locking_script", agentLockingScript),
+			logger.Stringer("txid", request.TxID),
+			logger.Formatter("output_indexes", "%v", request.OutputIndexes),
+		}, "Removing recovery request")
+
 		recoveryTxs.Lock()
 		recoveryTxs.Remove(request.TxID)
 		recoveryTxs.Unlock()
