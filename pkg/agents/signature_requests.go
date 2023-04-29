@@ -323,8 +323,6 @@ func (a *Agent) processSignatureRequest(ctx context.Context, transaction *transa
 			return etx, errors.Wrap(err, "complete settlement")
 		}
 
-		allBalances.Revert(transferTxID)
-
 		// Cancel scheduled task to cancel the transfer if other contract(s) don't respond.
 		if a.scheduler != nil {
 			a.scheduler.Cancel(ctx, transferTxID)

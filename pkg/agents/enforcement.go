@@ -960,7 +960,7 @@ func (a *Agent) processConfiscateOrder(ctx context.Context, transaction *transac
 	defer a.transactions.Release(ctx, confiscationTxID)
 
 	balances.FinalizeConfiscation(txid, confiscationTxID, now)
-	depositBalance.Settle(txid, confiscationTxID, now)
+	depositBalance.Settle(ctx, txid, confiscationTxID, now)
 
 	// Set confiscation tx as processed.
 	confiscationTransaction.Lock()
@@ -1470,7 +1470,7 @@ func (a *Agent) processConfiscation(ctx context.Context, transaction *transactio
 		}
 
 		// Update balance
-		if addedBalance.Settle(orderTxID, txid, confiscation.Timestamp) {
+		if addedBalance.Settle(ctx, orderTxID, txid, confiscation.Timestamp) {
 			logger.WarnWithFields(ctx, []logger.Field{
 				logger.Timestamp("timestamp", int64(addedBalance.Timestamp)),
 				logger.Timestamp("existing_timestamp", int64(confiscation.Timestamp)),
@@ -1513,7 +1513,7 @@ func (a *Agent) processConfiscation(ctx context.Context, transaction *transactio
 			logger.Uint64("quantity", addedDepositBalance.Quantity),
 			logger.Uint64("old_quantity", depositBalance.Quantity),
 		}, "Older confiscation ignored")
-	} else if addedDepositBalance.Settle(orderTxID, txid, confiscation.Timestamp) {
+	} else if addedDepositBalance.Settle(ctx, orderTxID, txid, confiscation.Timestamp) {
 		// Update balance
 		logger.WarnWithFields(ctx, []logger.Field{
 			logger.Timestamp("timestamp", int64(addedDepositBalance.Timestamp)),

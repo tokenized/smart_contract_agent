@@ -8,6 +8,7 @@ import (
 	"reflect"
 	"sync"
 
+	"github.com/tokenized/logger"
 	"github.com/tokenized/pkg/bitcoin"
 	"github.com/tokenized/pkg/bsor"
 	ci "github.com/tokenized/pkg/cacher"
@@ -580,7 +581,9 @@ func (b *Balance) VerifySettlement(transferTxID bitcoin.Hash32, quantity, now ui
 
 // Settle applies any balance adjustments for the specified transfer transaction to the current
 // quantity.
-func (b *Balance) Settle(transferTxID, settlementTxID bitcoin.Hash32, now uint64) bool {
+func (b *Balance) Settle(ctx context.Context, transferTxID, settlementTxID bitcoin.Hash32,
+	now uint64) bool {
+
 	var newAdjustments []*BalanceAdjustment
 	found := false
 	for _, adj := range b.Adjustments {
@@ -602,6 +605,13 @@ func (b *Balance) Settle(transferTxID, settlementTxID bitcoin.Hash32, now uint64
 		newAdjustments = append(newAdjustments, adj)
 	}
 	b.Adjustments = newAdjustments
+
+	if !found {
+		logger.InfoWithFields(ctx, []logger.Field{
+			logger.Stringer("locking_script", b.LockingScript),
+			logger.Stringer("transfer_txid", transferTxID),
+		}, "Balance adjustment not found to settle")
+	}
 
 	return found
 }
@@ -852,13 +862,15 @@ func (bs *Balances) CancelPending(txid bitcoin.Hash32) {
 	}
 }
 
-func (bs *Balances) Settle(transferTxID, settlementTxID bitcoin.Hash32, now uint64) {
+func (bs *Balances) Settle(ctx context.Context, transferTxID, settlementTxID bitcoin.Hash32,
+	now uint64) {
+
 	for _, b := range *bs {
 		if b == nil {
 			continue
 		}
 
-		b.Settle(transferTxID, settlementTxID, now)
+		b.Settle(ctx, transferTxID, settlementTxID, now)
 	}
 }
 
@@ -946,13 +958,15 @@ func (bs BalanceSet) Unlock() {
 	}
 }
 
-func (bs *BalanceSet) Settle(transferTxID, settlementTxID bitcoin.Hash32, now uint64) {
+func (bs *BalanceSet) Settle(ctx context.Context, transferTxID, settlementTxID bitcoin.Hash32,
+	now uint64) {
+
 	for _, b := range *bs {
 		if len(b) == 0 {
 			continue
 		}
 
-		b.Settle(transferTxID, settlementTxID, now)
+		b.Settle(ctx, transferTxID, settlementTxID, now)
 	}
 }
 

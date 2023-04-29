@@ -338,7 +338,7 @@ func (a *Agent) completeSettlement(ctx context.Context, transferTransaction *tra
 
 	// Settle balances regardless of tx acceptance by the network as the agent is the single source
 	// of truth.
-	balances.Settle(transferTxID, settlementTxID, now)
+	balances.Settle(ctx, transferTxID, settlementTxID, now)
 
 	// Set settlement tx as processed since all the balances were just settled.
 	settlementTransaction.Lock()
@@ -580,7 +580,7 @@ func (a *Agent) applySettlements(ctx context.Context, transaction *transactions.
 			}
 
 			// Update balance
-			if addedBalance.Settle(*transferTxID, txid, timestamp) {
+			if addedBalance.Settle(ctx, *transferTxID, txid, timestamp) {
 				logger.InfoWithFields(instrumentCtx, []logger.Field{
 					logger.Timestamp("timestamp", int64(addedBalance.Timestamp)),
 					logger.Timestamp("existing_timestamp", int64(timestamp)),
