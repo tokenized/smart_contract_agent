@@ -141,15 +141,17 @@ func (i *Instrument) TransfersPermitted() bool {
 		return pl.TransfersPermitted
 	case *instruments.ShareCommon:
 		return pl.TransfersPermitted
-	case *instruments.Coupon:
+	case *instruments.DiscountCoupon:
 		return pl.TransfersPermitted
-	case *instruments.LoyaltyPoints:
+	case *instruments.DeprecatedLoyaltyPoints:
 		return pl.TransfersPermitted
 	case *instruments.TicketAdmission:
 		return pl.TransfersPermitted
 	case *instruments.CasinoChip:
 		return pl.TransfersPermitted
 	case *instruments.BondFixedRate:
+		return pl.TransfersPermitted
+	case *instruments.RewardPoint:
 		return pl.TransfersPermitted
 	}
 
@@ -190,12 +192,14 @@ func (i *Instrument) IsExpired(now uint64) bool {
 	case *instruments.ShareCommon:
 	case *instruments.CasinoChip:
 		return pl.ExpirationTimestamp != 0 && pl.ExpirationTimestamp < now
-	case *instruments.Coupon:
+	case *instruments.DiscountCoupon:
 		return pl.ExpirationTimestamp != 0 && pl.ExpirationTimestamp < now
-	case *instruments.LoyaltyPoints:
+	case *instruments.DeprecatedLoyaltyPoints:
 		return pl.ExpirationTimestamp != 0 && pl.ExpirationTimestamp < now
 	case *instruments.TicketAdmission:
 		return pl.EventEndTimestamp != 0 && pl.EventEndTimestamp < now
+	case *instruments.RewardPoint:
+		return pl.ExpirationTimestamp != 0 && pl.ExpirationTimestamp < now
 	}
 
 	return false

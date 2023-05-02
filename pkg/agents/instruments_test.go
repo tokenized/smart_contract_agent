@@ -25,7 +25,7 @@ func Test_Instruments_Definition(t *testing.T) {
 	agent, test := StartTestAgentWithContract(ctx, t)
 
 	for i := 0; i < 10; i++ {
-		couponPayload := &instruments.Coupon{
+		couponPayload := &instruments.DiscountCoupon{
 			RedeemingEntity:     "test.com",
 			ValidFromTimestamp:  uint64(time.Now().UnixNano()),
 			ExpirationTimestamp: uint64(time.Now().Add(time.Hour * 20000).UnixNano()),
@@ -52,7 +52,7 @@ func Test_Instruments_Definition(t *testing.T) {
 			// HolderProposal                   bool
 			// InstrumentModificationGovernance uint32
 			AuthorizedTokenQty: uint64(mathRand.Intn(100000)),
-			InstrumentType:     instruments.CodeCoupon,
+			InstrumentType:     instruments.CodeDiscountCoupon,
 			InstrumentPayload:  couponBuf.Bytes(),
 			TradeRestrictions:  []string{actions.PolitiesAustralia},
 		}
@@ -166,7 +166,7 @@ func Test_Instruments_Definition(t *testing.T) {
 		js, _ = json.MarshalIndent(payload, "", "  ")
 		t.Logf("Instrument Payload : %s", js)
 
-		couponPayloadResult, ok := payload.(*instruments.Coupon)
+		couponPayloadResult, ok := payload.(*instruments.DiscountCoupon)
 		if !ok {
 			t.Errorf("Instrument payload not a coupon")
 		}

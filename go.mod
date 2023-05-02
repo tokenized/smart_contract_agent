@@ -11,8 +11,8 @@ require (
 	github.com/tokenized/envelope v1.1.0
 	github.com/tokenized/logger v0.1.3
 	github.com/tokenized/pkg v0.6.1-0.20230424204429-ab336b6e84a4
-	github.com/tokenized/specification v1.2.1-0.20230424204707-14dcf858bdfb
-	github.com/tokenized/spynode v0.3.0
+	github.com/tokenized/specification v1.2.1-0.20230502212443-e34eeeec5121
+	github.com/tokenized/spynode v0.3.1-0.20230502202335-87cde4d21504
 	github.com/tokenized/threads v0.1.2
 	github.com/tokenized/txbuilder v1.0.0
 )
