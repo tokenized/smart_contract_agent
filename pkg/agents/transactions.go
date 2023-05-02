@@ -509,6 +509,8 @@ func (a *Agent) processAction(ctx context.Context, agentLockingScript bitcoin.Sc
 				logger.String("action_name", action.TypeName()),
 			}, "Response action invalid : %s", err)
 		}
+
+		return nil
 	}
 
 	var responseEtx *expanded_tx.ExpandedTx
