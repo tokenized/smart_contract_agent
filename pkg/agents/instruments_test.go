@@ -120,9 +120,14 @@ func Test_Instruments_Definition(t *testing.T) {
 		}
 
 		if err := agent.Process(ctx, transaction, []Action{{
-			AgentLockingScripts: []bitcoin.Script{test.contractLockingScript},
-			OutputIndex:         definitionScriptOutputIndex,
-			Action:              definition,
+			OutputIndex: definitionScriptOutputIndex,
+			Action:      definition,
+			Agents: []ActionAgent{
+				{
+					LockingScript: test.contractLockingScript,
+					IsRequest:     true,
+				},
+			},
 		}}); err != nil {
 			t.Fatalf("Failed to process transaction : %s", err)
 		}
@@ -277,9 +282,14 @@ func Test_Instruments_Amendment_Basic(t *testing.T) {
 	}
 
 	if err := agent.Process(ctx, transaction, []Action{{
-		AgentLockingScripts: []bitcoin.Script{test.contractLockingScript},
-		OutputIndex:         modificationScriptOutputIndex,
-		Action:              modification,
+		OutputIndex: modificationScriptOutputIndex,
+		Action:      modification,
+		Agents: []ActionAgent{
+			{
+				LockingScript: test.contractLockingScript,
+				IsRequest:     true,
+			},
+		},
 	}}); err != nil {
 		t.Fatalf("Failed to process transaction : %s", err)
 	}
@@ -442,9 +452,14 @@ func Test_Instruments_Amendment_Payload(t *testing.T) {
 	}
 
 	if err := agent.Process(ctx, transaction, []Action{{
-		AgentLockingScripts: []bitcoin.Script{test.contractLockingScript},
-		OutputIndex:         modificationScriptOutputIndex,
-		Action:              modification,
+		OutputIndex: modificationScriptOutputIndex,
+		Action:      modification,
+		Agents: []ActionAgent{
+			{
+				LockingScript: test.contractLockingScript,
+				IsRequest:     true,
+			},
+		},
 	}}); err != nil {
 		t.Fatalf("Failed to process transaction : %s", err)
 	}
@@ -618,9 +633,14 @@ func Test_Instruments_Amendment_Proposal(t *testing.T) {
 	}
 
 	if err := agent.Process(ctx, transaction, []Action{{
-		AgentLockingScripts: []bitcoin.Script{test.contractLockingScript},
-		OutputIndex:         modificationScriptOutputIndex,
-		Action:              modification,
+		OutputIndex: modificationScriptOutputIndex,
+		Action:      modification,
+		Agents: []ActionAgent{
+			{
+				LockingScript: test.contractLockingScript,
+				IsRequest:     true,
+			},
+		},
 	}}); err != nil {
 		t.Fatalf("Failed to process transaction : %s", err)
 	}

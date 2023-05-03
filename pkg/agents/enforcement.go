@@ -414,7 +414,7 @@ func (a *Agent) processFreezeOrder(ctx context.Context, transaction *transaction
 	tx := transaction.Tx.Copy()
 	transaction.Unlock()
 
-	etx, err := buildExpandedTx(freezeTx.MsgTx, []*wire.MsgTx{tx})
+	etx, err := buildExpandedTx(freezeTx.MsgTx, []*wire.MsgTx{&tx})
 	if err != nil {
 		return nil, errors.Wrap(err, "expanded tx")
 	}
@@ -679,7 +679,7 @@ func (a *Agent) processThawOrder(ctx context.Context, transaction *transactions.
 	tx := transaction.Tx.Copy()
 	transaction.Unlock()
 
-	etx, err := buildExpandedTx(thawTx.MsgTx, []*wire.MsgTx{tx})
+	etx, err := buildExpandedTx(thawTx.MsgTx, []*wire.MsgTx{&tx})
 	if err != nil {
 		return nil, errors.Wrap(err, "expanded tx")
 	}
@@ -972,7 +972,7 @@ func (a *Agent) processConfiscateOrder(ctx context.Context, transaction *transac
 	tx := transaction.Tx.Copy()
 	transaction.Unlock()
 
-	etx, err := buildExpandedTx(confiscationTx.MsgTx, []*wire.MsgTx{tx})
+	etx, err := buildExpandedTx(confiscationTx.MsgTx, []*wire.MsgTx{&tx})
 	if err != nil {
 		return nil, errors.Wrap(err, "expanded tx")
 	}
@@ -1023,7 +1023,7 @@ func (a *Agent) processFreeze(ctx context.Context, transaction *transactions.Tra
 
 	transaction.Unlock()
 
-	if _, err := a.addResponseTxID(ctx, orderTxID, txid); err != nil {
+	if _, err := a.addResponseTxID(ctx, orderTxID, txid, freeze, outputIndex); err != nil {
 		return errors.Wrap(err, "add response txid")
 	}
 
@@ -1187,7 +1187,7 @@ func (a *Agent) processThaw(ctx context.Context, transaction *transactions.Trans
 
 	transaction.Unlock()
 
-	if _, err := a.addResponseTxID(ctx, orderTxID, txid); err != nil {
+	if _, err := a.addResponseTxID(ctx, orderTxID, txid, thaw, outputIndex); err != nil {
 		return errors.Wrap(err, "add response txid")
 	}
 
@@ -1357,7 +1357,7 @@ func (a *Agent) processConfiscation(ctx context.Context, transaction *transactio
 
 	outputCount := transaction.OutputCount()
 
-	if _, err := a.addResponseTxID(ctx, orderTxID, txid); err != nil {
+	if _, err := a.addResponseTxID(ctx, orderTxID, txid, confiscation, outputIndex); err != nil {
 		transaction.Unlock()
 		return errors.Wrap(err, "add response txid")
 	}
@@ -1569,7 +1569,7 @@ func (a *Agent) processReconciliation(ctx context.Context, transaction *transact
 
 	transaction.Unlock()
 
-	if _, err := a.addResponseTxID(ctx, orderTxID, txid); err != nil {
+	if _, err := a.addResponseTxID(ctx, orderTxID, txid, reconciliation, outputIndex); err != nil {
 		return errors.Wrap(err, "add response txid")
 	}
 

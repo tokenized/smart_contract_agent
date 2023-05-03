@@ -121,9 +121,14 @@ func Test_Proposal_Valid(t *testing.T) {
 	}
 
 	if err := agent.Process(ctx, transaction, []Action{{
-		AgentLockingScripts: []bitcoin.Script{test.contractLockingScript},
-		OutputIndex:         proposalScriptOutputIndex,
-		Action:              proposal,
+		OutputIndex: proposalScriptOutputIndex,
+		Action:      proposal,
+		Agents: []ActionAgent{
+			{
+				LockingScript: test.contractLockingScript,
+				IsRequest:     true,
+			},
+		},
 	}}); err != nil {
 		t.Fatalf("Failed to process transaction : %s", err)
 	}
@@ -350,9 +355,14 @@ func Test_Ballots_Valid(t *testing.T) {
 		}
 
 		if err := agent.Process(ctx, transaction, []Action{{
-			AgentLockingScripts: []bitcoin.Script{test.contractLockingScript},
-			OutputIndex:         ballotCastScriptOutputIndex,
-			Action:              ballotCast,
+			OutputIndex: ballotCastScriptOutputIndex,
+			Action:      ballotCast,
+			Agents: []ActionAgent{
+				{
+					LockingScript: test.contractLockingScript,
+					IsRequest:     true,
+				},
+			},
 		}}); err != nil {
 			t.Fatalf("Failed to process transaction : %s", err)
 		}

@@ -113,9 +113,14 @@ func Test_BodyOfAgreement_Offer_Valid(t *testing.T) {
 	}
 
 	if err := agent.Process(ctx, transaction, []Action{{
-		AgentLockingScripts: []bitcoin.Script{test.contractLockingScript},
-		OutputIndex:         offerScriptOutputIndex,
-		Action:              offer,
+		Action:      offer,
+		OutputIndex: offerScriptOutputIndex,
+		Agents: []ActionAgent{
+			{
+				LockingScript: test.contractLockingScript,
+				IsRequest:     true,
+			},
+		},
 	}}); err != nil {
 		t.Fatalf("Failed to process transaction : %s", err)
 	}
@@ -247,9 +252,14 @@ func Test_BodyOfAgreement_Offer_UnreferencedTerm(t *testing.T) {
 	}
 
 	if err := agent.Process(ctx, transaction, []Action{{
-		AgentLockingScripts: []bitcoin.Script{test.contractLockingScript},
-		OutputIndex:         offerScriptOutputIndex,
-		Action:              offer,
+		OutputIndex: offerScriptOutputIndex,
+		Action:      offer,
+		Agents: []ActionAgent{
+			{
+				LockingScript: test.contractLockingScript,
+				IsRequest:     true,
+			},
+		},
 	}}); err != nil {
 		t.Fatalf("Failed to process transaction : %s", err)
 	}
@@ -425,9 +435,14 @@ func Test_BodyOfAgreement_Amendment_Basic(t *testing.T) {
 	}
 
 	if err := agent.Process(ctx, transaction, []Action{{
-		AgentLockingScripts: []bitcoin.Script{test.contractLockingScript},
-		OutputIndex:         bodyAmendmentScriptOutputIndex,
-		Action:              bodyAmendment,
+		OutputIndex: bodyAmendmentScriptOutputIndex,
+		Action:      bodyAmendment,
+		Agents: []ActionAgent{
+			{
+				LockingScript: test.contractLockingScript,
+				IsRequest:     true,
+			},
+		},
 	}}); err != nil {
 		t.Fatalf("Failed to process transaction : %s", err)
 	}
@@ -613,9 +628,14 @@ func Test_BodyOfAgreement_Amendment_Child(t *testing.T) {
 	}
 
 	if err := agent.Process(ctx, transaction, []Action{{
-		AgentLockingScripts: []bitcoin.Script{test.contractLockingScript},
-		OutputIndex:         bodyAmendmentScriptOutputIndex,
-		Action:              bodyAmendment,
+		OutputIndex: bodyAmendmentScriptOutputIndex,
+		Action:      bodyAmendment,
+		Agents: []ActionAgent{
+			{
+				LockingScript: test.contractLockingScript,
+				IsRequest:     true,
+			},
+		},
 	}}); err != nil {
 		t.Fatalf("Failed to process transaction : %s", err)
 	}
@@ -809,9 +829,14 @@ func Test_BodyOfAgreement_Amendment_Proposal(t *testing.T) {
 	}
 
 	if err := agent.Process(ctx, transaction, []Action{{
-		AgentLockingScripts: []bitcoin.Script{test.contractLockingScript},
-		OutputIndex:         bodyAmendmentScriptOutputIndex,
-		Action:              bodyAmendment,
+		OutputIndex: bodyAmendmentScriptOutputIndex,
+		Action:      bodyAmendment,
+		Agents: []ActionAgent{
+			{
+				LockingScript: test.contractLockingScript,
+				IsRequest:     true,
+			},
+		},
 	}}); err != nil {
 		t.Fatalf("Failed to process transaction : %s", err)
 	}

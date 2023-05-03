@@ -146,9 +146,14 @@ func Test_Responder_Response(t *testing.T) {
 	}
 
 	if err := agent.Process(ctx, transaction, []Action{{
-		AgentLockingScripts: []bitcoin.Script{test.contractLockingScript},
-		OutputIndex:         transferScriptOutputIndex,
-		Action:              transfer,
+		OutputIndex: transferScriptOutputIndex,
+		Action:      transfer,
+		Agents: []ActionAgent{
+			{
+				LockingScript: test.contractLockingScript,
+				IsRequest:     true,
+			},
+		},
 	}}); err != nil {
 		t.Fatalf("Failed to process transaction : %s", err)
 	}
@@ -352,9 +357,14 @@ func Test_Responder_Request(t *testing.T) {
 	}
 
 	if err := agent.Process(ctx, transaction, []Action{{
-		AgentLockingScripts: []bitcoin.Script{test.contractLockingScript},
-		OutputIndex:         transferScriptOutputIndex,
-		Action:              transfer,
+		OutputIndex: transferScriptOutputIndex,
+		Action:      transfer,
+		Agents: []ActionAgent{
+			{
+				LockingScript: test.contractLockingScript,
+				IsRequest:     true,
+			},
+		},
 	}}); err != nil {
 		t.Fatalf("Failed to process transaction : %s", err)
 	}
@@ -530,9 +540,14 @@ func Test_Responder_AlreadyProcessed(t *testing.T) {
 	}
 
 	if err := agent.Process(ctx, transaction, []Action{{
-		AgentLockingScripts: []bitcoin.Script{test.contractLockingScript},
-		OutputIndex:         transferScriptOutputIndex,
-		Action:              transfer,
+		OutputIndex: transferScriptOutputIndex,
+		Action:      transfer,
+		Agents: []ActionAgent{
+			{
+				LockingScript: test.contractLockingScript,
+				IsRequest:     true,
+			},
+		},
 	}}); err != nil {
 		t.Fatalf("Failed to process transaction : %s", err)
 	}

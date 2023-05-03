@@ -84,7 +84,7 @@ func (a *Agent) processMessage(ctx context.Context, transaction *transactions.Tr
 		logger.InfoWithFields(ctx, []logger.Field{
 			logger.Stringer("receiver_locking_script", output.LockingScript),
 		}, "Agent is the message sender")
-		if _, err := a.addResponseTxID(ctx, requestTxID, txid); err != nil {
+		if _, err := a.addResponseTxID(ctx, requestTxID, txid, message, outputIndex); err != nil {
 			return nil, errors.Wrap(err, "add response txid")
 		}
 

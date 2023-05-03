@@ -436,7 +436,7 @@ func (a *Agent) processProposal(ctx context.Context, transaction *transactions.T
 	tx := transaction.Tx.Copy()
 	transaction.Unlock()
 
-	etx, err := buildExpandedTx(voteTx.MsgTx, []*wire.MsgTx{tx})
+	etx, err := buildExpandedTx(voteTx.MsgTx, []*wire.MsgTx{&tx})
 	if err != nil {
 		return nil, errors.Wrap(err, "expanded tx")
 	}
@@ -484,7 +484,7 @@ func (a *Agent) processVote(ctx context.Context, transaction *transactions.Trans
 
 	transaction.Unlock()
 
-	if _, err := a.addResponseTxID(ctx, proposalTxID, txid); err != nil {
+	if _, err := a.addResponseTxID(ctx, proposalTxID, txid, vote, outputIndex); err != nil {
 		return errors.Wrap(err, "add response txid")
 	}
 
@@ -771,7 +771,7 @@ func (a *Agent) processBallotCast(ctx context.Context, transaction *transactions
 	tx := transaction.Tx.Copy()
 	transaction.Unlock()
 
-	etx, err := buildExpandedTx(ballotCountedTx.MsgTx, []*wire.MsgTx{tx})
+	etx, err := buildExpandedTx(ballotCountedTx.MsgTx, []*wire.MsgTx{&tx})
 	if err != nil {
 		return nil, errors.Wrap(err, "expanded tx")
 	}
@@ -805,7 +805,8 @@ func (a *Agent) processBallotCounted(ctx context.Context, transaction *transacti
 		return nil // Not for this agent's contract
 	}
 
-	if _, err := a.addResponseTxID(ctx, ballotCastTxID, txid); err != nil {
+	if _, err := a.addResponseTxID(ctx, ballotCastTxID, txid, ballotCounted,
+		outputIndex); err != nil {
 		return errors.Wrap(err, "add response txid")
 	}
 
@@ -921,7 +922,7 @@ func (a *Agent) processVoteResult(ctx context.Context, transaction *transactions
 		return nil // Not for this agent's contract
 	}
 
-	if _, err := a.addResponseTxID(ctx, voteTxID, txid); err != nil {
+	if _, err := a.addResponseTxID(ctx, voteTxID, txid, result, outputIndex); err != nil {
 		return errors.Wrap(err, "add response txid")
 	}
 

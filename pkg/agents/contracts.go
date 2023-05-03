@@ -267,7 +267,7 @@ func (a *Agent) processContractOffer(ctx context.Context, transaction *transacti
 	tx := transaction.Tx.Copy()
 	transaction.Unlock()
 
-	etx, err := buildExpandedTx(formationTx.MsgTx, []*wire.MsgTx{tx})
+	etx, err := buildExpandedTx(formationTx.MsgTx, []*wire.MsgTx{&tx})
 	if err != nil {
 		return nil, errors.Wrap(err, "expanded tx")
 	}
@@ -716,7 +716,7 @@ func (a *Agent) processContractAmendment(ctx context.Context, transaction *trans
 	tx := transaction.Tx.Copy()
 	transaction.Unlock()
 
-	etx, err := buildExpandedTx(formationTx.MsgTx, []*wire.MsgTx{tx})
+	etx, err := buildExpandedTx(formationTx.MsgTx, []*wire.MsgTx{&tx})
 	if err != nil {
 		return nil, errors.Wrap(err, "expanded tx")
 	}
@@ -749,7 +749,8 @@ func (a *Agent) processContractFormation(ctx context.Context, transaction *trans
 		return nil // Not for this agent's contract
 	}
 
-	if _, err := a.addResponseTxID(ctx, input.PreviousOutPoint.Hash, txid); err != nil {
+	if _, err := a.addResponseTxID(ctx, input.PreviousOutPoint.Hash, txid, formation,
+		outputIndex); err != nil {
 		return errors.Wrap(err, "add response txid")
 	}
 

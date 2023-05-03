@@ -64,7 +64,8 @@ func (a *Agent) ProcessPeerChannelMessage(ctx context.Context, msg peer_channels
 	agentLockingScript := a.LockingScript()
 
 	config := a.Config()
-	requestOutputs, err := relevantRequestOutputs(ctx, request.Tx, agentLockingScript, config.IsTest)
+	requestOutputs, err := relevantRequestOutputs(ctx, request.Tx, agentLockingScript,
+		config.IsTest)
 	if err != nil {
 		return errors.Wrap(err, "tx is relevant")
 	}
@@ -102,9 +103,7 @@ func (a *Agent) ProcessPeerChannelMessage(ctx context.Context, msg peer_channels
 		contractHash := a.ContractHash()
 		allResponded := true
 		for _, outputIndex := range requestOutputs {
-			transaction.Lock()
-			processeds := transaction.ContractProcessed(contractHash, outputIndex)
-			transaction.Unlock()
+			processeds := transaction.GetContractProcessed(contractHash, outputIndex)
 			if len(processeds) == 0 {
 				allResponded = false
 				continue

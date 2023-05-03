@@ -96,9 +96,14 @@ func Test_Process(t *testing.T) {
 	}
 
 	if err := agent.Process(ctx, contractFormationTransaction, []Action{{
-		AgentLockingScripts: []bitcoin.Script{test.contractLockingScript},
-		OutputIndex:         contractFormationScriptOutputIndex,
-		Action:              contractFormation,
+		OutputIndex: contractFormationScriptOutputIndex,
+		Action:      contractFormation,
+		Agents: []ActionAgent{
+			{
+				LockingScript: test.contractLockingScript,
+				IsRequest:     false,
+			},
+		},
 	}}); err != nil {
 		t.Fatalf("Failed to process contract formation : %s", err)
 	}
@@ -220,9 +225,14 @@ func Test_Process(t *testing.T) {
 	}
 
 	if err := agent.Process(ctx, instrumentCreationTx, []Action{{
-		AgentLockingScripts: []bitcoin.Script{test.contractLockingScript},
-		OutputIndex:         instrumentCreationScriptOutputIndex,
-		Action:              instrumentCreation,
+		OutputIndex: instrumentCreationScriptOutputIndex,
+		Action:      instrumentCreation,
+		Agents: []ActionAgent{
+			{
+				LockingScript: test.contractLockingScript,
+				IsRequest:     false,
+			},
+		},
 	}}); err != nil {
 		t.Fatalf("Failed to process instrument creation : %s", err)
 	}
@@ -462,9 +472,14 @@ func Test_Process(t *testing.T) {
 
 		t.Logf("Sending transfer request : %s", settlementTxID)
 		if err := agent.Process(ctx, settlementTx, []Action{{
-			AgentLockingScripts: []bitcoin.Script{test.contractLockingScript},
-			OutputIndex:         settlementScriptOutputIndex,
-			Action:              settlement,
+			OutputIndex: settlementScriptOutputIndex,
+			Action:      settlement,
+			Agents: []ActionAgent{
+				{
+					LockingScript: test.contractLockingScript,
+					IsRequest:     false,
+				},
+			},
 		}}); err != nil {
 			t.Fatalf("Failed to process settlement : %s", err)
 		}
@@ -644,9 +659,14 @@ func Test_Process(t *testing.T) {
 		}
 
 		if err := agent.Process(ctx, settlementTx, []Action{{
-			AgentLockingScripts: []bitcoin.Script{test.contractLockingScript},
-			OutputIndex:         settlementScriptOutputIndex,
-			Action:              settlement,
+			OutputIndex: settlementScriptOutputIndex,
+			Action:      settlement,
+			Agents: []ActionAgent{
+				{
+					LockingScript: test.contractLockingScript,
+					IsRequest:     false,
+				},
+			},
 		}}); err != nil {
 			t.Fatalf("Failed to process settlement : %s", err)
 		}

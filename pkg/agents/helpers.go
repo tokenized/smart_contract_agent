@@ -9,6 +9,7 @@ import (
 	"github.com/tokenized/pkg/wire"
 	"github.com/tokenized/smart_contract_agent/pkg/transactions"
 	"github.com/tokenized/specification/dist/golang/actions"
+	"github.com/tokenized/specification/dist/golang/messages"
 	"github.com/tokenized/specification/dist/golang/protocol"
 	"github.com/tokenized/txbuilder"
 
@@ -77,8 +78,136 @@ func findBitcoinOutput(tx *wire.MsgTx, lockingScript bitcoin.Script, value uint6
 	return false
 }
 
-func (a *Agent) addResponseTxID(ctx context.Context,
-	requestTxID, responseTxID bitcoin.Hash32) (bool, error) {
+func isRequestType(action actions.Action) bool {
+	switch action.(type) {
+	case *actions.ContractOffer, *actions.ContractAmendment, *actions.ContractAddressChange:
+		return true
+
+	case *actions.BodyOfAgreementOffer, *actions.BodyOfAgreementAmendment:
+		return true
+
+	case *actions.InstrumentDefinition, *actions.InstrumentModification:
+		return true
+
+	case *actions.Transfer:
+		return true
+
+	case *actions.Proposal, *actions.BallotCast:
+		return true
+
+	case *actions.Order:
+		return true
+
+	case *actions.Message:
+		return true
+
+	default:
+		return false
+	}
+}
+
+func requestActionOutputIndex(requestTransaction *transactions.Transaction, codes []string,
+	messageCodes []uint32, isTest bool) int {
+
+	outputCount := requestTransaction.OutputCount()
+	for outputIndex := 0; outputIndex < outputCount; outputIndex++ {
+		output := requestTransaction.Output(outputIndex)
+		action, err := protocol.Deserialize(output.LockingScript, isTest)
+		if err != nil {
+			continue
+		}
+
+		if message, ok := action.(*actions.Message); ok {
+			for _, code := range messageCodes {
+				if message.MessageCode == code {
+					return outputIndex
+				}
+			}
+		}
+
+		if len(codes) == 0 && isRequestType(action) {
+			return outputIndex
+		}
+
+		for _, code := range codes {
+			if action.Code() == code {
+				return outputIndex
+			}
+		}
+	}
+
+	return -1
+}
+
+func requestMessageOutputIndex(requestTransaction *transactions.Transaction,
+	message *actions.Message, isTest bool) (int, error) {
+
+	switch message.MessageCode {
+	case messages.CodeSettlementRequest:
+		return requestActionOutputIndex(requestTransaction, []string{actions.CodeTransfer},
+			[]uint32{messages.CodeSettlementRequest}, isTest), nil
+
+	case messages.CodeSignatureRequest:
+		return requestActionOutputIndex(requestTransaction, nil,
+			[]uint32{messages.CodeSettlementRequest}, isTest), nil
+
+	default:
+		return 0, errors.Wrapf(ErrNotImplemented, "%s: %d", actions.CodeMessage,
+			message.MessageCode)
+	}
+}
+
+func findRequestActionOutputIndex(requestTransaction *transactions.Transaction,
+	responseAction actions.Action, responseOutputIndex int, isTest bool) (int, error) {
+
+	switch response := responseAction.(type) {
+	case *actions.ContractFormation:
+		return requestActionOutputIndex(requestTransaction, []string{actions.CodeContractOffer,
+			actions.CodeContractAmendment}, nil, isTest), nil
+
+	case *actions.BodyOfAgreementFormation:
+		return requestActionOutputIndex(requestTransaction,
+			[]string{actions.CodeBodyOfAgreementOffer, actions.CodeBodyOfAgreementAmendment}, nil,
+			isTest), nil
+
+	case *actions.InstrumentCreation:
+		return requestActionOutputIndex(requestTransaction,
+			[]string{actions.CodeInstrumentDefinition, actions.CodeInstrumentModification}, nil,
+			isTest), nil
+
+	case *actions.Settlement:
+		return requestActionOutputIndex(requestTransaction, []string{actions.CodeTransfer}, nil,
+			isTest), nil
+
+	case *actions.Vote:
+		return requestActionOutputIndex(requestTransaction, []string{actions.CodeProposal}, nil,
+			isTest), nil
+
+	case *actions.Result:
+		return requestActionOutputIndex(requestTransaction, []string{actions.CodeProposal}, nil,
+			isTest), nil
+
+	case *actions.BallotCounted:
+		return requestActionOutputIndex(requestTransaction, []string{actions.CodeBallotCast}, nil,
+			isTest), nil
+
+	case *actions.Freeze, *actions.Thaw, *actions.Confiscation, *actions.DeprecatedReconciliation:
+		return requestActionOutputIndex(requestTransaction, []string{actions.CodeOrder}, nil,
+			isTest), nil
+
+	case *actions.Message:
+		return requestMessageOutputIndex(requestTransaction, response, isTest)
+
+	case *actions.Rejection:
+		return requestActionOutputIndex(requestTransaction, nil, nil, isTest), nil
+
+	default:
+		return 0, errors.Wrap(ErrNotImplemented, responseAction.Code())
+	}
+}
+
+func (a *Agent) addResponseTxID(ctx context.Context, requestTxID, responseTxID bitcoin.Hash32,
+	responseAction actions.Action, responseOutputIndex int) (bool, error) {
 
 	requestTransaction, err := a.transactions.Get(ctx, requestTxID)
 	if err != nil {
@@ -94,19 +223,10 @@ func (a *Agent) addResponseTxID(ctx context.Context,
 
 	// Find request action
 	config := a.Config()
-	requestOutputIndex := -1
-	outputCount := requestTransaction.OutputCount()
-	for i := 0; i < outputCount; i++ {
-		output := requestTransaction.Output(i)
-		action, err := protocol.Deserialize(output.LockingScript, config.IsTest)
-		if err != nil {
-			continue
-		}
-
-		if IsRequest(action) {
-			requestOutputIndex = i
-			break
-		}
+	requestOutputIndex, err := findRequestActionOutputIndex(requestTransaction, responseAction,
+		responseOutputIndex, config.IsTest)
+	if err != nil {
+		return false, errors.Wrap(err, "find request index")
 	}
 
 	if requestOutputIndex == -1 {
@@ -138,44 +258,6 @@ func (a *Agent) addResponseTxID(ctx context.Context,
 	}
 
 	return result, nil
-}
-
-func IsRequest(action actions.Action) bool {
-	switch action.(type) {
-	case *actions.ContractOffer, *actions.ContractAmendment, *actions.ContractAddressChange:
-		return true
-
-	case *actions.BodyOfAgreementOffer, *actions.BodyOfAgreementAmendment:
-		return true
-
-	case *actions.InstrumentDefinition, *actions.InstrumentModification:
-		return true
-
-	case *actions.Transfer:
-		return true
-
-	case *actions.Proposal, *actions.BallotCast:
-		return true
-
-	case *actions.Order:
-		return true
-
-	case *actions.Message:
-		return true
-
-	default:
-		return false
-	}
-}
-
-func containsRequest(actions []Action) bool {
-	for _, action := range actions {
-		if IsRequest(action.Action) {
-			return true
-		}
-	}
-
-	return false
 }
 
 func buildExpandedTx(tx *wire.MsgTx, ancestors []*wire.MsgTx) (*expanded_tx.ExpandedTx, error) {

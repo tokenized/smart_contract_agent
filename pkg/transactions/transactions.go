@@ -177,8 +177,9 @@ func (c *TransactionCache) AddRawWithOutputs(ctx context.Context, tx *wire.MsgTx
 func (c *TransactionCache) AddRaw(ctx context.Context, tx *wire.MsgTx,
 	merkleProofs merkle_proof.MerkleProofs) (*Transaction, error) {
 
+	txCopy := tx.Copy()
 	itx := &Transaction{
-		Tx:           tx.Copy(),
+		Tx:           &txCopy,
 		MerkleProofs: merkleProofs.Copy(),
 	}
 
@@ -244,8 +245,9 @@ func (c *TransactionCache) ExpandedTx(ctx context.Context,
 		return nil, errors.Wrap(err, "populate ancestors")
 	}
 
+	txCopy := transaction.Tx.Copy()
 	return &expanded_tx.ExpandedTx{
-		Tx:           transaction.Tx.Copy(),
+		Tx:           &txCopy,
 		Ancestors:    transaction.Ancestors.Copy(),
 		SpentOutputs: transaction.SpentOutputs.Copy(),
 	}, nil
@@ -264,8 +266,9 @@ func (c *TransactionCache) GetExpandedTx(ctx context.Context,
 	}
 
 	defer c.Release(ctx, txid)
+	txCopy := transaction.Tx.Copy()
 	return &expanded_tx.ExpandedTx{
-		Tx:           transaction.Tx.Copy(),
+		Tx:           &txCopy,
 		Ancestors:    transaction.Ancestors.Copy(),
 		SpentOutputs: transaction.SpentOutputs.Copy(),
 	}, nil
@@ -311,8 +314,9 @@ func (c *TransactionCache) populateAncestors(ctx context.Context, transaction *T
 		}
 
 		inputTx.Lock()
+		txCopy := inputTx.Tx.Copy()
 		atx = &expanded_tx.AncestorTx{
-			Tx:           inputTx.Tx.Copy(),
+			Tx:           &txCopy,
 			MerkleProofs: inputTx.MerkleProofs.Copy(),
 		}
 		inputTx.Unlock()
@@ -435,6 +439,13 @@ func (tx *Transaction) ContractProcessed(contract state.ContractHash,
 	return result
 }
 
+func (tx *Transaction) GetContractProcessed(contract state.ContractHash,
+	outputIndex int) []*Processed {
+	tx.Lock()
+	defer tx.Unlock()
+	return tx.ContractProcessed(contract, outputIndex)
+}
+
 func TransactionPath(txid bitcoin.Hash32) string {
 	return fmt.Sprintf("%s/%s", txPath, txid)
 }
@@ -465,7 +476,8 @@ func (t *Transaction) CacheCopy() ci.Value {
 	}
 
 	if t.Tx != nil {
-		result.Tx = t.Tx.Copy()
+		txCopy := t.Tx.Copy()
+		result.Tx = &txCopy
 	}
 
 	for i, response := range t.Processed {
@@ -531,7 +543,8 @@ func (tx Transaction) InputCount() int {
 }
 
 func (tx Transaction) Input(index int) *wire.TxIn {
-	return tx.Tx.TxIn[index]
+	c := tx.Tx.TxIn[index].Copy()
+	return &c
 }
 
 func (tx Transaction) InputOutput(index int) (*wire.TxOut, error) {
@@ -565,7 +578,8 @@ func (tx Transaction) InputOutput(index int) (*wire.TxOut, error) {
 		return nil, errors.Wrap(expanded_tx.MissingInput, txin.PreviousOutPoint.String())
 	}
 
-	return ptx.TxOut[txin.PreviousOutPoint.Index], nil
+	c := ptx.TxOut[txin.PreviousOutPoint.Index].Copy()
+	return &c, nil
 }
 
 func (tx Transaction) OutputCount() int {
@@ -573,7 +587,8 @@ func (tx Transaction) OutputCount() int {
 }
 
 func (tx Transaction) Output(index int) *wire.TxOut {
-	return tx.Tx.TxOut[index]
+	c := tx.Tx.TxOut[index].Copy()
+	return &c
 }
 
 func (tx Transaction) ParseActions(isTest bool) []actions.Action {
@@ -591,7 +606,8 @@ func (tx Transaction) ParseActions(isTest bool) []actions.Action {
 }
 
 func (tx Transaction) GetMsgTx() *wire.MsgTx {
-	return tx.Tx
+	txCopy := tx.Tx.Copy()
+	return &txCopy
 }
 
 func (tx *Transaction) GetTxID() bitcoin.Hash32 {

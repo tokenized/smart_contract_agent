@@ -579,7 +579,7 @@ func (a *Agent) createSettlementRequest(ctx context.Context,
 
 	balances.SettlePending(transferTxID, true)
 
-	etx, err := buildExpandedTx(messageTx.MsgTx, []*wire.MsgTx{currentTx, transferTx})
+	etx, err := buildExpandedTx(messageTx.MsgTx, []*wire.MsgTx{&currentTx, &transferTx})
 	if err != nil {
 		return nil, errors.Wrap(err, "expanded tx")
 	}

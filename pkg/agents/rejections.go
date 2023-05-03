@@ -51,7 +51,8 @@ func (a *Agent) processRejection(ctx context.Context, transaction *transactions.
 		logger.InfoWithFields(ctx, []logger.Field{
 			logger.Stringer("receiver_locking_script", output.LockingScript),
 		}, "Agent is the rejection sender")
-		if _, err := a.addResponseTxID(ctx, rejectedTxID, txid); err != nil {
+		if _, err := a.addResponseTxID(ctx, rejectedTxID, txid, rejection,
+			outputIndex); err != nil {
 			return nil, errors.Wrap(err, "add response txid")
 		}
 
@@ -490,7 +491,7 @@ func (a *Agent) createRejection(ctx context.Context, transaction *transactions.T
 	tx := transaction.Tx.Copy()
 	transaction.Unlock()
 
-	etx, err := buildExpandedTx(rejectTx.MsgTx, []*wire.MsgTx{tx})
+	etx, err := buildExpandedTx(rejectTx.MsgTx, []*wire.MsgTx{&tx})
 	if err != nil {
 		return nil, errors.Wrap(err, "expanded tx")
 	}

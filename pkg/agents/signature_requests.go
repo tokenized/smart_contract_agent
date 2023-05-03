@@ -120,7 +120,7 @@ func (a *Agent) processSignatureRequest(ctx context.Context, transaction *transa
 	}
 
 	if transferContracts.IsFirstContract() {
-		processeds := transferTransaction.ContractProcessed(a.ContractHash(), transferOutputIndex)
+		processeds := transferTransaction.GetContractProcessed(a.ContractHash(), transferOutputIndex)
 		for _, processed := range processeds {
 			if processed.ResponseTxID == nil {
 				continue
@@ -570,7 +570,7 @@ func (a *Agent) createSignatureRequest(ctx context.Context,
 	currentTx := currentTransaction.Tx.Copy()
 	currentTransaction.Unlock()
 
-	etx, err := buildExpandedTx(messageTx.MsgTx, []*wire.MsgTx{currentTx})
+	etx, err := buildExpandedTx(messageTx.MsgTx, []*wire.MsgTx{&currentTx})
 	if err != nil {
 		return nil, errors.Wrap(err, "expanded tx")
 	}

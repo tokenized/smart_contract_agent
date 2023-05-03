@@ -140,9 +140,14 @@ func Test_Freeze_Balances_Valid(t *testing.T) {
 
 	now := uint64(time.Now().UnixNano())
 	if err := agent.Process(ctx, transaction, []Action{{
-		AgentLockingScripts: []bitcoin.Script{test.contractLockingScript},
-		OutputIndex:         freezeOrderScriptOutputIndex,
-		Action:              freezeOrder,
+		OutputIndex: freezeOrderScriptOutputIndex,
+		Action:      freezeOrder,
+		Agents: []ActionAgent{
+			{
+				LockingScript: test.contractLockingScript,
+				IsRequest:     true,
+			},
+		},
 	}}); err != nil {
 		t.Fatalf("Failed to process transaction : %s", err)
 	}
@@ -329,9 +334,14 @@ func Test_Freeze_Balances_Valid(t *testing.T) {
 
 	now = uint64(time.Now().UnixNano())
 	if err := agent.Process(ctx, transaction, []Action{{
-		AgentLockingScripts: []bitcoin.Script{test.contractLockingScript},
-		OutputIndex:         thawOrderScriptOutputIndex,
-		Action:              thawOrder,
+		OutputIndex: thawOrderScriptOutputIndex,
+		Action:      thawOrder,
+		Agents: []ActionAgent{
+			{
+				LockingScript: test.contractLockingScript,
+				IsRequest:     true,
+			},
+		},
 	}}); err != nil {
 		t.Fatalf("Failed to process transaction : %s", err)
 	}
@@ -491,9 +501,14 @@ func Test_Freeze_Contract_Valid(t *testing.T) {
 
 	now := uint64(time.Now().UnixNano())
 	if err := agent.Process(ctx, transaction, []Action{{
-		AgentLockingScripts: []bitcoin.Script{test.contractLockingScript},
-		OutputIndex:         freezeOrderScriptOutputIndex,
-		Action:              freezeOrder,
+		OutputIndex: freezeOrderScriptOutputIndex,
+		Action:      freezeOrder,
+		Agents: []ActionAgent{
+			{
+				LockingScript: test.contractLockingScript,
+				IsRequest:     true,
+			},
+		},
 	}}); err != nil {
 		t.Fatalf("Failed to process transaction : %s", err)
 	}
@@ -641,9 +656,14 @@ func Test_Freeze_Contract_Valid(t *testing.T) {
 
 	now = uint64(time.Now().UnixNano())
 	if err := agent.Process(ctx, transaction, []Action{{
-		AgentLockingScripts: []bitcoin.Script{test.contractLockingScript},
-		OutputIndex:         thawOrderScriptOutputIndex,
-		Action:              thawOrder,
+		OutputIndex: thawOrderScriptOutputIndex,
+		Action:      thawOrder,
+		Agents: []ActionAgent{
+			{
+				LockingScript: test.contractLockingScript,
+				IsRequest:     true,
+			},
+		},
 	}}); err != nil {
 		t.Fatalf("Failed to process transaction : %s", err)
 	}
@@ -789,9 +809,14 @@ func Test_Freeze_Instrument_Valid(t *testing.T) {
 
 	now := uint64(time.Now().UnixNano())
 	if err := agent.Process(ctx, transaction, []Action{{
-		AgentLockingScripts: []bitcoin.Script{test.contractLockingScript},
-		OutputIndex:         freezeOrderScriptOutputIndex,
-		Action:              freezeOrder,
+		OutputIndex: freezeOrderScriptOutputIndex,
+		Action:      freezeOrder,
+		Agents: []ActionAgent{
+			{
+				LockingScript: test.contractLockingScript,
+				IsRequest:     true,
+			},
+		},
 	}}); err != nil {
 		t.Fatalf("Failed to process transaction : %s", err)
 	}
@@ -939,9 +964,14 @@ func Test_Freeze_Instrument_Valid(t *testing.T) {
 
 	now = uint64(time.Now().UnixNano())
 	if err := agent.Process(ctx, transaction, []Action{{
-		AgentLockingScripts: []bitcoin.Script{test.contractLockingScript},
-		OutputIndex:         thawOrderScriptOutputIndex,
-		Action:              thawOrder,
+		OutputIndex: thawOrderScriptOutputIndex,
+		Action:      thawOrder,
+		Agents: []ActionAgent{
+			{
+				LockingScript: test.contractLockingScript,
+				IsRequest:     true,
+			},
+		},
 	}}); err != nil {
 		t.Fatalf("Failed to process transaction : %s", err)
 	}

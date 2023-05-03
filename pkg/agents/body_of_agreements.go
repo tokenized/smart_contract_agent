@@ -159,7 +159,7 @@ func (a *Agent) processBodyOfAgreementOffer(ctx context.Context, transaction *tr
 	tx := transaction.Tx.Copy()
 	transaction.Unlock()
 
-	etx, err := buildExpandedTx(formationTx.MsgTx, []*wire.MsgTx{tx})
+	etx, err := buildExpandedTx(formationTx.MsgTx, []*wire.MsgTx{&tx})
 	if err != nil {
 		return nil, errors.Wrap(err, "expanded tx")
 	}
@@ -392,7 +392,7 @@ func (a *Agent) processBodyOfAgreementAmendment(ctx context.Context, transaction
 	tx := transaction.Tx.Copy()
 	transaction.Unlock()
 
-	etx, err := buildExpandedTx(formationTx.MsgTx, []*wire.MsgTx{tx})
+	etx, err := buildExpandedTx(formationTx.MsgTx, []*wire.MsgTx{&tx})
 	if err != nil {
 		return nil, errors.Wrap(err, "expanded tx")
 	}
@@ -404,8 +404,9 @@ func (a *Agent) processBodyOfAgreementAmendment(ctx context.Context, transaction
 	return etx, nil
 }
 
-func (a *Agent) processBodyOfAgreementFormation(ctx context.Context, transaction *transactions.Transaction,
-	formation *actions.BodyOfAgreementFormation, outputIndex int) error {
+func (a *Agent) processBodyOfAgreementFormation(ctx context.Context,
+	transaction *transactions.Transaction, formation *actions.BodyOfAgreementFormation,
+	outputIndex int) error {
 
 	// First input must be the agent's locking script
 	transaction.Lock()
@@ -422,7 +423,8 @@ func (a *Agent) processBodyOfAgreementFormation(ctx context.Context, transaction
 		return nil // Not for this agent's contract
 	}
 
-	if _, err := a.addResponseTxID(ctx, input.PreviousOutPoint.Hash, txid); err != nil {
+	if _, err := a.addResponseTxID(ctx, input.PreviousOutPoint.Hash, txid, formation,
+		outputIndex); err != nil {
 		return errors.Wrap(err, "add response txid")
 	}
 

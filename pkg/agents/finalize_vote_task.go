@@ -248,7 +248,7 @@ func (a *Agent) FinalizeVote(ctx context.Context,
 	proposalTx := proposalTransaction.Tx.Copy()
 	proposalTransaction.Unlock()
 
-	etx, err := buildExpandedTx(voteResultTx.MsgTx, []*wire.MsgTx{proposalTx})
+	etx, err := buildExpandedTx(voteResultTx.MsgTx, []*wire.MsgTx{&proposalTx})
 	if err != nil {
 		return nil, errors.Wrap(err, "expanded tx")
 	}

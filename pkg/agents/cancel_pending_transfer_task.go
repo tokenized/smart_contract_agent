@@ -153,7 +153,7 @@ func (a *Agent) CancelPendingTransfer(ctx context.Context,
 	}
 
 	if transferContracts.IsFirstContract() {
-		processeds := transferTransaction.ContractProcessed(a.ContractHash(), transferOutputIndex)
+		processeds := transferTransaction.GetContractProcessed(a.ContractHash(), transferOutputIndex)
 		for _, processed := range processeds {
 			if processed.ResponseTxID == nil {
 				continue
@@ -220,7 +220,9 @@ func (a *Agent) CancelPendingTransfer(ctx context.Context,
 
 		var lockingScripts []bitcoin.Script
 		for _, sender := range instrumentTransfer.InstrumentSenders {
+			transferTransaction.Lock()
 			inputOutput, err := transferTransaction.InputOutput(int(sender.Index))
+			transferTransaction.Unlock()
 			if err != nil {
 				logger.Warn(instrumentCtx, "Invalid sender index : %s", err)
 				continue

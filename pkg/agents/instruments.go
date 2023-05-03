@@ -221,7 +221,7 @@ func (a *Agent) processInstrumentDefinition(ctx context.Context, transaction *tr
 	tx := transaction.Tx.Copy()
 	transaction.Unlock()
 
-	etx, err := buildExpandedTx(creationTx.MsgTx, []*wire.MsgTx{tx})
+	etx, err := buildExpandedTx(creationTx.MsgTx, []*wire.MsgTx{&tx})
 	if err != nil {
 		return nil, errors.Wrap(err, "expanded tx")
 	}
@@ -482,7 +482,7 @@ func (a *Agent) processInstrumentModification(ctx context.Context, transaction *
 	tx := transaction.Tx.Copy()
 	transaction.Unlock()
 
-	etx, err := buildExpandedTx(creationTx.MsgTx, []*wire.MsgTx{tx})
+	etx, err := buildExpandedTx(creationTx.MsgTx, []*wire.MsgTx{&tx})
 	if err != nil {
 		return nil, errors.Wrap(err, "expanded tx")
 	}
@@ -514,7 +514,8 @@ func (a *Agent) processInstrumentCreation(ctx context.Context,
 		return nil // Not for this agent's contract
 	}
 
-	if _, err := a.addResponseTxID(ctx, input.PreviousOutPoint.Hash, txid); err != nil {
+	if _, err := a.addResponseTxID(ctx, input.PreviousOutPoint.Hash, txid, creation,
+		outputIndex); err != nil {
 		return errors.Wrap(err, "add response txid")
 	}
 

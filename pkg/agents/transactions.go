@@ -27,15 +27,20 @@ type RecoveryRequest struct {
 	OutputIndexes []int          `bsor:"2" json:"output_indexes"`
 }
 
+type ActionAgent struct {
+	LockingScript bitcoin.Script
+	IsRequest     bool
+}
+
 type Action struct {
-	AgentLockingScripts []bitcoin.Script
-	OutputIndex         int
-	Action              actions.Action
+	Agents      []ActionAgent
+	OutputIndex int
+	Action      actions.Action
 }
 
 func (a Action) IsRelevant(agentLockingScript bitcoin.Script) bool {
-	for _, ls := range a.AgentLockingScripts {
-		if ls.Equal(agentLockingScript) {
+	for _, agent := range a.Agents {
+		if agent.LockingScript.Equal(agentLockingScript) {
 			return true
 		}
 	}
@@ -70,12 +75,12 @@ func CompileActions(ctx context.Context, transaction expanded_tx.TransactionWith
 			return nil, errors.Wrapf(errors.Wrap(ErrInvalidAction, err.Error()), "output %d", index)
 		}
 
-		agentLockingScripts, err := ReleventAgentLockingScripts(transaction, action)
+		agents, err := GetActionAgents(transaction, action)
 		if err != nil {
 			return nil, errors.Wrapf(err, "output %d", index)
 		}
 
-		if len(agentLockingScripts) == 0 {
+		if len(agents) == 0 {
 			logger.WarnWithFields(ctx, []logger.Field{
 				logger.Stringer("txid", transaction.TxID()),
 				logger.String("action_code", action.Code()),
@@ -85,18 +90,18 @@ func CompileActions(ctx context.Context, transaction expanded_tx.TransactionWith
 		}
 
 		result = append(result, Action{
-			AgentLockingScripts: agentLockingScripts,
-			OutputIndex:         index,
-			Action:              action,
+			Agents:      agents,
+			OutputIndex: index,
+			Action:      action,
 		})
 	}
 
 	return result, nil
 }
 
-// ReleventAgentLockingScripts returns the agent locking scripts that are relevant to this action.
-func ReleventAgentLockingScripts(transaction expanded_tx.TransactionWithOutputs,
-	action actions.Action) ([]bitcoin.Script, error) {
+// GetActionAgents returns the agent actions that are relevant to this action.
+func GetActionAgents(transaction expanded_tx.TransactionWithOutputs,
+	action actions.Action) ([]ActionAgent, error) {
 
 	switch act := action.(type) {
 	case *actions.ContractOffer, *actions.ContractAmendment, *actions.ContractAddressChange,
@@ -105,7 +110,12 @@ func ReleventAgentLockingScripts(transaction expanded_tx.TransactionWithOutputs,
 		*actions.BallotCast, *actions.Order:
 
 		// Request action where first output is the contract agent.
-		return []bitcoin.Script{transaction.Output(0).LockingScript}, nil
+		return []ActionAgent{
+			{
+				LockingScript: transaction.Output(0).LockingScript,
+				IsRequest:     true,
+			},
+		}, nil
 
 	case *actions.ContractFormation, *actions.BodyOfAgreementFormation, *actions.InstrumentCreation,
 		*actions.Vote, *actions.BallotCounted, *actions.Result, *actions.Freeze, *actions.Thaw,
@@ -117,10 +127,15 @@ func ReleventAgentLockingScripts(transaction expanded_tx.TransactionWithOutputs,
 			return nil, errors.Wrap(err, "input locking script")
 		}
 
-		return []bitcoin.Script{inputOutput.LockingScript}, nil
+		return []ActionAgent{
+			{
+				LockingScript: inputOutput.LockingScript,
+				IsRequest:     false,
+			},
+		}, nil
 
 	case *actions.Transfer:
-		var result []bitcoin.Script
+		var result []ActionAgent
 		for _, instrument := range act.Instruments {
 			if int(instrument.ContractIndex) >= transaction.OutputCount() {
 				return nil, errors.Wrapf(ErrInvalidAction, "index out of range : %d >= %d",
@@ -128,13 +143,16 @@ func ReleventAgentLockingScripts(transaction expanded_tx.TransactionWithOutputs,
 			}
 
 			lockingScript := transaction.Output(int(instrument.ContractIndex)).LockingScript
-			result = appendLockingScript(result, lockingScript)
+			result = append(result, ActionAgent{
+				LockingScript: lockingScript,
+				IsRequest:     true,
+			})
 		}
 
 		return result, nil
 
 	case *actions.Settlement:
-		var result []bitcoin.Script
+		var result []ActionAgent
 		for _, instrument := range act.Instruments {
 			if int(instrument.ContractIndex) >= transaction.InputCount() {
 				return nil, errors.Wrapf(ErrInvalidAction, "index out of range : %d >= %d",
@@ -145,13 +163,16 @@ func ReleventAgentLockingScripts(transaction expanded_tx.TransactionWithOutputs,
 			if err != nil {
 				return nil, errors.Wrap(err, "input locking script")
 			}
-			result = appendLockingScript(result, inputOutput.LockingScript)
+			result = append(result, ActionAgent{
+				LockingScript: inputOutput.LockingScript,
+				IsRequest:     false,
+			})
 		}
 
 		return result, nil
 
 	case *actions.RectificationSettlement:
-		var result []bitcoin.Script
+		var result []ActionAgent
 		for _, instrument := range act.Instruments {
 			if int(instrument.ContractIndex) >= transaction.InputCount() {
 				return nil, errors.Wrapf(ErrInvalidAction, "index out of range : %d >= %d",
@@ -162,13 +183,16 @@ func ReleventAgentLockingScripts(transaction expanded_tx.TransactionWithOutputs,
 			if err != nil {
 				return nil, errors.Wrap(err, "input locking script")
 			}
-			result = appendLockingScript(result, inputOutput.LockingScript)
+			result = append(result, ActionAgent{
+				LockingScript: inputOutput.LockingScript,
+				IsRequest:     false,
+			})
 		}
 
 		return result, nil
 
 	case *actions.Message:
-		var result []bitcoin.Script
+		var result []ActionAgent
 		for _, senderIndex := range act.SenderIndexes {
 			if int(senderIndex) >= transaction.InputCount() {
 				return nil, errors.Wrapf(ErrInvalidAction, "sender index out of range : %d >= %d",
@@ -179,7 +203,10 @@ func ReleventAgentLockingScripts(transaction expanded_tx.TransactionWithOutputs,
 			if err != nil {
 				return nil, errors.Wrap(err, "input locking script")
 			}
-			result = appendLockingScript(result, inputOutput.LockingScript)
+			result = append(result, ActionAgent{
+				LockingScript: inputOutput.LockingScript,
+				IsRequest:     true,
+			})
 		}
 
 		for _, receiverIndex := range act.ReceiverIndexes {
@@ -189,20 +216,26 @@ func ReleventAgentLockingScripts(transaction expanded_tx.TransactionWithOutputs,
 			}
 
 			lockingScript := transaction.Output(int(receiverIndex)).LockingScript
-			result = appendLockingScript(result, lockingScript)
+			result = append(result, ActionAgent{
+				LockingScript: lockingScript,
+				IsRequest:     false,
+			})
 		}
 
 		return result, nil
 
 	case *actions.Rejection:
-		var result []bitcoin.Script
+		var result []ActionAgent
 
 		// First input
 		inputOutput, err := transaction.InputOutput(0)
 		if err != nil {
 			return nil, errors.Wrap(err, "input locking script")
 		}
-		result = appendLockingScript(result, inputOutput.LockingScript)
+		result = append(result, ActionAgent{
+			LockingScript: inputOutput.LockingScript,
+			IsRequest:     false,
+		})
 
 		outputCount := transaction.OutputCount()
 		if int(act.RejectAddressIndex) >= outputCount {
@@ -211,12 +244,18 @@ func ReleventAgentLockingScripts(transaction expanded_tx.TransactionWithOutputs,
 		}
 
 		lockingScript := transaction.Output(int(act.RejectAddressIndex)).LockingScript
-		result = appendLockingScript(result, lockingScript)
+		result = append(result, ActionAgent{
+			LockingScript: lockingScript,
+			IsRequest:     true,
+		})
 
 		if len(act.AddressIndexes) == 0 {
 			// First output
 			lockingScript := transaction.Output(0).LockingScript
-			result = appendLockingScript(result, lockingScript)
+			result = append(result, ActionAgent{
+				LockingScript: lockingScript,
+				IsRequest:     true,
+			})
 		} else {
 			for _, addressIndex := range act.AddressIndexes {
 				if int(addressIndex) >= outputCount {
@@ -225,7 +264,10 @@ func ReleventAgentLockingScripts(transaction expanded_tx.TransactionWithOutputs,
 				}
 
 				lockingScript := transaction.Output(int(addressIndex)).LockingScript
-				result = appendLockingScript(result, lockingScript)
+				result = append(result, ActionAgent{
+					LockingScript: lockingScript,
+					IsRequest:     true,
+				})
 			}
 		}
 
@@ -297,14 +339,16 @@ func (a *Agent) Process(ctx context.Context, transaction *transactions.Transacti
 	var relevantActions []Action
 	containsRequest := false
 	for _, action := range actionList {
-		if !action.IsRelevant(agentLockingScript) {
-			continue
-		}
+		for _, actionAgent := range action.Agents {
+			if actionAgent.LockingScript.Equal(agentLockingScript) {
+				relevantActions = append(relevantActions, action)
 
-		relevantActions = append(relevantActions, action)
+				if actionAgent.IsRequest {
+					containsRequest = true
+				}
 
-		if !containsRequest && IsRequest(action.Action) {
-			containsRequest = true
+				break
+			}
 		}
 	}
 
@@ -330,9 +374,16 @@ func (a *Agent) Process(ctx context.Context, transaction *transactions.Transacti
 	}
 
 	for i, action := range relevantActions {
-		if err := a.processAction(ctx, agentLockingScript, transaction, txid, action.Action,
-			action.OutputIndex, config.RecoveryMode, feeRate, minFeeRate, trace); err != nil {
-			return errors.Wrapf(err, "process action %d: %s", i, action.Action.Code())
+		for _, actionAgent := range action.Agents {
+			if !actionAgent.LockingScript.Equal(agentLockingScript) {
+				continue
+			}
+
+			if err := a.processAction(ctx, agentLockingScript, transaction, txid, action.Action,
+				action.OutputIndex, actionAgent.IsRequest, config.RecoveryMode, feeRate, minFeeRate,
+				trace); err != nil {
+				return errors.Wrapf(err, "process action %d: %s", i, action.Action.Code())
+			}
 		}
 	}
 
@@ -354,36 +405,42 @@ func (a *Agent) ProcessUnsafe(ctx context.Context, transaction *transactions.Tra
 	}, "Processing unsafe transaction")
 
 	for i, action := range actionList {
-		if IsRequest(action.Action) {
-			processed := transaction.ContractProcessed(a.ContractHash(), action.OutputIndex)
-			if len(processed) > 0 {
-				logger.InfoWithFields(ctx, []logger.Field{
-					logger.Stringer("txid", txid),
-					logger.Int("output_index", action.OutputIndex),
-					logger.String("action_code", action.Action.Code()),
-					logger.String("action_name", action.Action.TypeName()),
-					logger.Stringer("response_txid", processed[0].ResponseTxID),
-				}, "Unsafe action already processed")
-				return nil
+		for _, actionAgent := range action.Agents {
+			if !actionAgent.LockingScript.Equal(agentLockingScript) {
+				continue
 			}
 
-			etx, err := a.createRejection(ctx, transaction, action.OutputIndex, -1,
-				platform.NewRejectError(actions.RejectionsDoubleSpend, ""))
-			if err != nil {
-				return errors.Wrap(err, "create rejection")
-			}
+			if actionAgent.IsRequest {
+				processed := transaction.GetContractProcessed(a.ContractHash(), action.OutputIndex)
+				if len(processed) > 0 {
+					logger.InfoWithFields(ctx, []logger.Field{
+						logger.Stringer("txid", txid),
+						logger.Int("output_index", action.OutputIndex),
+						logger.String("action_code", action.Action.Code()),
+						logger.String("action_name", action.Action.TypeName()),
+						logger.Stringer("response_txid", processed[0].ResponseTxID),
+					}, "Unsafe action already processed")
+					return nil
+				}
 
-			if etx != nil {
-				if err := a.BroadcastTx(ctx, etx, nil); err != nil {
-					return errors.Wrap(err, "broadcast")
+				etx, err := a.createRejection(ctx, transaction, action.OutputIndex, -1,
+					platform.NewRejectError(actions.RejectionsDoubleSpend, ""))
+				if err != nil {
+					return errors.Wrap(err, "create rejection")
+				}
+
+				if etx != nil {
+					if err := a.BroadcastTx(ctx, etx, nil); err != nil {
+						return errors.Wrap(err, "broadcast")
+					}
+				}
+			} else {
+				// If it isn't a request then we can process it like normal.
+				if err := a.processAction(ctx, agentLockingScript, transaction, txid, action.Action,
+					action.OutputIndex, actionAgent.IsRequest, false, 1.0, 0.0, trace); err != nil {
+					return errors.Wrapf(err, "process action %d: %s", i, action.Action.Code())
 				}
 			}
-		}
-
-		// If it isn't a request then we can process it like normal.
-		if err := a.processAction(ctx, agentLockingScript, transaction, txid, action.Action,
-			action.OutputIndex, false, 1.0, 0.0, trace); err != nil {
-			return errors.Wrapf(err, "process action %d: %s", i, action.Action.Code())
 		}
 	}
 
@@ -392,12 +449,13 @@ func (a *Agent) ProcessUnsafe(ctx context.Context, transaction *transactions.Tra
 
 func (a *Agent) processAction(ctx context.Context, agentLockingScript bitcoin.Script,
 	transaction *transactions.Transaction, txid bitcoin.Hash32, action actions.Action,
-	outputIndex int, inRecovery bool, feeRate, minFeeRate float64, trace uuid.UUID) error {
+	outputIndex int, isRequest, inRecovery bool, feeRate, minFeeRate float64,
+	trace uuid.UUID) error {
 
 	ctx = logger.ContextWithLogFields(ctx, logger.Stringer("action_trace", uuid.New()))
 	start := time.Now()
 
-	processed := transaction.ContractProcessed(a.ContractHash(), outputIndex)
+	processed := transaction.GetContractProcessed(a.ContractHash(), outputIndex)
 	if len(processed) > 0 {
 		logger.InfoWithFields(ctx, []logger.Field{
 			logger.Stringer("tx_trace", trace), // link tx processing to action processing
@@ -411,7 +469,7 @@ func (a *Agent) processAction(ctx context.Context, agentLockingScript bitcoin.Sc
 		return nil
 	}
 
-	if inRecovery && IsRequest(action) {
+	if inRecovery && isRequest {
 		if added, err := a.addRecoveryRequest(ctx, agentLockingScript, txid,
 			outputIndex); err != nil {
 			return errors.Wrap(err, "recovery request")
@@ -436,7 +494,7 @@ func (a *Agent) processAction(ctx context.Context, agentLockingScript bitcoin.Sc
 		return nil
 	}
 
-	if IsRequest(action) {
+	if isRequest {
 		if !a.IsActive() {
 			// link tx processing to action processing
 			ctx = logger.ContextWithLogFields(ctx, logger.Stringer("tx_trace", trace))
@@ -485,8 +543,6 @@ func (a *Agent) processAction(ctx context.Context, agentLockingScript bitcoin.Sc
 		logger.String("action_code", action.Code()),
 		logger.String("action_name", action.TypeName()),
 	}, "Processing action")
-
-	isRequest := IsRequest(action)
 
 	if err := action.Validate(); err != nil {
 		if isRequest {
@@ -676,18 +732,14 @@ func relevantRequestOutputs(ctx context.Context, etx *expanded_tx.ExpandedTx,
 			continue
 		}
 
-		if !IsRequest(action) {
-			continue
-		}
-
-		agentLockingScripts, err := ReleventAgentLockingScripts(etx, action)
+		agentActions, err := GetActionAgents(etx, action)
 		if err != nil {
 			return nil, errors.Wrap(err, "relevant")
 		}
 
 		isRelevant := false
-		for _, ls := range agentLockingScripts {
-			if ls.Equal(agentLockingScript) {
+		for _, agentAction := range agentActions {
+			if agentAction.IsRequest && agentAction.LockingScript.Equal(agentLockingScript) {
 				isRelevant = true
 			}
 		}

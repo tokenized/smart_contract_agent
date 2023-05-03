@@ -350,7 +350,7 @@ func (a *Agent) completeSettlement(ctx context.Context, transferTransaction *tra
 	transferTx := transferTransaction.Tx.Copy()
 	transferTransaction.Unlock()
 
-	etx, err := buildExpandedTx(settlementTx.MsgTx, []*wire.MsgTx{transferTx})
+	etx, err := buildExpandedTx(settlementTx.MsgTx, []*wire.MsgTx{&transferTx})
 	if err != nil {
 		return nil, errors.Wrap(err, "expanded tx")
 	}
@@ -383,7 +383,8 @@ func (a *Agent) processSettlement(ctx context.Context, transaction *transactions
 			return errors.Wrap(err, "expand tx")
 		}
 
-		if _, err := a.addResponseTxID(ctx, *transferTxID, etx.TxID()); err != nil {
+		if _, err := a.addResponseTxID(ctx, *transferTxID, etx.TxID(), settlement,
+			outputIndex); err != nil {
 			return errors.Wrap(err, "add response txid")
 		}
 
@@ -399,8 +400,9 @@ func (a *Agent) processSettlement(ctx context.Context, transaction *transactions
 	return nil
 }
 
-func (a *Agent) processRectificationSettlement(ctx context.Context, transaction *transactions.Transaction,
-	settlement *actions.RectificationSettlement, outputIndex int) error {
+func (a *Agent) processRectificationSettlement(ctx context.Context,
+	transaction *transactions.Transaction, settlement *actions.RectificationSettlement,
+	outputIndex int) error {
 
 	transferTxID, lockingScripts, err := a.applySettlements(ctx, transaction,
 		settlement.Instruments, settlement.Timestamp)
@@ -409,7 +411,8 @@ func (a *Agent) processRectificationSettlement(ctx context.Context, transaction 
 	}
 
 	if transferTxID != nil {
-		if _, err := a.addResponseTxID(ctx, *transferTxID, transaction.GetTxID()); err != nil {
+		if _, err := a.addResponseTxID(ctx, *transferTxID, transaction.GetTxID(), settlement,
+			outputIndex); err != nil {
 			return errors.Wrap(err, "add response txid")
 		}
 	}
