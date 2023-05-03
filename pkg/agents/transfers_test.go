@@ -1458,6 +1458,7 @@ func Test_Transfers_Multi_Basic(t *testing.T) {
 		}
 
 		t.Logf("Created tx : %s", tx.String(bitcoin.MainNet))
+		transferTxID := tx.TxID()
 
 		addTransaction := &transactions.Transaction{
 			Tx:           tx.MsgTx,
@@ -1640,6 +1641,114 @@ func Test_Transfers_Multi_Basic(t *testing.T) {
 
 		test.caches.Transactions.Release(ctx, messageTransaction.GetTxID())
 
+		// Check that the balances do have pending adjustement.
+		balance, err := test.caches.Caches.Balances.Get(ctx, contractLockingScript1,
+			instrument1.InstrumentCode, adminLockingScript1)
+		if err != nil {
+			t.Fatalf("Failed to get admin balance : %s", err)
+		}
+
+		balance.Lock()
+		js, _ = json.MarshalIndent(balance, "", "  ")
+		balance.Unlock()
+		t.Logf("Balance before signature request : %s", js)
+
+		foundAdjustments := 0
+		balance.Lock()
+		for _, adj := range balance.Adjustments {
+			if adj.TxID == nil {
+				continue
+			}
+
+			if adj.TxID.Equal(&transferTxID) {
+				foundAdjustments++
+			}
+		}
+		balance.Unlock()
+		test.caches.Caches.Balances.Release(ctx, contractLockingScript1,
+			instrument1.InstrumentCode, balance)
+
+		if foundAdjustments == 0 {
+			t.Fatalf("Pending adjustment not found before signature request")
+		} else if foundAdjustments != 1 {
+			t.Fatalf("Wrong number of pending adjustments found before signature request : got %d, want %d",
+				foundAdjustments, 1)
+		} else {
+			t.Logf("Found pending adjustment before signature request")
+		}
+
+		// Check that the balances do have pending adjustement.
+		balance, err = test.caches.Caches.Balances.Get(ctx, contractLockingScript1,
+			instrument1.InstrumentCode, receiver1LockingScripts[0])
+		if err != nil {
+			t.Fatalf("Failed to get receiver balance : %s", err)
+		}
+
+		balance.Lock()
+		js, _ = json.MarshalIndent(balance, "", "  ")
+		balance.Unlock()
+		t.Logf("Balance before signature request : %s", js)
+
+		foundAdjustments = 0
+		balance.Lock()
+		for _, adj := range balance.Adjustments {
+			if adj.TxID == nil {
+				continue
+			}
+
+			if adj.TxID.Equal(&transferTxID) {
+				foundAdjustments++
+			}
+		}
+		balance.Unlock()
+		test.caches.Caches.Balances.Release(ctx, contractLockingScript1,
+			instrument1.InstrumentCode, balance)
+
+		if foundAdjustments == 0 {
+			t.Fatalf("Pending adjustment not found before signature request")
+		} else if foundAdjustments != 1 {
+			t.Fatalf("Wrong number of pending adjustments found before signature request : got %d, want %d",
+				foundAdjustments, 1)
+		} else {
+			t.Logf("Found pending adjustment before signature request")
+		}
+
+		// Check that the balances do have pending adjustement.
+		balance, err = test.caches.Caches.Balances.Get(ctx, contractLockingScript2,
+			instrument2.InstrumentCode, receiver2LockingScripts[0])
+		if err != nil {
+			t.Fatalf("Failed to get receiver balance : %s", err)
+		}
+
+		balance.Lock()
+		js, _ = json.MarshalIndent(balance, "", "  ")
+		balance.Unlock()
+		t.Logf("Balance before signature request : %s", js)
+
+		foundAdjustments = 0
+		balance.Lock()
+		for _, adj := range balance.Adjustments {
+			if adj.TxID == nil {
+				continue
+			}
+
+			if adj.TxID.Equal(&transferTxID) {
+				foundAdjustments++
+			}
+		}
+		balance.Unlock()
+		test.caches.Caches.Balances.Release(ctx, contractLockingScript2,
+			instrument2.InstrumentCode, balance)
+
+		if foundAdjustments == 0 {
+			t.Fatalf("Pending adjustment not found before signature request")
+		} else if foundAdjustments != 1 {
+			t.Fatalf("Wrong number of pending adjustments found before signature request : got %d, want %d",
+				foundAdjustments, 1)
+		} else {
+			t.Logf("Found pending adjustment before signature request")
+		}
+
 		message2SpentOutputs := []*expanded_tx.Output{
 			{
 				LockingScript: agent1ResponseTx.Tx.TxOut[0].LockingScript,
@@ -1665,7 +1774,7 @@ func Test_Transfers_Multi_Basic(t *testing.T) {
 			t.Fatalf("Failed to process message 2 transaction : %s", err)
 		}
 
-		agent2ResponseTx3 := broadcaster1.GetLastTx()
+		agent2ResponseTx3 := broadcaster2.GetLastTx()
 		broadcaster2.ClearTxs()
 		if agent2ResponseTx3 != nil {
 			t.Fatalf("Agent 2 response tx 3 should be nil : %s", agent2ResponseTx3)
@@ -1688,13 +1797,15 @@ func Test_Transfers_Multi_Basic(t *testing.T) {
 		t.Logf("Agent 1 response tx 3 : %s", agent1ResponseTx3)
 
 		var settlement *actions.Settlement
-		for _, txout := range agent1ResponseTx3.Tx.TxOut {
+		settlementScriptOutputIndex := 0
+		for outputIndex, txout := range agent1ResponseTx3.Tx.TxOut {
 			action, err := protocol.Deserialize(txout.LockingScript, true)
 			if err != nil {
 				continue
 			}
 
 			if a, ok := action.(*actions.Settlement); ok {
+				settlementScriptOutputIndex = outputIndex
 				settlement = a
 			}
 
@@ -1717,6 +1828,143 @@ func Test_Transfers_Multi_Basic(t *testing.T) {
 		t.Logf("Settlement : %s", js)
 
 		test.caches.Transactions.Release(ctx, message2Transaction.GetTxID())
+
+		// Check that the balances don't have any adjustements pending.
+		balance, err = test.caches.Caches.Balances.Get(ctx, contractLockingScript1,
+			instrument1.InstrumentCode, adminLockingScript1)
+		if err != nil {
+			t.Fatalf("Failed to get admin balance : %s", err)
+		}
+
+		balance.Lock()
+		js, _ = json.MarshalIndent(balance, "", "  ")
+		balance.Unlock()
+		t.Logf("Balance : %s", js)
+
+		foundAdjustments = 0
+		balance.Lock()
+		for _, adj := range balance.Adjustments {
+			if adj.TxID == nil {
+				continue
+			}
+
+			if adj.TxID.Equal(&transferTxID) {
+				foundAdjustments++
+			}
+		}
+		balance.Unlock()
+
+		test.caches.Caches.Balances.Release(ctx, contractLockingScript1,
+			instrument1.InstrumentCode, balance)
+
+		if foundAdjustments != 0 {
+			t.Fatalf("Pending adjustment should not be found after signature request")
+		} else {
+			t.Logf("Did not find pending adjustments after signature request")
+		}
+
+		// Check that the balances don't have any adjustements pending.
+		balance, err = test.caches.Caches.Balances.Get(ctx, contractLockingScript1,
+			instrument1.InstrumentCode, receiver1LockingScripts[0])
+		if err != nil {
+			t.Fatalf("Failed to get receiver balance : %s", err)
+		}
+
+		balance.Lock()
+		js, _ = json.MarshalIndent(balance, "", "  ")
+		balance.Unlock()
+		t.Logf("Balance : %s", js)
+
+		foundAdjustments = 0
+		balance.Lock()
+		for _, adj := range balance.Adjustments {
+			if adj.TxID == nil {
+				continue
+			}
+
+			if adj.TxID.Equal(&transferTxID) {
+				foundAdjustments++
+			}
+		}
+		balance.Unlock()
+
+		test.caches.Caches.Balances.Release(ctx, contractLockingScript1,
+			instrument1.InstrumentCode, balance)
+
+		if foundAdjustments != 0 {
+			t.Fatalf("Pending adjustment should not be found after signature request")
+		} else {
+			t.Logf("Did not find pending adjustments after signature request")
+		}
+
+		settlementSpentOutputs := []*expanded_tx.Output{
+			{
+				LockingScript: tx.MsgTx.TxOut[0].LockingScript,
+				Value:         tx.MsgTx.TxOut[0].Value,
+			},
+			{
+				LockingScript: tx.MsgTx.TxOut[1].LockingScript,
+				Value:         tx.MsgTx.TxOut[1].Value,
+			},
+		}
+
+		addSettlementTransaction := &transactions.Transaction{
+			Tx:           agent1ResponseTx3.Tx,
+			SpentOutputs: settlementSpentOutputs,
+		}
+
+		settlementTransaction, err := test.caches.Transactions.Add(ctx, addSettlementTransaction)
+		if err != nil {
+			t.Fatalf("Failed to add transaction : %s", err)
+		}
+
+		if err := agent2.Process(ctx, settlementTransaction, []Action{{
+			AgentLockingScripts: []bitcoin.Script{contractLockingScript2},
+			OutputIndex:         settlementScriptOutputIndex,
+			Action:              settlement,
+		}}); err != nil {
+			t.Fatalf("Failed to process message 2 transaction : %s", err)
+		}
+
+		agent2ResponseTx4 := broadcaster2.GetLastTx()
+		broadcaster2.ClearTxs()
+		if agent2ResponseTx4 != nil {
+			t.Fatalf("Agent 2 response tx 4 should be nil : %s", agent2ResponseTx4)
+		}
+
+		// Check that the balances don't have any adjustements pending.
+		balance, err = test.caches.Caches.Balances.Get(ctx, contractLockingScript2,
+			instrument2.InstrumentCode, receiver2LockingScripts[0])
+		if err != nil {
+			t.Fatalf("Failed to get receiver balance : %s", err)
+		}
+
+		balance.Lock()
+		js, _ = json.MarshalIndent(balance, "", "  ")
+		balance.Unlock()
+		t.Logf("Balance : %s", js)
+
+		foundAdjustments = 0
+		balance.Lock()
+		for _, adj := range balance.Adjustments {
+			if adj.TxID == nil {
+				continue
+			}
+
+			if adj.TxID.Equal(&transferTxID) {
+				foundAdjustments++
+			}
+		}
+		balance.Unlock()
+
+		test.caches.Caches.Balances.Release(ctx, contractLockingScript2,
+			instrument2.InstrumentCode, balance)
+
+		if foundAdjustments != 0 {
+			t.Fatalf("Pending adjustment should not be found after signature request")
+		} else {
+			t.Logf("Did not find pending adjustments after signature request")
+		}
 	}
 
 	agent1.Release(ctx)

@@ -515,6 +515,12 @@ func (b *Balance) FinalizeConfiscation(orderTxID, confiscationTxID bitcoin.Hash3
 // SettlePending clears the current pending modification and converts it into a balance
 // adjustment.
 func (b *Balance) SettlePending(txid bitcoin.Hash32, isMultiContract bool) {
+	for _, adj := range b.Adjustments {
+		if adj.TxID.Equal(&txid) {
+			return
+		}
+	}
+
 	var code BalanceAdjustmentCode
 	if isMultiContract {
 		if b.pendingDirection { // credit
