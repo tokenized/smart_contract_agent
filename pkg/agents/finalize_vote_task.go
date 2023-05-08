@@ -187,7 +187,7 @@ func (a *Agent) FinalizeVote(ctx context.Context,
 		return nil, platform.NewRejectError(actions.RejectionsMsgMalformed, err.Error())
 	}
 
-	voteResultTx := txbuilder.NewTxBuilder(config.FeeRate, config.DustFeeRate)
+	voteResultTx := txbuilder.NewTxBuilder(float32(config.FeeRate), float32(config.DustFeeRate))
 
 	if err := voteResultTx.AddInput(wire.OutPoint{Hash: proposalTxID, Index: 1}, agentLockingScript,
 		proposalOutputValue); err != nil {
@@ -223,7 +223,12 @@ func (a *Agent) FinalizeVote(ctx context.Context,
 	}
 
 	// Sign vote tx.
-	if _, err := voteResultTx.Sign([]bitcoin.Key{a.Key()}); err != nil {
+	if err := a.Sign(ctx, voteResultTx, a.FeeLockingScript()); err != nil {
+		if errors.Cause(err) == txbuilder.ErrInsufficientValue {
+			return nil, platform.NewRejectError(actions.RejectionsInsufficientTxFeeFunding,
+				err.Error())
+		}
+
 		return nil, errors.Wrap(err, "sign")
 	}
 

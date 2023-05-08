@@ -345,7 +345,7 @@ func (a *Agent) processProposal(ctx context.Context, transaction *transactions.T
 		return nil, platform.NewRejectError(actions.RejectionsMsgMalformed, err.Error())
 	}
 
-	voteTx := txbuilder.NewTxBuilder(config.FeeRate, config.DustFeeRate)
+	voteTx := txbuilder.NewTxBuilder(float32(config.FeeRate), float32(config.DustFeeRate))
 
 	if err := voteTx.AddInput(wire.OutPoint{Hash: txid, Index: 0}, agentLockingScript,
 		contractOutput.Value); err != nil {
@@ -380,10 +380,10 @@ func (a *Agent) processProposal(ctx context.Context, transaction *transactions.T
 	}
 
 	// Sign vote tx.
-	if _, err := voteTx.Sign([]bitcoin.Key{a.Key()}); err != nil {
+	if err := a.Sign(ctx, voteTx, a.FeeLockingScript()); err != nil {
 		if errors.Cause(err) == txbuilder.ErrInsufficientValue {
-			logger.Warn(ctx, "Insufficient tx funding : %s", err)
-			return nil, platform.NewRejectError(actions.RejectionsInsufficientTxFeeFunding, err.Error())
+			return nil, platform.NewRejectError(actions.RejectionsInsufficientTxFeeFunding,
+				err.Error())
 		}
 
 		return nil, errors.Wrap(err, "sign")
@@ -700,7 +700,7 @@ func (a *Agent) processBallotCast(ctx context.Context, transaction *transactions
 	}
 
 	config := a.Config()
-	ballotCountedTx := txbuilder.NewTxBuilder(config.FeeRate, config.DustFeeRate)
+	ballotCountedTx := txbuilder.NewTxBuilder(float32(config.FeeRate), float32(config.DustFeeRate))
 
 	if err := ballotCountedTx.AddInput(wire.OutPoint{Hash: txid, Index: 0}, agentLockingScript,
 		contractOutput.Value); err != nil {
@@ -736,10 +736,10 @@ func (a *Agent) processBallotCast(ctx context.Context, transaction *transactions
 	}
 
 	// Sign vote tx.
-	if _, err := ballotCountedTx.Sign([]bitcoin.Key{a.Key()}); err != nil {
+	if err := a.Sign(ctx, ballotCountedTx, a.FeeLockingScript()); err != nil {
 		if errors.Cause(err) == txbuilder.ErrInsufficientValue {
-			logger.Warn(ctx, "Insufficient tx funding : %s", err)
-			return nil, platform.NewRejectError(actions.RejectionsInsufficientTxFeeFunding, err.Error())
+			return nil, platform.NewRejectError(actions.RejectionsInsufficientTxFeeFunding,
+				err.Error())
 		}
 
 		return nil, errors.Wrap(err, "sign")

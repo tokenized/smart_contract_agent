@@ -6,6 +6,9 @@ import (
 	"crypto/sha256"
 	"fmt"
 
+	"github.com/tokenized/bitcoin_interpreter"
+	"github.com/tokenized/bitcoin_interpreter/agent_bitcoin_transfer"
+	"github.com/tokenized/bitcoin_interpreter/p2pkh"
 	"github.com/tokenized/logger"
 	"github.com/tokenized/pkg/bitcoin"
 	"github.com/tokenized/pkg/expanded_tx"
@@ -130,17 +133,20 @@ func (a *Agent) processTransfer(ctx context.Context, transaction *transactions.T
 	}
 
 	config := a.Config()
-	settlementTx := txbuilder.NewTxBuilder(config.FeeRate, config.DustFeeRate)
+	settlementTx := txbuilder.NewTxBuilder(float32(config.FeeRate), float32(config.DustFeeRate))
 	settlement := &actions.Settlement{
 		Timestamp: now,
 	}
 
+	containsBitcoinTransfer := false
 	for index, instrumentTransfer := range transfer.Instruments {
 		instrumentID, _ := protocol.InstrumentIDForTransfer(instrumentTransfer)
 		instrumentCtx := logger.ContextWithLogFields(ctx,
 			logger.String("instrument_id", instrumentID))
 
 		if instrumentTransfer.InstrumentType == protocol.BSVInstrumentID {
+			containsBitcoinTransfer = true
+
 			if len(instrumentTransfer.InstrumentCode) != 0 {
 				allBalances.Revert(txid)
 				logger.Warn(instrumentCtx, "Bitcoin instrument with instrument code")
@@ -240,11 +246,17 @@ func (a *Agent) processTransfer(ctx context.Context, transaction *transactions.T
 		return etx, nil
 	}
 
-	// Sign settlement tx.
-	if _, err := settlementTx.Sign([]bitcoin.Key{a.Key()}); err != nil {
+	var additionalUnlockers []bitcoin_interpreter.Unlocker
+	if containsBitcoinTransfer {
+		// Create an unlocker for the agent bitcoin transfer script.
+		signer := p2pkh.NewUnlockerFull(a.Key(), true, bitcoin_interpreter.SigHashDefault, -1)
+		approveUnlocker := agent_bitcoin_transfer.NewAgentApproveUnlocker(signer)
+		additionalUnlockers = append(additionalUnlockers, approveUnlocker)
+	}
+
+	if err := a.Sign(ctx, settlementTx, a.FeeLockingScript(), additionalUnlockers...); err != nil {
 		allBalances.Revert(txid)
 		if errors.Cause(err) == txbuilder.ErrInsufficientValue {
-			logger.Warn(ctx, "Insufficient tx funding : %s", err)
 			return nil, platform.NewRejectErrorWithOutputIndex(actions.RejectionsInsufficientTxFeeFunding,
 				err.Error(), transferContracts.FirstContractOutputIndex)
 		}

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/tokenized/bitcoin_interpreter"
 	"github.com/tokenized/logger"
 	"github.com/tokenized/pkg/bitcoin"
 	"github.com/tokenized/pkg/expanded_tx"
@@ -30,7 +31,7 @@ func (a *Agent) processSettlementRequest(ctx context.Context, transaction *trans
 	now := a.Now()
 
 	config := a.Config()
-	settlementTx := txbuilder.NewTxBuilder(config.FeeRate, config.DustFeeRate)
+	settlementTx := txbuilder.NewTxBuilder(float32(config.FeeRate), float32(config.DustFeeRate))
 
 	newTransferTxID, err := bitcoin.NewHash32(settlementRequest.TransferTxId)
 	if err != nil {
@@ -339,24 +340,19 @@ func (a *Agent) processSettlementRequest(ctx context.Context, transaction *trans
 		}
 
 		// Sign settlement tx.
-		key := a.Key()
-		usedKeys, err := settlementTx.Sign([]bitcoin.Key{key})
-		if err != nil && errors.Cause(err) != txbuilder.ErrMissingPrivateKey {
-			allBalances.Revert(transferTxID)
-
+		if err := a.Sign(ctx, settlementTx, a.FeeLockingScript()); err != nil {
 			if errors.Cause(err) == txbuilder.ErrInsufficientValue {
-				logger.Warn(ctx, "Insufficient tx funding : %s", err)
+				allBalances.Revert(transferTxID)
 				return nil, platform.NewRejectError(actions.RejectionsInsufficientTxFeeFunding,
 					err.Error())
 			}
 
-			return nil, errors.Wrap(err, "sign")
-		}
-
-		if len(usedKeys) != 1 || !usedKeys[0].Equal(key) {
-			allBalances.Revert(transferTxID)
-			return nil, fmt.Errorf("Wrong used key returned from signing : %s",
-				usedKeys[0].PublicKey())
+			// The "can't unlock" error is expected here because there are inputs from another
+			// agent.
+			if errors.Cause(err) != bitcoin_interpreter.CantUnlock {
+				allBalances.Revert(transferTxID)
+				return nil, errors.Wrap(err, "sign")
+			}
 		}
 
 		etx, err := a.createSignatureRequest(ctx, transaction, outputIndex, transferContracts,
@@ -489,7 +485,7 @@ func (a *Agent) createSettlementRequest(ctx context.Context,
 	}
 
 	config := a.Config()
-	messageTx := txbuilder.NewTxBuilder(config.FeeRate, config.DustFeeRate)
+	messageTx := txbuilder.NewTxBuilder(float32(config.FeeRate), float32(config.DustFeeRate))
 
 	if err := messageTx.AddInput(wire.OutPoint{Hash: currentTxID, Index: uint32(fundingIndex)},
 		agentLockingScript, fundingOutput.Value); err != nil {
@@ -547,9 +543,8 @@ func (a *Agent) createSettlementRequest(ctx context.Context,
 		return nil, errors.Wrap(err, "add message output")
 	}
 
-	if _, err := messageTx.Sign([]bitcoin.Key{a.Key()}); err != nil {
+	if err := a.Sign(ctx, messageTx, transferContracts.NextLockingScript); err != nil {
 		if errors.Cause(err) == txbuilder.ErrInsufficientValue {
-			logger.Warn(ctx, "Insufficient tx funding : %s", err)
 			return nil, platform.NewRejectError(actions.RejectionsInsufficientTxFeeFunding,
 				err.Error())
 		}

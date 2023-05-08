@@ -165,7 +165,7 @@ func (a *Agent) processFreezeOrder(ctx context.Context, transaction *transaction
 	}
 
 	config := a.Config()
-	freezeTx := txbuilder.NewTxBuilder(config.FeeRate, config.DustFeeRate)
+	freezeTx := txbuilder.NewTxBuilder(float32(config.FeeRate), float32(config.DustFeeRate))
 
 	if err := freezeTx.AddInput(wire.OutPoint{Hash: txid, Index: 0}, agentLockingScript,
 		contractOutput.Value); err != nil {
@@ -372,14 +372,14 @@ func (a *Agent) processFreezeOrder(ctx context.Context, transaction *transaction
 	}
 
 	// Sign freeze tx.
-	if _, err := freezeTx.Sign([]bitcoin.Key{a.Key()}); err != nil {
+	if err := a.Sign(ctx, freezeTx, a.FeeLockingScript()); err != nil {
+		balances.RevertPending()
+
 		if errors.Cause(err) == txbuilder.ErrInsufficientValue {
-			logger.Warn(ctx, "Insufficient tx funding : %s", err)
-			balances.RevertPending()
-			return nil, platform.NewRejectError(actions.RejectionsInsufficientTxFeeFunding, err.Error())
+			return nil, platform.NewRejectError(actions.RejectionsInsufficientTxFeeFunding,
+				err.Error())
 		}
 
-		balances.RevertPending()
 		return nil, errors.Wrap(err, "sign")
 	}
 
@@ -450,7 +450,7 @@ func (a *Agent) processThawOrder(ctx context.Context, transaction *transactions.
 	}
 
 	config := a.Config()
-	thawTx := txbuilder.NewTxBuilder(config.FeeRate, config.DustFeeRate)
+	thawTx := txbuilder.NewTxBuilder(float32(config.FeeRate), float32(config.DustFeeRate))
 
 	if err := thawTx.AddInput(wire.OutPoint{Hash: txid, Index: 0}, agentLockingScript,
 		contractOutput.Value); err != nil {
@@ -644,10 +644,12 @@ func (a *Agent) processThawOrder(ctx context.Context, transaction *transactions.
 	}
 
 	// Sign thaw tx.
-	if _, err := thawTx.Sign([]bitcoin.Key{a.Key()}); err != nil {
+	if err := a.Sign(ctx, thawTx, a.FeeLockingScript()); err != nil {
+		balances.RevertPending()
+
 		if errors.Cause(err) == txbuilder.ErrInsufficientValue {
-			logger.Warn(ctx, "Insufficient tx funding : %s", err)
-			return nil, platform.NewRejectError(actions.RejectionsInsufficientTxFeeFunding, err.Error())
+			return nil, platform.NewRejectError(actions.RejectionsInsufficientTxFeeFunding,
+				err.Error())
 		}
 
 		return nil, errors.Wrap(err, "sign")
@@ -716,7 +718,7 @@ func (a *Agent) processConfiscateOrder(ctx context.Context, transaction *transac
 	}
 
 	config := a.Config()
-	confiscationTx := txbuilder.NewTxBuilder(config.FeeRate, config.DustFeeRate)
+	confiscationTx := txbuilder.NewTxBuilder(float32(config.FeeRate), float32(config.DustFeeRate))
 
 	if err := confiscationTx.AddInput(wire.OutPoint{Hash: txid, Index: 0}, agentLockingScript,
 		contractOutput.Value); err != nil {
@@ -941,11 +943,12 @@ func (a *Agent) processConfiscateOrder(ctx context.Context, transaction *transac
 	}
 
 	// Sign confiscation tx.
-	if _, err := confiscationTx.Sign([]bitcoin.Key{a.Key()}); err != nil {
+	if err := a.Sign(ctx, confiscationTx, a.FeeLockingScript()); err != nil {
 		balances.RevertPending()
+
 		if errors.Cause(err) == txbuilder.ErrInsufficientValue {
-			logger.Warn(ctx, "Insufficient tx funding : %s", err)
-			return nil, platform.NewRejectError(actions.RejectionsInsufficientTxFeeFunding, err.Error())
+			return nil, platform.NewRejectError(actions.RejectionsInsufficientTxFeeFunding,
+				err.Error())
 		}
 
 		return nil, errors.Wrap(err, "sign")

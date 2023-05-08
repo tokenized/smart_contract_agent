@@ -290,8 +290,9 @@ func (a *Agent) createRejection(ctx context.Context, transaction *transactions.T
 	}
 
 	agentLockingScript := a.LockingScript()
+	changeLockingScript := a.FeeLockingScript()
 	config := a.Config()
-	rejectTx := txbuilder.NewTxBuilder(config.FeeRate, config.DustFeeRate)
+	rejectTx := txbuilder.NewTxBuilder(float32(config.FeeRate), float32(config.DustFeeRate))
 
 	transaction.Lock()
 
@@ -452,23 +453,27 @@ func (a *Agent) createRejection(ctx context.Context, transaction *transactions.T
 		}
 
 		if refundInputValue == 0 {
-			if err := rejectTx.SetChangeLockingScript(agentLockingScript, ""); err != nil {
+			if err := rejectTx.SetChangeLockingScript(changeLockingScript, ""); err != nil {
 				return nil, errors.Wrap(err, "set change locking script")
 			}
-		} else if err := rejectTx.SetChangeLockingScript(refundScript, ""); err != nil {
-			return nil, errors.Wrap(err, "set change locking script")
+		} else {
+			changeLockingScript = refundScript
+			if err := rejectTx.SetChangeLockingScript(refundScript, ""); err != nil {
+				return nil, errors.Wrap(err, "set change locking script")
+			}
 		}
 	} else {
+		changeLockingScript = reject.ReceiverLockingScript
 		if err := rejectTx.SetChangeLockingScript(reject.ReceiverLockingScript, ""); err != nil {
 			return nil, errors.Wrap(err, "set change locking script")
 		}
 	}
 	transaction.Unlock()
 
-	if _, err := rejectTx.Sign([]bitcoin.Key{a.Key()}); err != nil {
+	if err := a.Sign(ctx, rejectTx, changeLockingScript); err != nil {
 		if errors.Cause(err) == txbuilder.ErrInsufficientValue {
-			logger.Warn(ctx, "Insufficient tx funding for reject : %s", err)
-			return nil, nil
+			return nil, platform.NewRejectError(actions.RejectionsInsufficientTxFeeFunding,
+				err.Error())
 		}
 
 		return nil, errors.Wrap(err, "sign")

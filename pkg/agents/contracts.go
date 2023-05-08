@@ -196,7 +196,7 @@ func (a *Agent) processContractOffer(ctx context.Context, transaction *transacti
 	}
 
 	config := a.Config()
-	formationTx := txbuilder.NewTxBuilder(config.FeeRate, config.DustFeeRate)
+	formationTx := txbuilder.NewTxBuilder(float32(config.FeeRate), float32(config.DustFeeRate))
 
 	if err := formationTx.AddInput(wire.OutPoint{Hash: txid, Index: 0}, agentLockingScript,
 		contractOutput.Value); err != nil {
@@ -228,9 +228,8 @@ func (a *Agent) processContractOffer(ctx context.Context, transaction *transacti
 	}
 
 	// Sign formation tx.
-	if _, err := formationTx.Sign([]bitcoin.Key{a.Key()}); err != nil {
+	if err := a.Sign(ctx, formationTx, a.FeeLockingScript()); err != nil {
 		if errors.Cause(err) == txbuilder.ErrInsufficientValue {
-			logger.Warn(ctx, "Insufficient tx funding : %s", err)
 			return nil, platform.NewRejectError(actions.RejectionsInsufficientTxFeeFunding,
 				err.Error())
 		}
@@ -644,7 +643,7 @@ func (a *Agent) processContractAmendment(ctx context.Context, transaction *trans
 		return nil, platform.NewRejectError(actions.RejectionsMsgMalformed, err.Error())
 	}
 
-	formationTx := txbuilder.NewTxBuilder(config.FeeRate, config.DustFeeRate)
+	formationTx := txbuilder.NewTxBuilder(float32(config.FeeRate), float32(config.DustFeeRate))
 
 	if err := formationTx.AddInput(wire.OutPoint{Hash: txid, Index: 0}, agentLockingScript,
 		contractOutput.Value); err != nil {
@@ -676,9 +675,8 @@ func (a *Agent) processContractAmendment(ctx context.Context, transaction *trans
 	}
 
 	// Sign formation tx.
-	if _, err := formationTx.Sign([]bitcoin.Key{a.Key()}); err != nil {
+	if err := a.Sign(ctx, formationTx, a.FeeLockingScript()); err != nil {
 		if errors.Cause(err) == txbuilder.ErrInsufficientValue {
-			logger.Warn(ctx, "Insufficient tx funding : %s", err)
 			return nil, platform.NewRejectError(actions.RejectionsInsufficientTxFeeFunding,
 				err.Error())
 		}

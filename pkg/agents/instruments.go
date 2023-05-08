@@ -161,7 +161,7 @@ func (a *Agent) processInstrumentDefinition(ctx context.Context, transaction *tr
 	creation.Timestamp = now // now might have changed while locking balance
 
 	config := a.Config()
-	creationTx := txbuilder.NewTxBuilder(config.FeeRate, config.DustFeeRate)
+	creationTx := txbuilder.NewTxBuilder(float32(config.FeeRate), float32(config.DustFeeRate))
 
 	if err := creationTx.AddInput(wire.OutPoint{Hash: txid, Index: 0}, agentLockingScript,
 		contractOutput.Value); err != nil {
@@ -194,9 +194,8 @@ func (a *Agent) processInstrumentDefinition(ctx context.Context, transaction *tr
 	}
 
 	// Sign creation tx.
-	if _, err := creationTx.Sign([]bitcoin.Key{a.Key()}); err != nil {
+	if err := a.Sign(ctx, creationTx, a.FeeLockingScript()); err != nil {
 		if errors.Cause(err) == txbuilder.ErrInsufficientValue {
-			logger.Warn(ctx, "Insufficient tx funding : %s", err)
 			return nil, platform.NewRejectError(actions.RejectionsInsufficientTxFeeFunding,
 				err.Error())
 		}
@@ -417,7 +416,7 @@ func (a *Agent) processInstrumentModification(ctx context.Context, transaction *
 	}
 	creation.Timestamp = now // now might have changed while locking balance
 
-	creationTx := txbuilder.NewTxBuilder(config.FeeRate, config.DustFeeRate)
+	creationTx := txbuilder.NewTxBuilder(float32(config.FeeRate), float32(config.DustFeeRate))
 
 	if err := creationTx.AddInput(wire.OutPoint{Hash: txid, Index: 0}, agentLockingScript,
 		contractOutput.Value); err != nil {
@@ -450,10 +449,10 @@ func (a *Agent) processInstrumentModification(ctx context.Context, transaction *
 	}
 
 	// Sign creation tx.
-	if _, err := creationTx.Sign([]bitcoin.Key{a.Key()}); err != nil {
+	if err := a.Sign(ctx, creationTx, a.FeeLockingScript()); err != nil {
 		if errors.Cause(err) == txbuilder.ErrInsufficientValue {
-			logger.Warn(ctx, "Insufficient tx funding : %s", err)
-			return nil, platform.NewRejectError(actions.RejectionsInsufficientTxFeeFunding, err.Error())
+			return nil, platform.NewRejectError(actions.RejectionsInsufficientTxFeeFunding,
+				err.Error())
 		}
 
 		return nil, errors.Wrap(err, "sign")

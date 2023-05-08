@@ -191,8 +191,8 @@ func (a *Agent) processSignatureRequest(ctx context.Context, transaction *transa
 		return nil, platform.NewDefaultRejectError(err)
 	}
 
-	settlementTx, err := txbuilder.NewTxBuilderFromWire(config.FeeRate, config.DustFeeRate, tx,
-		[]*wire.MsgTx{transferTx})
+	settlementTx, err := txbuilder.NewTxBuilderFromWire(float32(config.FeeRate),
+		float32(config.DustFeeRate), tx, []*wire.MsgTx{transferTx})
 	if err != nil {
 		return nil, errors.Wrap(err, "build settlement tx")
 	}
@@ -502,7 +502,7 @@ func (a *Agent) createSignatureRequest(ctx context.Context,
 	}
 
 	config := a.Config()
-	messageTx := txbuilder.NewTxBuilder(config.FeeRate, config.DustFeeRate)
+	messageTx := txbuilder.NewTxBuilder(float32(config.FeeRate), float32(config.DustFeeRate))
 
 	if err := messageTx.AddInput(wire.OutPoint{Hash: currentTxID, Index: uint32(fundingIndex)},
 		agentLockingScript, fundingOutput.Value); err != nil {
@@ -545,7 +545,7 @@ func (a *Agent) createSignatureRequest(ctx context.Context,
 		return nil, errors.Wrap(err, "add message output")
 	}
 
-	if _, err := messageTx.Sign([]bitcoin.Key{a.Key()}); err != nil {
+	if err := a.Sign(ctx, messageTx, transferContracts.PreviousLockingScript); err != nil {
 		if errors.Cause(err) == txbuilder.ErrInsufficientValue {
 			return nil, platform.NewRejectError(actions.RejectionsInsufficientTxFeeFunding,
 				err.Error())
