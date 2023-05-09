@@ -224,11 +224,6 @@ func (a *Agent) FinalizeVote(ctx context.Context,
 
 	// Sign vote tx.
 	if err := a.Sign(ctx, voteResultTx, a.FeeLockingScript()); err != nil {
-		if errors.Cause(err) == txbuilder.ErrInsufficientValue {
-			return nil, platform.NewRejectError(actions.RejectionsInsufficientTxFeeFunding,
-				err.Error())
-		}
-
 		return nil, errors.Wrap(err, "sign")
 	}
 

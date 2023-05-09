@@ -3,6 +3,9 @@ package agents
 import (
 	"context"
 
+	"github.com/tokenized/bitcoin_interpreter"
+	"github.com/tokenized/bitcoin_interpreter/agent_bitcoin_transfer"
+	"github.com/tokenized/bitcoin_interpreter/p2pkh"
 	"github.com/tokenized/logger"
 	"github.com/tokenized/pkg/bitcoin"
 	"github.com/tokenized/pkg/expanded_tx"
@@ -298,6 +301,79 @@ func (a *Agent) createRejection(ctx context.Context, transaction *transactions.T
 
 	txid := transaction.TxID()
 
+	actionOutput := transaction.Output(actionOutputIndex)
+	action, err := protocol.Deserialize(actionOutput.LockingScript, config.IsTest)
+	if err != nil {
+		return nil, errors.Wrap(err, "deserialize action")
+	}
+
+	var agentBitcoinTransferUnlocker bitcoin_interpreter.Unlocker
+
+	if transfer, ok := action.(*actions.Transfer); ok {
+		var bitcoinTransfer *actions.InstrumentTransferField
+		for _, inst := range transfer.Instruments {
+			if inst.InstrumentType == protocol.BSVInstrumentID {
+				bitcoinTransfer = inst
+				break
+			}
+		}
+
+		if bitcoinTransfer != nil {
+			// Create an unlocker for the agent bitcoin transfer script.
+			signer := p2pkh.NewUnlockerFull(a.Key(), true, bitcoin_interpreter.SigHashDefault, -1)
+			agentBitcoinTransferUnlocker = agent_bitcoin_transfer.NewAgentRefundUnlocker(signer)
+
+			// Find any agent bitcoin transfer outputs with the contract locking script.
+			outputCount := transaction.OutputCount()
+			for i := 0; i < outputCount; i++ {
+				output := transaction.Output(i)
+				if !agentBitcoinTransferUnlocker.CanUnlock(output.LockingScript) {
+					continue
+				}
+
+				// Find appropriate output to add.
+				info, err := agent_bitcoin_transfer.MatchScript(output.LockingScript)
+				if err != nil {
+					continue
+				}
+
+				// Find refund script
+				refundFound := false
+				for _, sender := range bitcoinTransfer.InstrumentSenders {
+					inputOutput, err := transaction.InputOutput(int(sender.Index))
+					if err != nil {
+						continue
+					}
+
+					if info.RefundMatches(inputOutput.LockingScript, output.Value) {
+						if err := rejectTx.AddOutput(inputOutput.LockingScript, output.Value, false,
+							false); err == nil {
+							refundFound = true
+							break
+						}
+					}
+				}
+
+				if !refundFound {
+					logger.WarnWithFields(ctx, []logger.Field{
+						logger.Int("output_index", i),
+					}, "Refund locking script not found")
+					continue
+				}
+
+				outpoint := wire.OutPoint{
+					Hash:  transaction.TxID(),
+					Index: uint32(i),
+				}
+				if err := rejectTx.AddInput(outpoint, output.LockingScript,
+					output.Value); err != nil {
+					transaction.Unlock()
+					return nil, errors.Wrap(err, "add input")
+				}
+			}
+		}
+	}
+
 	inputFound := false
 	if !inputFound && responseOutputIndex != -1 {
 		outpoint := wire.OutPoint{
@@ -470,10 +546,10 @@ func (a *Agent) createRejection(ctx context.Context, transaction *transactions.T
 	}
 	transaction.Unlock()
 
-	if err := a.Sign(ctx, rejectTx, changeLockingScript); err != nil {
+	if err := a.Sign(ctx, rejectTx, changeLockingScript, agentBitcoinTransferUnlocker); err != nil {
 		if errors.Cause(err) == txbuilder.ErrInsufficientValue {
-			return nil, platform.NewRejectError(actions.RejectionsInsufficientTxFeeFunding,
-				err.Error())
+			logger.Warn(ctx, "Insufficient tx funding for reject : %s", err)
+			return nil, nil
 		}
 
 		return nil, errors.Wrap(err, "sign")

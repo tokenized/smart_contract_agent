@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tokenized/bitcoin_interpreter"
+	"github.com/tokenized/bitcoin_interpreter/agent_bitcoin_transfer"
 	"github.com/tokenized/logger"
 	"github.com/tokenized/pkg/bitcoin"
 	"github.com/tokenized/pkg/expanded_tx"
@@ -21,6 +23,7 @@ import (
 	"github.com/tokenized/specification/dist/golang/protocol"
 	"github.com/tokenized/threads"
 	"github.com/tokenized/txbuilder"
+	"github.com/tokenized/txbuilder/fees"
 
 	"github.com/pkg/errors"
 )
@@ -2046,10 +2049,11 @@ func Test_Transfers_Multi_Basic(t *testing.T) {
 	StopTestAgent(ctx, t, test)
 }
 
-func Test_Transfers_Bitcoin(t *testing.T) {
+func Test_Transfers_Bitcoin_Refund(t *testing.T) {
 	ctx := logger.ContextWithLogger(context.Background(), true, true, "")
 	test := StartTestData(ctx, t)
 
+	feeRate := 0.05
 	broadcaster := state.NewMockTxBroadcaster()
 
 	contractKey, contractLockingScript, adminKey, adminLockingScript, contract1, instrument := state.MockInstrument(ctx,
@@ -2073,6 +2077,8 @@ func Test_Transfers_Bitcoin(t *testing.T) {
 		t.Fatalf("Failed to create agent : %s", err)
 	}
 
+	fundValue := uint64(1500)
+
 	var receiver1Keys, receiver2Keys []bitcoin.Key
 	var receiver1LockingScripts, receiver2LockingScripts []bitcoin.Script
 	var receiver1Quantities, receiver2Quantities []uint64
@@ -2095,9 +2101,10 @@ func Test_Transfers_Bitcoin(t *testing.T) {
 			},
 		}
 
-		tx := txbuilder.NewTxBuilder(0.05, 0.0)
+		tx := txbuilder.NewTxBuilder(float32(feeRate), 0.0)
 
 		var spentOutputs []*expanded_tx.Output
+		var inputLockingScripts []bitcoin.Script
 
 		// Add admin as sender
 		instrumentQuantity := uint64(mathRand.Intn(1000)) + 1
@@ -2115,6 +2122,7 @@ func Test_Transfers_Bitcoin(t *testing.T) {
 			LockingScript: adminLockingScript,
 			Value:         1,
 		})
+		inputLockingScripts = append(inputLockingScripts, adminLockingScript)
 
 		if err := tx.AddInput(*outpoint1, adminLockingScript, 1); err != nil {
 			t.Fatalf("Failed to add input : %s", err)
@@ -2134,6 +2142,272 @@ func Test_Transfers_Bitcoin(t *testing.T) {
 			LockingScript: bitcoinLockingScript,
 			Value:         bitcoinQuantity + 5,
 		})
+		inputLockingScripts = append(inputLockingScripts, bitcoinLockingScript)
+
+		if err := tx.AddInput(*outpoint2, bitcoinLockingScript, bitcoinQuantity+5); err != nil {
+			t.Fatalf("Failed to add input : %s", err)
+		}
+
+		// Add receivers
+		key, lockingScript, ra := state.MockKey()
+		receiver1Keys = append(receiver1Keys, key)
+		receiver1LockingScripts = append(receiver1LockingScripts, lockingScript)
+
+		instrumentTransfer.InstrumentReceivers = append(instrumentTransfer.InstrumentReceivers,
+			&actions.InstrumentReceiverField{
+				Address:  ra.Bytes(),
+				Quantity: instrumentQuantity,
+			})
+
+		key, lockingScript, ra = state.MockKey()
+		receiver2Keys = append(receiver2Keys, key)
+		receiver2LockingScripts = append(receiver2LockingScripts, lockingScript)
+
+		bitcoinTransfer.InstrumentReceivers = append(bitcoinTransfer.InstrumentReceivers,
+			&actions.InstrumentReceiverField{
+				Address:  ra.Bytes(),
+				Quantity: bitcoinQuantity + 1,
+			})
+
+		agentBitcoinTransferLockingScript, err := agent_bitcoin_transfer.CreateScript(contractLockingScript,
+			lockingScript, bitcoinLockingScript, bitcoinQuantity, bitcoinLockingScript,
+			uint32(time.Now().Unix()+100))
+		if err != nil {
+			t.Fatalf("Failed to create agent bitcoin transfer locking script : %s", err)
+		}
+
+		// Add agent bitcoin transfer output
+		if err := tx.AddOutput(agentBitcoinTransferLockingScript, bitcoinQuantity, false,
+			false); err != nil {
+			t.Fatalf("Failed to add agent bitcoin transfer output : %s", err)
+		}
+
+		// Add contract output
+		instrumentTransfer.ContractIndex = uint32(len(tx.MsgTx.TxOut))
+		if err := tx.AddOutput(contractLockingScript, 240, false,
+			false); err != nil {
+			t.Fatalf("Failed to add contract output : %s", err)
+		}
+
+		// Add action output
+		transferScript, err := protocol.Serialize(transfer, true)
+		if err != nil {
+			t.Fatalf("Failed to serialize transfer action : %s", err)
+		}
+
+		transferScriptOutputIndex := len(tx.Outputs)
+		if err := tx.AddOutput(transferScript, 0, false, false); err != nil {
+			t.Fatalf("Failed to add transfer action output : %s", err)
+		}
+
+		// Add funding
+		fundingKey, fundingLockingScript, _ := state.MockKey()
+		fundingOutpoint := state.MockOutPoint(fundingLockingScript, fundValue)
+		spentOutputs = append(spentOutputs, &expanded_tx.Output{
+			LockingScript: fundingLockingScript,
+			Value:         fundValue,
+		})
+		inputLockingScripts = append(inputLockingScripts, bitcoinLockingScript)
+
+		if err := tx.AddInput(*fundingOutpoint, fundingLockingScript, fundValue); err != nil {
+			t.Fatalf("Failed to add input : %s", err)
+		}
+
+		_, changeLockingScript, _ := state.MockKey()
+		tx.SetChangeLockingScript(changeLockingScript, "")
+
+		estimate, boomerang, err := protocol.EstimatedTransferResponse(tx.MsgTx,
+			inputLockingScripts, float32(feeRate), 0.0,
+			[]uint64{contract1.Formation.ContractFee, 0}, true)
+		if err != nil {
+			t.Fatalf("Failed to estimate response size : %s", err)
+		}
+
+		t.Logf("Response estimate : %v (%d boomerang)", estimate, boomerang)
+
+		tx.MsgTx.TxOut[instrumentTransfer.ContractIndex].Value = estimate[0]
+
+		if _, err := tx.Sign([]bitcoin.Key{adminKey, bitcoinKey, fundingKey}); err != nil {
+			t.Fatalf("Failed to sign tx : %s", err)
+		}
+
+		t.Logf("Created tx : %s", tx.String(bitcoin.MainNet))
+
+		js, _ := json.MarshalIndent(transfer, "", "  ")
+		t.Logf("Transfer : %s", js)
+
+		addTransaction := &transactions.Transaction{
+			Tx:           tx.MsgTx,
+			SpentOutputs: spentOutputs,
+		}
+
+		transaction, err := test.caches.Transactions.Add(ctx, addTransaction)
+		if err != nil {
+			t.Fatalf("Failed to add transaction : %s", err)
+		}
+
+		if err := agent.Process(ctx, transaction, []Action{{
+			OutputIndex: transferScriptOutputIndex,
+			Action:      transfer,
+			Agents: []ActionAgent{
+				{
+					LockingScript: contractLockingScript,
+					IsRequest:     true,
+				},
+			},
+		}}); err != nil {
+			t.Fatalf("Failed to process transfer transaction : %s", err)
+		}
+
+		test.caches.Transactions.Release(ctx, transaction.GetTxID())
+
+		agentResponseTx := broadcaster.GetLastTx()
+		broadcaster.ClearTxs()
+		if agentResponseTx == nil {
+			t.Fatalf("No agent 1 response tx 1")
+		}
+
+		t.Logf("Agent response tx 1 : %s", agentResponseTx)
+
+		var rejection *actions.Rejection
+		for _, txout := range agentResponseTx.Tx.TxOut {
+			action, err := protocol.Deserialize(txout.LockingScript, true)
+			if err != nil {
+				continue
+			}
+
+			if a, ok := action.(*actions.Rejection); ok {
+				rejection = a
+			}
+		}
+
+		if rejection == nil {
+			t.Fatalf("Missing rejection action")
+		}
+
+		rejectData := actions.RejectionsData(rejection.RejectionCode)
+		if rejectData != nil {
+			t.Logf("Rejection Code : %s", rejectData.Label)
+		}
+
+		js, _ = json.MarshalIndent(rejection, "", "  ")
+		t.Logf("Rejection : %s", js)
+
+		if !bitcoinLockingScript.Equal(agentResponseTx.Tx.TxOut[0].LockingScript) {
+			t.Fatalf("Wrong locking script for bitcoin refund output : \n  got  : %s\n  want : %s",
+				agentResponseTx.Tx.TxOut[0].LockingScript, bitcoinLockingScript)
+		}
+
+		if agentResponseTx.Tx.TxOut[0].Value != bitcoinQuantity {
+			t.Fatalf("Wrong value for bitcoin refund output : got  : %d, want : %d",
+				agentResponseTx.Tx.TxOut[0].Value, bitcoinQuantity)
+		}
+
+		if err := bitcoin_interpreter.VerifyTx(ctx, agentResponseTx); err != nil {
+			t.Fatalf("Failed to verify tx : %s", err)
+		}
+	}
+
+	agent.Release(ctx)
+	test.caches.Caches.Instruments.Release(ctx, contractLockingScript, instrument.InstrumentCode)
+	test.caches.Caches.Contracts.Release(ctx, contractLockingScript)
+	StopTestAgent(ctx, t, test)
+}
+
+func Test_Transfers_Bitcoin_Approve(t *testing.T) {
+	ctx := logger.ContextWithLogger(context.Background(), true, true, "")
+	test := StartTestData(ctx, t)
+
+	feeRate := 0.05
+	broadcaster := state.NewMockTxBroadcaster()
+
+	contractKey, contractLockingScript, adminKey, adminLockingScript, contract1, instrument := state.MockInstrument(ctx,
+		&test.caches.TestCaches)
+	_, feeLockingScript, _ := state.MockKey()
+
+	bitcoinKey, bitcoinLockingScript, _ := state.MockKey()
+
+	agentData := AgentData{
+		Key:              contractKey,
+		LockingScript:    contractLockingScript,
+		ContractFee:      contract1.Formation.ContractFee,
+		FeeLockingScript: feeLockingScript,
+		IsActive:         true,
+	}
+
+	agent, err := NewAgent(ctx, agentData, DefaultConfig(), test.caches.Caches,
+		test.caches.Transactions, test.caches.Services, test.locker, test.store, broadcaster, nil,
+		nil, nil, nil, test.peerChannelsFactory, test.peerChannelResponses)
+	if err != nil {
+		t.Fatalf("Failed to create agent : %s", err)
+	}
+
+	fundValue := uint64(1500)
+
+	var receiver1Keys, receiver2Keys []bitcoin.Key
+	var receiver1LockingScripts, receiver2LockingScripts []bitcoin.Script
+	var receiver1Quantities, receiver2Quantities []uint64
+	for i := 0; i < 10; i++ {
+		instrumentTransfer := &actions.InstrumentTransferField{
+			ContractIndex:  0,
+			InstrumentType: string(instrument.InstrumentType[:]),
+			InstrumentCode: instrument.InstrumentCode[:],
+		}
+
+		bitcoinTransfer := &actions.InstrumentTransferField{
+			ContractIndex:  0,
+			InstrumentType: protocol.BSVInstrumentID,
+		}
+
+		transfer := &actions.Transfer{
+			Instruments: []*actions.InstrumentTransferField{
+				instrumentTransfer,
+				bitcoinTransfer,
+			},
+		}
+
+		tx := txbuilder.NewTxBuilder(float32(feeRate), 0.0)
+
+		var spentOutputs []*expanded_tx.Output
+		var inputLockingScripts []bitcoin.Script
+
+		// Add admin as sender
+		instrumentQuantity := uint64(mathRand.Intn(1000)) + 1
+		receiver1Quantities = append(receiver1Quantities, instrumentQuantity)
+
+		instrumentTransfer.InstrumentSenders = append(instrumentTransfer.InstrumentSenders,
+			&actions.QuantityIndexField{
+				Quantity: instrumentQuantity,
+				Index:    uint32(len(tx.MsgTx.TxIn)),
+			})
+
+		// Add input
+		outpoint1 := state.MockOutPoint(adminLockingScript, 1)
+		spentOutputs = append(spentOutputs, &expanded_tx.Output{
+			LockingScript: adminLockingScript,
+			Value:         1,
+		})
+		inputLockingScripts = append(inputLockingScripts, adminLockingScript)
+
+		if err := tx.AddInput(*outpoint1, adminLockingScript, 1); err != nil {
+			t.Fatalf("Failed to add input : %s", err)
+		}
+
+		bitcoinQuantity := uint64(mathRand.Intn(1000)) + 1
+		receiver2Quantities = append(receiver2Quantities, bitcoinQuantity)
+
+		bitcoinTransfer.InstrumentSenders = append(bitcoinTransfer.InstrumentSenders,
+			&actions.QuantityIndexField{
+				Quantity: bitcoinQuantity,
+				Index:    uint32(len(tx.MsgTx.TxIn)),
+			})
+
+		outpoint2 := state.MockOutPoint(bitcoinLockingScript, bitcoinQuantity+5)
+		spentOutputs = append(spentOutputs, &expanded_tx.Output{
+			LockingScript: bitcoinLockingScript,
+			Value:         bitcoinQuantity + 5,
+		})
+		inputLockingScripts = append(inputLockingScripts, bitcoinLockingScript)
 
 		if err := tx.AddInput(*outpoint2, bitcoinLockingScript, bitcoinQuantity+5); err != nil {
 			t.Fatalf("Failed to add input : %s", err)
@@ -2160,8 +2434,22 @@ func Test_Transfers_Bitcoin(t *testing.T) {
 				Quantity: bitcoinQuantity,
 			})
 
-		// Add contract outputs
-		if err := tx.AddOutput(contractLockingScript, 240+bitcoinQuantity, false,
+		agentBitcoinTransferLockingScript, err := agent_bitcoin_transfer.CreateScript(contractLockingScript,
+			lockingScript, bitcoinLockingScript, bitcoinQuantity, bitcoinLockingScript,
+			uint32(time.Now().Unix()+100))
+		if err != nil {
+			t.Fatalf("Failed to create agent bitcoin transfer locking script : %s", err)
+		}
+
+		// Add agent bitcoin transfer output
+		if err := tx.AddOutput(agentBitcoinTransferLockingScript, bitcoinQuantity, false,
+			false); err != nil {
+			t.Fatalf("Failed to add agent bitcoin transfer output : %s", err)
+		}
+
+		// Add contract output
+		instrumentTransfer.ContractIndex = uint32(len(tx.MsgTx.TxOut))
+		if err := tx.AddOutput(contractLockingScript, 240, false,
 			false); err != nil {
 			t.Fatalf("Failed to add contract output : %s", err)
 		}
@@ -2179,18 +2467,31 @@ func Test_Transfers_Bitcoin(t *testing.T) {
 
 		// Add funding
 		fundingKey, fundingLockingScript, _ := state.MockKey()
-		fundingOutpoint := state.MockOutPoint(fundingLockingScript, 1000)
+		fundingOutpoint := state.MockOutPoint(fundingLockingScript, fundValue)
 		spentOutputs = append(spentOutputs, &expanded_tx.Output{
 			LockingScript: fundingLockingScript,
-			Value:         1000,
+			Value:         fundValue,
 		})
+		inputLockingScripts = append(inputLockingScripts, bitcoinLockingScript)
 
-		if err := tx.AddInput(*fundingOutpoint, fundingLockingScript, 1000); err != nil {
+		if err := tx.AddInput(*fundingOutpoint, fundingLockingScript, fundValue); err != nil {
 			t.Fatalf("Failed to add input : %s", err)
 		}
 
 		_, changeLockingScript, _ := state.MockKey()
 		tx.SetChangeLockingScript(changeLockingScript, "")
+
+		estimate, boomerang, err := protocol.EstimatedTransferResponse(tx.MsgTx,
+			inputLockingScripts, float32(feeRate), 0.0,
+			[]uint64{contract1.Formation.ContractFee, 0}, true)
+		if err != nil {
+			t.Fatalf("Failed to estimate response size : %s", err)
+		}
+
+		t.Logf("Response estimate : %v (%d boomerang)", estimate, boomerang)
+
+		responseFeeEstimate := estimate[0] - contract1.Formation.ContractFee
+		tx.MsgTx.TxOut[instrumentTransfer.ContractIndex].Value = estimate[0]
 
 		if _, err := tx.Sign([]bitcoin.Key{adminKey, bitcoinKey, fundingKey}); err != nil {
 			t.Fatalf("Failed to sign tx : %s", err)
@@ -2262,6 +2563,41 @@ func Test_Transfers_Bitcoin(t *testing.T) {
 
 		js, _ = json.MarshalIndent(settlement, "", "  ")
 		t.Logf("Settlement : %s", js)
+
+		responseSize := agentResponseTx.Tx.SerializeSize()
+		responseFee := fees.EstimateFeeValue(responseSize, feeRate)
+
+		t.Logf("Response fee estimate : %d (actual %d)", responseFeeEstimate, responseFee)
+
+		if responseFeeEstimate < responseFee {
+			t.Errorf("Response fee estimate was too low : got %d, want %d", responseFeeEstimate,
+				responseFee)
+		}
+
+		highResponseFeeEstimate := uint64(float64(responseFee) * 0.10)
+		if highResponseFeeEstimate < 10 {
+			highResponseFeeEstimate = responseFee + 10
+		} else {
+			highResponseFeeEstimate += responseFee
+		}
+		if responseFeeEstimate > highResponseFeeEstimate {
+			t.Errorf("Response fee estimate was too high : got %d, want <%d", responseFeeEstimate,
+				highResponseFeeEstimate)
+		}
+
+		if !lockingScript.Equal(agentResponseTx.Tx.TxOut[0].LockingScript) {
+			t.Fatalf("Wrong locking script for bitcoin approve output : \n  got  : %s\n  want : %s",
+				agentResponseTx.Tx.TxOut[0].LockingScript, lockingScript)
+		}
+
+		if agentResponseTx.Tx.TxOut[0].Value != bitcoinQuantity {
+			t.Fatalf("Wrong value for bitcoin approve output : got  : %d, want : %d",
+				agentResponseTx.Tx.TxOut[0].Value, bitcoinQuantity)
+		}
+
+		if err := bitcoin_interpreter.VerifyTx(ctx, agentResponseTx); err != nil {
+			t.Fatalf("Failed to verify tx : %s", err)
+		}
 	}
 
 	agent.Release(ctx)

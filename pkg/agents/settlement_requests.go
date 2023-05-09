@@ -7,6 +7,8 @@ import (
 	"time"
 
 	"github.com/tokenized/bitcoin_interpreter"
+	"github.com/tokenized/bitcoin_interpreter/agent_bitcoin_transfer"
+	"github.com/tokenized/bitcoin_interpreter/p2pkh"
 	"github.com/tokenized/logger"
 	"github.com/tokenized/pkg/bitcoin"
 	"github.com/tokenized/pkg/expanded_tx"
@@ -339,8 +341,12 @@ func (a *Agent) processSettlementRequest(ctx context.Context, transaction *trans
 			return nil, errors.Wrap(err, "set change")
 		}
 
+		p2pkhEstimator := p2pkh.NewUnlockEstimator()
+		bitcoinTransferEstimator := agent_bitcoin_transfer.NewApproveUnlockEstimator(p2pkhEstimator)
+
 		// Sign settlement tx.
-		if err := a.Sign(ctx, settlementTx, a.FeeLockingScript()); err != nil {
+		if err := a.Sign(ctx, settlementTx, a.FeeLockingScript(), p2pkhEstimator,
+			bitcoinTransferEstimator); err != nil {
 			if errors.Cause(err) == txbuilder.ErrInsufficientValue {
 				allBalances.Revert(transferTxID)
 				return nil, platform.NewRejectError(actions.RejectionsInsufficientTxFeeFunding,

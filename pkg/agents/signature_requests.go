@@ -5,6 +5,8 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/tokenized/bitcoin_interpreter/agent_bitcoin_transfer"
+	"github.com/tokenized/bitcoin_interpreter/p2pkh"
 	"github.com/tokenized/logger"
 	"github.com/tokenized/pkg/bitcoin"
 	"github.com/tokenized/pkg/expanded_tx"
@@ -292,8 +294,9 @@ func (a *Agent) processSignatureRequest(ctx context.Context, transaction *transa
 
 	// Verify contract fee
 	contractFee := a.ContractFee()
+	feeLockingScript := a.FeeLockingScript()
 	if contractFee > 0 {
-		if !findBitcoinOutput(settlementTx.MsgTx, a.FeeLockingScript(), contractFee) {
+		if !findBitcoinOutput(settlementTx.MsgTx, feeLockingScript, contractFee) {
 			allBalances.Revert(transferTxID)
 
 			return nil, platform.NewRejectErrorFull(actions.RejectionsMsgMalformed,
@@ -301,12 +304,16 @@ func (a *Agent) processSignatureRequest(ctx context.Context, transaction *transa
 		}
 	}
 
+	p2pkhEstimator := p2pkh.NewUnlockEstimator()
+	bitcoinTransferEstimator := agent_bitcoin_transfer.NewApproveUnlockEstimator(p2pkhEstimator)
+
 	// Sign settlement tx.
-	if _, err := settlementTx.SignOnly([]bitcoin.Key{a.Key()}); err != nil {
+	// Use a nil change locking script because we don't want to modify the tx at all because it is
+	// already signed by some agents.
+	if err := a.Sign(ctx, settlementTx, nil, p2pkhEstimator, bitcoinTransferEstimator); err != nil {
 		allBalances.Revert(transferTxID)
 
 		if errors.Cause(err) == txbuilder.ErrInsufficientValue {
-			logger.Warn(ctx, "Insufficient tx funding : %s", err)
 			return nil, platform.NewRejectErrorFull(actions.RejectionsInsufficientTxFeeFunding,
 				err.Error(), 0, rejectOutputIndex, rejectLockingScript)
 		}

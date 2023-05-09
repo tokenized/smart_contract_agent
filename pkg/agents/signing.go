@@ -30,13 +30,21 @@ func (a *Agent) Sign(ctx context.Context, tx *txbuilder.TxBuilder,
 		p2pkh.NewUnlocker(a.Key()), // Default signer
 	}
 
-	if len(additionalUnlockers) > 0 {
-		// Unlockers for any special inputs like agent bitcoin transfers.
-		unlockers = append(unlockers, additionalUnlockers...)
+	// Unlockers for any special inputs like agent bitcoin transfers.
+	for _, additionalUnlocker := range additionalUnlockers {
+		if additionalUnlocker == nil {
+			continue
+		}
+		unlockers = append(unlockers, additionalUnlocker)
+	}
+
+	sizeEstimate, err := fees.EstimateSize(tx, unlockers)
+	if err != nil {
+		return errors.Wrap(err, "estimate size")
 	}
 
 	config := a.Config()
-	feeEstimate, err := fees.EstimateFee(tx, unlockers, config.FeeRate)
+	feeEstimate := fees.EstimateFeeValue(sizeEstimate, config.FeeRate)
 	if err != nil {
 		return errors.Wrap(err, "estimate fee")
 	}
@@ -48,7 +56,7 @@ func (a *Agent) Sign(ctx context.Context, tx *txbuilder.TxBuilder,
 		return errors.Wrapf(txbuilder.ErrInsufficientValue, description)
 	}
 
-	if fee > int64(feeEstimate) { // There is some change
+	if fee > int64(feeEstimate) && len(changeLockingScript) > 0 { // There is some change
 		change := uint64(fee) - feeEstimate
 		found := false
 
@@ -90,16 +98,17 @@ func (a *Agent) Sign(ctx context.Context, tx *txbuilder.TxBuilder,
 
 	// Some transactions will have inputs from other agents so it is okay if we can't sign all the
 	// inputs. We must always sign at least one input or something went wrong. We still return the
-	// "can't unlock" error so that the caller knows the tx is not fully unlocked.
-	var cantUnlock error
+	// "can't unlock" error so that the caller knows the tx is not fully unlocked.\
 	unlockedCount := 0
 	for inputIndex, txin := range tx.MsgTx.TxIn {
-		unlockingScript, err := unlockers.Unlock(ctx, tx, inputIndex, 0)
+		unlockingScript, err := unlockers.Unlock(ctx, tx, inputIndex)
 		if err != nil {
-			if errors.Cause(err) == bitcoin_interpreter.CantUnlock {
-				cantUnlock = errors.Wrapf(err, "unlock input %d", inputIndex)
+			if errors.Cause(err) == bitcoin_interpreter.CantUnlock ||
+				errors.Cause(err) == bitcoin_interpreter.CantSign ||
+				errors.Cause(err) == bitcoin_interpreter.ScriptNotMatching {
 				continue
 			}
+
 			return errors.Wrapf(err, "unlock input %d", inputIndex)
 		}
 		txin.UnlockingScript = unlockingScript
@@ -110,5 +119,5 @@ func (a *Agent) Sign(ctx context.Context, tx *txbuilder.TxBuilder,
 		return errors.New("Failed to sign transaction")
 	}
 
-	return cantUnlock
+	return nil
 }

@@ -38,13 +38,14 @@ var (
 )
 
 type Config struct {
-	IsTest                  bool            `default:"true" envconfig:"IS_TEST" json:"is_test"`
-	FeeRate                 float64         `default:"0.05" envconfig:"FEE_RATE" json:"fee_rate"`
-	DustFeeRate             float64         `default:"0.0" envconfig:"DUST_FEE_RATE" json:"dust_fee_rate"`
-	MinFeeRate              float64         `default:"0.05" envconfig:"MIN_FEE_RATE" json:"min_fee_rate"`
-	MultiContractExpiration config.Duration `default:"10s" envconfig:"MULTI_CONTRACT_EXPIRATION" json:"multi_contract_expiration"`
-	ChannelTimeout          config.Duration `default:"10s" envconfig:"CHANNEL_TIMEOUT" json:"channel_timeout"`
-	RecoveryMode            bool            `default:"false" envconfig:"RECOVERY_MODE" json:"recovery_mode"`
+	IsTest                             bool            `default:"true" envconfig:"IS_TEST" json:"is_test"`
+	FeeRate                            float64         `default:"0.05" envconfig:"FEE_RATE" json:"fee_rate"`
+	DustFeeRate                        float64         `default:"0.0" envconfig:"DUST_FEE_RATE" json:"dust_fee_rate"`
+	MinFeeRate                         float64         `default:"0.05" envconfig:"MIN_FEE_RATE" json:"min_fee_rate"`
+	MultiContractExpiration            config.Duration `default:"10s" envconfig:"MULTI_CONTRACT_EXPIRATION" json:"multi_contract_expiration"`
+	ChannelTimeout                     config.Duration `default:"10s" envconfig:"CHANNEL_TIMEOUT" json:"channel_timeout"`
+	MinimumAgentBitcoinTransferRecover config.Duration `default:"1h" envconfig:"AGENT_BITCOIN_TRANSFER_RECOVER" json:"agent_bitcoin_transfer_recover"`
+	RecoveryMode                       bool            `default:"false" envconfig:"RECOVERY_MODE" json:"recovery_mode"`
 }
 
 func DefaultConfig() Config {

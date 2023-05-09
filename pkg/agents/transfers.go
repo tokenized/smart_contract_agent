@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"fmt"
+	"time"
 
 	"github.com/tokenized/bitcoin_interpreter"
 	"github.com/tokenized/bitcoin_interpreter/agent_bitcoin_transfer"
@@ -138,29 +139,50 @@ func (a *Agent) processTransfer(ctx context.Context, transaction *transactions.T
 		Timestamp: now,
 	}
 
-	containsBitcoinTransfer := false
+	var additionalUnlockers []bitcoin_interpreter.Unlocker
+	var agentBitcoinTransferUnlocker bitcoin_interpreter.Unlocker
+
+	// Process bitcoin transfers first so the inputs and outputs can line up.
+	for _, instrumentTransfer := range transfer.Instruments {
+		instrumentID, _ := protocol.InstrumentIDForTransfer(instrumentTransfer)
+		instrumentCtx := logger.ContextWithLogFields(ctx,
+			logger.String("instrument_id", instrumentID))
+
+		if instrumentTransfer.InstrumentType != protocol.BSVInstrumentID {
+			continue
+		}
+
+		if agentBitcoinTransferUnlocker == nil {
+			// Create an unlocker for the agent bitcoin transfer script.
+			signer := p2pkh.NewUnlockerFull(a.Key(), true, bitcoin_interpreter.SigHashDefault,
+				-1)
+			agentBitcoinTransferUnlocker = agent_bitcoin_transfer.NewAgentApproveUnlocker(signer)
+			additionalUnlockers = append(additionalUnlockers, agentBitcoinTransferUnlocker)
+		}
+
+		if len(instrumentTransfer.InstrumentCode) != 0 {
+			allBalances.Revert(txid)
+			logger.Warn(instrumentCtx, "Bitcoin instrument with instrument code")
+			return nil, platform.NewRejectErrorWithOutputIndex(actions.RejectionsMsgMalformed,
+				"bitcoin transfer with instrument code",
+				transferContracts.FirstContractOutputIndex)
+		}
+
+		if err := a.buildBitcoinTransfer(instrumentCtx, transaction, settlementTx,
+			instrumentTransfer, agentBitcoinTransferUnlocker,
+			config.MinimumAgentBitcoinTransferRecover.Duration); err != nil {
+			allBalances.Revert(txid)
+			return nil, errors.Wrap(err, "build bitcoin transfer")
+		}
+	}
+
+	// Process instrument transfers.
 	for index, instrumentTransfer := range transfer.Instruments {
 		instrumentID, _ := protocol.InstrumentIDForTransfer(instrumentTransfer)
 		instrumentCtx := logger.ContextWithLogFields(ctx,
 			logger.String("instrument_id", instrumentID))
 
 		if instrumentTransfer.InstrumentType == protocol.BSVInstrumentID {
-			containsBitcoinTransfer = true
-
-			if len(instrumentTransfer.InstrumentCode) != 0 {
-				allBalances.Revert(txid)
-				logger.Warn(instrumentCtx, "Bitcoin instrument with instrument code")
-				return nil, platform.NewRejectErrorWithOutputIndex(actions.RejectionsMsgMalformed,
-					"bitcoin transfer with instrument code",
-					transferContracts.FirstContractOutputIndex)
-			}
-
-			if err := a.buildBitcoinTransfer(instrumentCtx, transaction, settlementTx,
-				instrumentTransfer); err != nil {
-				allBalances.Revert(txid)
-				return nil, errors.Wrap(err, "build bitcoin transfer")
-			}
-
 			continue
 		}
 
@@ -246,14 +268,6 @@ func (a *Agent) processTransfer(ctx context.Context, transaction *transactions.T
 		return etx, nil
 	}
 
-	var additionalUnlockers []bitcoin_interpreter.Unlocker
-	if containsBitcoinTransfer {
-		// Create an unlocker for the agent bitcoin transfer script.
-		signer := p2pkh.NewUnlockerFull(a.Key(), true, bitcoin_interpreter.SigHashDefault, -1)
-		approveUnlocker := agent_bitcoin_transfer.NewAgentApproveUnlocker(signer)
-		additionalUnlockers = append(additionalUnlockers, approveUnlocker)
-	}
-
 	if err := a.Sign(ctx, settlementTx, a.FeeLockingScript(), additionalUnlockers...); err != nil {
 		allBalances.Revert(txid)
 		if errors.Cause(err) == txbuilder.ErrInsufficientValue {
@@ -275,12 +289,17 @@ func (a *Agent) processTransfer(ctx context.Context, transaction *transactions.T
 }
 
 func (a *Agent) buildBitcoinTransfer(ctx context.Context, transferTransaction *transactions.Transaction,
-	settlementTx *txbuilder.TxBuilder, instrumentTransfer *actions.InstrumentTransferField) error {
+	settlementTx *txbuilder.TxBuilder, instrumentTransfer *actions.InstrumentTransferField,
+	unlocker bitcoin_interpreter.Unlocker, minimumRecover time.Duration) error {
 
 	transferTransaction.Lock()
 	defer transferTransaction.Unlock()
 
+	inputCount := transferTransaction.InputCount()
+
+	// Verify quantities balance.
 	quantity := uint64(0)
+
 	var usedInputs []uint32
 	for _, sender := range instrumentTransfer.InstrumentSenders {
 		for _, used := range usedInputs {
@@ -291,12 +310,18 @@ func (a *Agent) buildBitcoinTransfer(ctx context.Context, transferTransaction *t
 		}
 		usedInputs = append(usedInputs, sender.Index)
 
-		output, err := transferTransaction.InputOutput(int(sender.Index))
-		if err != nil {
-			return platform.NewRejectError(actions.RejectionsMsgMalformed, err.Error())
+		if int(sender.Index) >= inputCount {
+			return platform.NewRejectError(actions.RejectionsMsgMalformed,
+				fmt.Sprintf("sender index out of range: %d>=%d", sender.Index, inputCount))
 		}
 
-		if sender.Quantity > output.Value {
+		inputOutput, err := transferTransaction.InputOutput(int(sender.Index))
+		if err != nil {
+			// This means there is an ancestor missing and is not a problem with the request.
+			return errors.Wrapf(err, "input output %d", sender.Index)
+		}
+
+		if sender.Quantity > inputOutput.Value {
 			return platform.NewRejectError(actions.RejectionsInsufficientValue,
 				"sender input value less than quantity")
 		}
@@ -304,28 +329,125 @@ func (a *Agent) buildBitcoinTransfer(ctx context.Context, transferTransaction *t
 		quantity += sender.Quantity
 	}
 
+	var usedAgentBitcoinTransferOutputs []int
 	for i, receiver := range instrumentTransfer.InstrumentReceivers {
-		ra, err := bitcoin.DecodeRawAddress(receiver.Address)
-		if err != nil {
-			return platform.NewRejectError(actions.RejectionsMsgMalformed, err.Error())
-		}
-
-		lockingScript, err := ra.LockingScript()
-		if err != nil {
-			return errors.Wrapf(err, "locking script %d", i)
-		}
-
-		if err := settlementTx.AddOutput(lockingScript, receiver.Quantity, false,
-			false); err != nil {
-			return platform.NewRejectError(actions.RejectionsMsgMalformed, err.Error())
-		}
-
 		if receiver.Quantity > quantity {
 			return platform.NewRejectError(actions.RejectionsInsufficientValue,
 				"send quantity less than receiver")
 		}
 
 		quantity -= receiver.Quantity
+
+		ra, err := bitcoin.DecodeRawAddress(receiver.Address)
+		if err != nil {
+			return platform.NewRejectError(actions.RejectionsMsgMalformed, err.Error())
+		}
+
+		receiverLockingScript, err := ra.LockingScript()
+		if err != nil {
+			return errors.Wrapf(err, "locking script %d", i)
+		}
+
+		// Find agent bitcoin transfer output.
+		agentBitcoinTransferOutputIndex := -1
+		var agentBitcoinTransferLockingScript bitcoin.Script
+		outputCount := transferTransaction.OutputCount()
+		for outputIndex := 0; outputIndex < outputCount; outputIndex++ {
+			usedFound := false
+			for _, used := range usedAgentBitcoinTransferOutputs {
+				if used == outputIndex {
+					usedFound = true
+					break
+				}
+			}
+
+			if usedFound {
+				continue
+			}
+
+			txout := transferTransaction.Output(outputIndex)
+
+			if unlocker.CanUnlock(txout.LockingScript) {
+				// Verify approve and refund hashes.
+				info, err := agent_bitcoin_transfer.MatchScript(txout.LockingScript)
+				if err != nil {
+					return errors.Wrap(err, "match script")
+				}
+
+				if !info.ApproveMatches(receiverLockingScript, receiver.Quantity) {
+					return platform.NewRejectError(actions.RejectionsTxMalformed,
+						fmt.Sprintf("Receiver %d: Agent bitcoin transfer approve outputs hash is incorrect",
+							i))
+				}
+
+				// Find refund script
+				refundFound := false
+				for _, sender := range instrumentTransfer.InstrumentSenders {
+					inputOutput, err := transferTransaction.InputOutput(int(sender.Index))
+					if err != nil {
+						return errors.Wrapf(err, "input output %d", sender.Index)
+					}
+
+					if info.RefundMatches(inputOutput.LockingScript, receiver.Quantity) {
+						refundFound = true
+						break
+					}
+				}
+
+				if !refundFound {
+					return platform.NewRejectError(actions.RejectionsTxMalformed,
+						fmt.Sprintf("Receiver %d: Agent bitcoin transfer refund outputs hash is incorrect",
+							i))
+				}
+
+				minimumRecoverLockTime := uint32(time.Now().Unix()) +
+					uint32(minimumRecover.Seconds())
+				if info.RecoverLockTime < minimumRecoverLockTime {
+					return platform.NewRejectError(actions.RejectionsTxMalformed,
+						fmt.Sprintf("Receiver %d: Agent bitcoin transfer recover lock time is too early",
+							i))
+				}
+
+				if txout.Value != receiver.Quantity {
+					return platform.NewRejectError(actions.RejectionsTxMalformed,
+						fmt.Sprintf("Wrong agent bitcoin transfer quantity (%d should be %d)",
+							txout.Value, receiver.Quantity))
+				}
+
+				agentBitcoinTransferOutputIndex = outputIndex
+				agentBitcoinTransferLockingScript = txout.LockingScript
+				break
+			}
+		}
+
+		if agentBitcoinTransferOutputIndex == -1 {
+			return platform.NewRejectError(actions.RejectionsTxMalformed,
+				fmt.Sprintf("Agent bitcoin transfer output not found for receiver %d", i))
+		}
+
+		if len(settlementTx.MsgTx.TxIn) != len(settlementTx.MsgTx.TxOut) {
+			return fmt.Errorf("Receiver %d: Tx input count %d and output count %d must match for "+
+				"agent bitcoin transfer SIGHASH_SINGLE to work",
+				i, len(settlementTx.MsgTx.TxIn), len(settlementTx.MsgTx.TxOut))
+		}
+
+		outpoint := wire.OutPoint{
+			Hash:  transferTransaction.TxID(),
+			Index: uint32(agentBitcoinTransferOutputIndex),
+		}
+
+		if err := settlementTx.AddInput(outpoint, agentBitcoinTransferLockingScript,
+			receiver.Quantity); err != nil {
+			return errors.Wrap(err, "add agent bitcoin transfer input")
+		}
+
+		if err := settlementTx.AddOutput(receiverLockingScript, receiver.Quantity, false,
+			false); err != nil {
+			return platform.NewRejectError(actions.RejectionsMsgMalformed, err.Error())
+		}
+
+		usedAgentBitcoinTransferOutputs = append(usedAgentBitcoinTransferOutputs,
+			agentBitcoinTransferOutputIndex)
 	}
 
 	if quantity != 0 {
