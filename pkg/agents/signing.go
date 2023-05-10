@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/tokenized/bitcoin_interpreter"
+	"github.com/tokenized/bitcoin_interpreter/check_signature_preimage"
 	"github.com/tokenized/bitcoin_interpreter/p2pkh"
 	"github.com/tokenized/logger"
 	"github.com/tokenized/pkg/bitcoin"
@@ -96,27 +97,48 @@ func (a *Agent) Sign(ctx context.Context, tx *txbuilder.TxBuilder,
 		}
 	}
 
-	// Some transactions will have inputs from other agents so it is okay if we can't sign all the
-	// inputs. We must always sign at least one input or something went wrong. We still return the
-	// "can't unlock" error so that the caller knows the tx is not fully unlocked.\
-	unlockedCount := 0
-	for inputIndex, txin := range tx.MsgTx.TxIn {
-		unlockingScript, err := unlockers.Unlock(ctx, tx, inputIndex)
-		if err != nil {
-			if errors.Cause(err) == bitcoin_interpreter.CantUnlock ||
-				errors.Cause(err) == bitcoin_interpreter.CantSign ||
-				errors.Cause(err) == bitcoin_interpreter.ScriptNotMatching {
-				continue
+	// Loop in case the tx needs malleation.
+	for i := 0; i < 10; i++ {
+		// Some transactions will have inputs from other agents so it is okay if we can't sign all
+		// the inputs. We must always sign at least one input or something went wrong. We still
+		// return the "can't unlock" error so that the caller knows the tx is not fully unlocked.
+		unlockedCount := 0
+		needsMalleation := false
+		for inputIndex, txin := range tx.MsgTx.TxIn {
+			unlockingScript, err := unlockers.Unlock(ctx, tx, inputIndex)
+			if err != nil {
+				if errors.Cause(err) == bitcoin_interpreter.CantUnlock ||
+					errors.Cause(err) == bitcoin_interpreter.CantSign ||
+					errors.Cause(err) == bitcoin_interpreter.ScriptNotMatching {
+					continue
+				}
+
+				if errors.Cause(err) == check_signature_preimage.TxNeedsMalleation {
+					needsMalleation = true
+					break
+				}
+
+				return errors.Wrapf(err, "unlock input %d", inputIndex)
+			}
+			txin.UnlockingScript = unlockingScript
+			unlockedCount++
+		}
+
+		if needsMalleation {
+			// Clear all previous signatures.
+			for _, txin := range tx.MsgTx.TxIn {
+				txin.UnlockingScript = nil
 			}
 
-			return errors.Wrapf(err, "unlock input %d", inputIndex)
+			tx.MsgTx.LockTime++
+			continue
 		}
-		txin.UnlockingScript = unlockingScript
-		unlockedCount++
-	}
 
-	if unlockedCount == 0 {
-		return errors.New("Failed to sign transaction")
+		if unlockedCount == 0 {
+			return errors.New("Failed to sign transaction")
+		}
+
+		break
 	}
 
 	return nil
