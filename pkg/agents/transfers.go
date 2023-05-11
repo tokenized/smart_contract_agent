@@ -388,6 +388,7 @@ func (a *Agent) buildBitcoinTransfer(ctx context.Context, transferTransaction *t
 				// Find refund script
 				refundFound := false
 				recoverLockingScript := info.RecoverLockingScript.Copy()
+				recoverLockingScript.RemoveHardVerify()
 				if info.RefundMatches(recoverLockingScript, receiver.Quantity) {
 					refundFound = true
 				}

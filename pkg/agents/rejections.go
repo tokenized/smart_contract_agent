@@ -341,7 +341,6 @@ func (a *Agent) createRejection(ctx context.Context, transaction *transactions.T
 
 				recoverLockingScript := info.RecoverLockingScript.Copy()
 				recoverLockingScript.RemoveHardVerify()
-				println("recover locking script", recoverLockingScript.String())
 				if info.RefundMatches(recoverLockingScript, output.Value) {
 					refundLockingScript = recoverLockingScript
 				}
@@ -354,7 +353,6 @@ func (a *Agent) createRejection(ctx context.Context, transaction *transactions.T
 							continue
 						}
 
-						println("input script", inputOutput.LockingScript.String())
 						if info.RefundMatches(inputOutput.LockingScript, output.Value) {
 							refundLockingScript = inputOutput.LockingScript
 							break
@@ -365,7 +363,6 @@ func (a *Agent) createRejection(ctx context.Context, transaction *transactions.T
 				if len(refundLockingScript) == 0 {
 					for subOutputIndex := 0; subOutputIndex < outputCount; subOutputIndex++ {
 						subTxout := transaction.Output(subOutputIndex)
-						println("output script", subTxout.LockingScript.String())
 						if info.RefundMatches(subTxout.LockingScript, output.Value) {
 							refundLockingScript = subTxout.LockingScript
 							break
