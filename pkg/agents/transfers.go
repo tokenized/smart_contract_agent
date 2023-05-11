@@ -42,12 +42,19 @@ func (a *Agent) processTransfer(ctx context.Context, transaction *transactions.T
 		return nil, errors.Wrap(err, "parse contracts")
 	}
 
-	if !transferContracts.IsFirstContract() {
-		logger.Info(ctx, "Waiting for settlement request message to process transfer")
-		// TODO Add scheduled task to cancel after multi-contract expiration time by spending the
-		// contract's output and taking the action fee. The reject should be sent to the requesting
-		// parties. --ce
-		return nil, nil // Wait for settlement request message
+	if transferContracts.IsMultiContract() {
+		if !transferContracts.IsFirstContract() {
+			logger.Info(ctx, "Waiting for settlement request message to process transfer")
+			// TODO Add scheduled task to cancel after multi-contract expiration time by spending the
+			// contract's output and taking the action fee. The reject should be sent to the requesting
+			// parties. --ce
+			return nil, nil // Wait for settlement request message
+		}
+
+		if transferContracts.IncludesBitcoin {
+			return nil, platform.NewRejectError(actions.RejectionsContractNotPermitted,
+				"More than one contract and bitcoin not supported")
+		}
 	}
 
 	now := a.Now()
@@ -330,7 +337,7 @@ func (a *Agent) buildBitcoinTransfer(ctx context.Context, transferTransaction *t
 	}
 
 	var usedAgentBitcoinTransferOutputs []int
-	for i, receiver := range instrumentTransfer.InstrumentReceivers {
+	for receiverIndex, receiver := range instrumentTransfer.InstrumentReceivers {
 		if receiver.Quantity > quantity {
 			return platform.NewRejectError(actions.RejectionsInsufficientValue,
 				"send quantity less than receiver")
@@ -345,7 +352,7 @@ func (a *Agent) buildBitcoinTransfer(ctx context.Context, transferTransaction *t
 
 		receiverLockingScript, err := ra.LockingScript()
 		if err != nil {
-			return errors.Wrapf(err, "locking script %d", i)
+			return errors.Wrapf(err, "locking script %d", receiverIndex)
 		}
 
 		// Find agent bitcoin transfer output.
@@ -375,29 +382,46 @@ func (a *Agent) buildBitcoinTransfer(ctx context.Context, transferTransaction *t
 				}
 
 				if !info.ApproveMatches(receiverLockingScript, receiver.Quantity) {
-					return platform.NewRejectError(actions.RejectionsTxMalformed,
-						fmt.Sprintf("Receiver %d: Agent bitcoin transfer approve outputs hash is incorrect",
-							i))
+					continue
 				}
 
 				// Find refund script
 				refundFound := false
-				for _, sender := range instrumentTransfer.InstrumentSenders {
-					inputOutput, err := transferTransaction.InputOutput(int(sender.Index))
-					if err != nil {
-						return errors.Wrapf(err, "input output %d", sender.Index)
-					}
+				recoverLockingScript := info.RecoverLockingScript.Copy()
+				if info.RefundMatches(recoverLockingScript, receiver.Quantity) {
+					refundFound = true
+				}
 
-					if info.RefundMatches(inputOutput.LockingScript, receiver.Quantity) {
-						refundFound = true
-						break
+				if !refundFound {
+					inputCount := transferTransaction.InputCount()
+					for subInputIndex := 0; subInputIndex < inputCount; subInputIndex++ {
+						inputOutput, err := transferTransaction.InputOutput(subInputIndex)
+						if err != nil {
+							return errors.Wrapf(err, "input output %d", subInputIndex)
+						}
+
+						if info.RefundMatches(inputOutput.LockingScript, receiver.Quantity) {
+							refundFound = true
+							break
+						}
+					}
+				}
+
+				if !refundFound {
+					for subOutputIndex := 0; subOutputIndex < outputCount; subOutputIndex++ {
+						subTxout := transferTransaction.Output(subOutputIndex)
+
+						if info.RefundMatches(subTxout.LockingScript, receiver.Quantity) {
+							refundFound = true
+							break
+						}
 					}
 				}
 
 				if !refundFound {
 					return platform.NewRejectError(actions.RejectionsTxMalformed,
 						fmt.Sprintf("Receiver %d: Agent bitcoin transfer refund outputs hash is incorrect",
-							i))
+							receiverIndex))
 				}
 
 				minimumRecoverLockTime := uint32(time.Now().Unix()) +
@@ -405,7 +429,7 @@ func (a *Agent) buildBitcoinTransfer(ctx context.Context, transferTransaction *t
 				if info.RecoverLockTime < minimumRecoverLockTime {
 					return platform.NewRejectError(actions.RejectionsTxMalformed,
 						fmt.Sprintf("Receiver %d: Agent bitcoin transfer recover lock time is too early",
-							i))
+							receiverIndex))
 				}
 
 				if txout.Value != receiver.Quantity {
@@ -422,13 +446,14 @@ func (a *Agent) buildBitcoinTransfer(ctx context.Context, transferTransaction *t
 
 		if agentBitcoinTransferOutputIndex == -1 {
 			return platform.NewRejectError(actions.RejectionsTxMalformed,
-				fmt.Sprintf("Agent bitcoin transfer output not found for receiver %d", i))
+				fmt.Sprintf("Agent bitcoin transfer output not found for receiver %d",
+					receiverIndex))
 		}
 
 		if len(settlementTx.MsgTx.TxIn) != len(settlementTx.MsgTx.TxOut) {
 			return fmt.Errorf("Receiver %d: Tx input count %d and output count %d must match for "+
 				"agent bitcoin transfer SIGHASH_SINGLE to work",
-				i, len(settlementTx.MsgTx.TxIn), len(settlementTx.MsgTx.TxOut))
+				receiverIndex, len(settlementTx.MsgTx.TxIn), len(settlementTx.MsgTx.TxOut))
 		}
 
 		outpoint := wire.OutPoint{
@@ -793,6 +818,9 @@ type TransferContracts struct {
 	// signature requests.
 	BoomerangOutput      *wire.TxOut
 	BoomerangOutputIndex int
+
+	// IncludesBitcoin is true when the transfer involves transferring bitcoin with tokens.
+	IncludesBitcoin bool
 }
 
 // IsPriorContract returns true if the specified locking script is for a contract that is processed
@@ -893,6 +921,7 @@ func parseTransferContracts(transferTransaction *transactions.Transaction, trans
 
 		var instrumentCode []byte
 		if instrumentTransfer.InstrumentType == protocol.BSVInstrumentID {
+			result.IncludesBitcoin = true
 			instrumentCode = nil
 		} else {
 			instrumentCode = instrumentTransfer.InstrumentCode

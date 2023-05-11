@@ -308,7 +308,6 @@ func (a *Agent) createRejection(ctx context.Context, transaction *transactions.T
 	}
 
 	var agentBitcoinTransferUnlocker bitcoin_interpreter.Unlocker
-
 	if transfer, ok := action.(*actions.Transfer); ok {
 		var bitcoinTransfer *actions.InstrumentTransferField
 		for _, inst := range transfer.Instruments {
@@ -325,8 +324,8 @@ func (a *Agent) createRejection(ctx context.Context, transaction *transactions.T
 
 			// Find any agent bitcoin transfer outputs with the contract locking script.
 			outputCount := transaction.OutputCount()
-			for i := 0; i < outputCount; i++ {
-				output := transaction.Output(i)
+			for outputIndex := 0; outputIndex < outputCount; outputIndex++ {
+				output := transaction.Output(outputIndex)
 				if !agentBitcoinTransferUnlocker.CanUnlock(output.LockingScript) {
 					continue
 				}
@@ -338,37 +337,62 @@ func (a *Agent) createRejection(ctx context.Context, transaction *transactions.T
 				}
 
 				// Find refund script
-				refundFound := false
-				for _, sender := range bitcoinTransfer.InstrumentSenders {
-					inputOutput, err := transaction.InputOutput(int(sender.Index))
-					if err != nil {
-						continue
-					}
+				var refundLockingScript bitcoin.Script
 
-					if info.RefundMatches(inputOutput.LockingScript, output.Value) {
-						if err := rejectTx.AddOutput(inputOutput.LockingScript, output.Value, false,
-							false); err == nil {
-							refundFound = true
+				recoverLockingScript := info.RecoverLockingScript.Copy()
+				recoverLockingScript.RemoveHardVerify()
+				println("recover locking script", recoverLockingScript.String())
+				if info.RefundMatches(recoverLockingScript, output.Value) {
+					refundLockingScript = recoverLockingScript
+				}
+
+				if len(refundLockingScript) == 0 {
+					inputCount := transaction.InputCount()
+					for subInputIndex := 0; subInputIndex < inputCount; subInputIndex++ {
+						inputOutput, err := transaction.InputOutput(subInputIndex)
+						if err != nil {
+							continue
+						}
+
+						println("input script", inputOutput.LockingScript.String())
+						if info.RefundMatches(inputOutput.LockingScript, output.Value) {
+							refundLockingScript = inputOutput.LockingScript
 							break
 						}
 					}
 				}
 
-				if !refundFound {
+				if len(refundLockingScript) == 0 {
+					for subOutputIndex := 0; subOutputIndex < outputCount; subOutputIndex++ {
+						subTxout := transaction.Output(subOutputIndex)
+						println("output script", subTxout.LockingScript.String())
+						if info.RefundMatches(subTxout.LockingScript, output.Value) {
+							refundLockingScript = subTxout.LockingScript
+							break
+						}
+					}
+				}
+
+				if len(refundLockingScript) == 0 {
 					logger.WarnWithFields(ctx, []logger.Field{
-						logger.Int("output_index", i),
+						logger.Int("output_index", outputIndex),
 					}, "Refund locking script not found")
 					continue
 				}
 
+				if err := rejectTx.AddOutput(refundLockingScript, output.Value, false,
+					false); err != nil {
+					return nil, errors.Wrap(err, "add agent bitcoin transfer output")
+				}
+
 				outpoint := wire.OutPoint{
 					Hash:  transaction.TxID(),
-					Index: uint32(i),
+					Index: uint32(outputIndex),
 				}
 				if err := rejectTx.AddInput(outpoint, output.LockingScript,
 					output.Value); err != nil {
 					transaction.Unlock()
-					return nil, errors.Wrap(err, "add input")
+					return nil, errors.Wrap(err, "add agent bitcoin transfer input")
 				}
 			}
 		}

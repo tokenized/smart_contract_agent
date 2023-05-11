@@ -2344,8 +2344,8 @@ func Test_Transfers_Bitcoin_Approve(t *testing.T) {
 
 	fundValue := uint64(1500)
 
-	var receiver1Keys, receiver2Keys []bitcoin.Key
-	var receiver1LockingScripts, receiver2LockingScripts []bitcoin.Script
+	var receiver1Keys, receiver21Keys, receiver22Keys []bitcoin.Key
+	var receiver1LockingScripts, receiver21LockingScripts, receiver22LockingScripts []bitcoin.Script
 	var receiver1Quantities, receiver2Quantities []uint64
 	for i := 0; i < 10; i++ {
 		instrumentTransfer := &actions.InstrumentTransferField{
@@ -2393,7 +2393,9 @@ func Test_Transfers_Bitcoin_Approve(t *testing.T) {
 			t.Fatalf("Failed to add input : %s", err)
 		}
 
-		bitcoinQuantity := uint64(mathRand.Intn(1000)) + 1
+		bitcoinQuantity1 := uint64(mathRand.Intn(1000)) + 1
+		bitcoinQuantity2 := uint64(mathRand.Intn(1000)) + 1
+		bitcoinQuantity := bitcoinQuantity1 + bitcoinQuantity2
 		receiver2Quantities = append(receiver2Quantities, bitcoinQuantity)
 
 		bitcoinTransfer.InstrumentSenders = append(bitcoinTransfer.InstrumentSenders,
@@ -2425,24 +2427,49 @@ func Test_Transfers_Bitcoin_Approve(t *testing.T) {
 			})
 
 		key, lockingScript, ra = state.MockKey()
-		receiver2Keys = append(receiver2Keys, key)
-		receiver2LockingScripts = append(receiver2LockingScripts, lockingScript)
+		receiver21Keys = append(receiver21Keys, key)
+		receiver21LockingScripts = append(receiver21LockingScripts, lockingScript)
+		bitcoinReceiver1LockingScript := lockingScript.Copy()
 
 		bitcoinTransfer.InstrumentReceivers = append(bitcoinTransfer.InstrumentReceivers,
 			&actions.InstrumentReceiverField{
 				Address:  ra.Bytes(),
-				Quantity: bitcoinQuantity,
+				Quantity: bitcoinQuantity1,
 			})
 
-		agentBitcoinTransferLockingScript, err := agent_bitcoin_transfer.CreateScript(contractLockingScript,
-			lockingScript, bitcoinLockingScript, bitcoinQuantity, bitcoinLockingScript,
-			uint32(time.Now().Unix()+100))
+		agentBitcoinTransferLockingScript1, err := agent_bitcoin_transfer.CreateScript(contractLockingScript,
+			bitcoinReceiver1LockingScript, bitcoinLockingScript, bitcoinQuantity1,
+			bitcoinLockingScript, uint32(time.Now().Unix()+100))
 		if err != nil {
 			t.Fatalf("Failed to create agent bitcoin transfer locking script : %s", err)
 		}
 
 		// Add agent bitcoin transfer output
-		if err := tx.AddOutput(agentBitcoinTransferLockingScript, bitcoinQuantity, false,
+		if err := tx.AddOutput(agentBitcoinTransferLockingScript1, bitcoinQuantity1, false,
+			false); err != nil {
+			t.Fatalf("Failed to add agent bitcoin transfer output : %s", err)
+		}
+
+		key, lockingScript, ra = state.MockKey()
+		receiver22Keys = append(receiver22Keys, key)
+		receiver22LockingScripts = append(receiver22LockingScripts, lockingScript)
+		bitcoinReceiver2LockingScript := lockingScript.Copy()
+
+		bitcoinTransfer.InstrumentReceivers = append(bitcoinTransfer.InstrumentReceivers,
+			&actions.InstrumentReceiverField{
+				Address:  ra.Bytes(),
+				Quantity: bitcoinQuantity2,
+			})
+
+		agentBitcoinTransferLockingScript2, err := agent_bitcoin_transfer.CreateScript(contractLockingScript,
+			bitcoinReceiver2LockingScript, bitcoinLockingScript, bitcoinQuantity2,
+			bitcoinLockingScript, uint32(time.Now().Unix()+100))
+		if err != nil {
+			t.Fatalf("Failed to create agent bitcoin transfer locking script : %s", err)
+		}
+
+		// Add agent bitcoin transfer output
+		if err := tx.AddOutput(agentBitcoinTransferLockingScript2, bitcoinQuantity2, false,
 			false); err != nil {
 			t.Fatalf("Failed to add agent bitcoin transfer output : %s", err)
 		}
@@ -2585,14 +2612,24 @@ func Test_Transfers_Bitcoin_Approve(t *testing.T) {
 				highResponseFeeEstimate)
 		}
 
-		if !lockingScript.Equal(agentResponseTx.Tx.TxOut[0].LockingScript) {
+		if !bitcoinReceiver1LockingScript.Equal(agentResponseTx.Tx.TxOut[0].LockingScript) {
 			t.Fatalf("Wrong locking script for bitcoin approve output : \n  got  : %s\n  want : %s",
-				agentResponseTx.Tx.TxOut[0].LockingScript, lockingScript)
+				agentResponseTx.Tx.TxOut[0].LockingScript, bitcoinReceiver1LockingScript)
 		}
 
-		if agentResponseTx.Tx.TxOut[0].Value != bitcoinQuantity {
+		if agentResponseTx.Tx.TxOut[0].Value != bitcoinQuantity1 {
 			t.Fatalf("Wrong value for bitcoin approve output : got  : %d, want : %d",
-				agentResponseTx.Tx.TxOut[0].Value, bitcoinQuantity)
+				agentResponseTx.Tx.TxOut[0].Value, bitcoinQuantity1)
+		}
+
+		if !bitcoinReceiver2LockingScript.Equal(agentResponseTx.Tx.TxOut[1].LockingScript) {
+			t.Fatalf("Wrong locking script for bitcoin approve output : \n  got  : %s\n  want : %s",
+				agentResponseTx.Tx.TxOut[1].LockingScript, bitcoinReceiver2LockingScript)
+		}
+
+		if agentResponseTx.Tx.TxOut[1].Value != bitcoinQuantity2 {
+			t.Fatalf("Wrong value for bitcoin approve output : got  : %d, want : %d",
+				agentResponseTx.Tx.TxOut[1].Value, bitcoinQuantity2)
 		}
 
 		if err := bitcoin_interpreter.VerifyTx(ctx, agentResponseTx); err != nil {
