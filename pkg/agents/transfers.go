@@ -374,6 +374,10 @@ func (a *Agent) buildBitcoinTransfer(ctx context.Context, transferTransaction *t
 
 			txout := transferTransaction.Output(outputIndex)
 
+			if txout.Value != receiver.Quantity {
+				continue
+			}
+
 			if unlocker.CanUnlock(txout.LockingScript) {
 				// Verify approve and refund hashes.
 				info, err := agent_bitcoin_transfer.MatchScript(txout.LockingScript)
