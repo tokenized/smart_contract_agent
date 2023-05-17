@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"encoding/hex"
 	mathRand "math/rand"
 	"testing"
 	"time"
@@ -3851,4 +3852,35 @@ func Test_Transfers_Multi_Reject_Second(t *testing.T) {
 	test.caches.Caches.Contracts.Release(ctx, contractLockingScript1)
 	test.caches.Caches.Contracts.Release(ctx, contractLockingScript2)
 	StopTestAgent(ctx, t, test)
+}
+
+func Test_AgentBitcoinTransfer_Script(t *testing.T) {
+	h := "6476a9143de8668a5f8c407fa6da15b8b14955603b4e6ca688ad64768258947f75820120947f7c75206647242e8770e98fb8b5c10d2210d9d299e8672653d80312a03cbe11cac5c33c8867768258947f75820120947f7c75204b20c01aca147225835145323a36124d16452eb688e697ef988960984edad7e3886867006b6376a91436b9b22cfac90cfeaacc35ed9f2ab7d4b8cc98e188ad6c8b6b686376a914bd7ebcc998ba9fd5787ed372f43bb2cf9ff573b888ad6c8b6b686376a9145125c5c5b87083182348daa8f46389a16af4d9dc88ad6c8b6b68526ca169768254947f758254947f7c7504779566648876820128947f758254947f7c7504ffffffff87916968aa517f517f517f517f517f517f517f517f517f517f517f517f517f517f517f517f517f517f517f517f517f517f517f517f517f517f517f517f517f517f517f7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e76009f6301007e6840f608e7b277ed70a30a879f500cdc24ef395fab9966d07615541c27da0222143d1044147c0f5849d63e288e823215a090789e81be96c8a523e8214cfdba62d0079320e4985843644c24f6d3dca51da13ca4303f4de290393918fa3ddfa348f94aeb799521414136d08c5ed2bf3ba048afe6dcaebafeffffffffffffffffffffffffffffff007d977652795296a06394677768012080517f517f517f517f517f517f517f517f517f517f517f517f517f517f517f517f517f517f517f517f517f517f517f517f517f517f517f517f517f517f517f7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e827c7e527c7e220220335fbb3f993be0a0c12b70fbc38cbea95a8c4a259e7412192534d343422cbd7a7c7e827c7e01307c7e01437e2102ba79df5f8ae7604a9830f03c7933028186aede0675a16f025dc4f8be8eec0382abac"
+	b, err := hex.DecodeString(h)
+	if err != nil {
+		t.Fatalf("Script hex : %s", err)
+	}
+	script := bitcoin.Script(b)
+	quantity := uint64(1000)
+
+	t.Logf("Script : %s", script)
+
+	info, err := agent_bitcoin_transfer.MatchScript(script)
+	if err != nil {
+		t.Fatalf("Match : %s", err)
+	}
+
+	js, _ := json.MarshalIndent(info, "", "  ")
+	t.Logf("Info : %s", js)
+
+	t.Logf("Recover locking script : %s", info.RecoverLockingScript)
+
+	recoverLockingScript := info.RecoverLockingScript.Copy()
+	t.Logf("Refund locking script copy : %s", recoverLockingScript)
+	recoverLockingScript.RemoveHardVerify()
+	t.Logf("Refund locking script : %s", recoverLockingScript)
+
+	if !info.RefundMatches(recoverLockingScript, quantity) {
+		t.Errorf("Refund doesn't match")
+	}
 }
