@@ -407,7 +407,7 @@ func (a *Agent) verifyBitcoinSettlement(ctx context.Context, transferTransaction
 			return errors.Wrapf(err, "locking script %d", i)
 		}
 
-		if !findBitcoinOutput(settlementTx.MsgTx, lockingScript, receiver.Quantity) {
+		if !findBitcoinOutputExact(settlementTx.MsgTx, lockingScript, receiver.Quantity) {
 			return platform.NewRejectError(actions.RejectionsMsgMalformed,
 				fmt.Sprintf("missing bitcoin output %d", i))
 		}
