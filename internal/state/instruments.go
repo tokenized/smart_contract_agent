@@ -153,6 +153,8 @@ func (i *Instrument) TransfersPermitted() bool {
 		return pl.TransfersPermitted
 	case *instruments.RewardPoint:
 		return pl.TransfersPermitted
+	case *instruments.CreditNote:
+		return pl.TransfersPermitted
 	}
 
 	return true

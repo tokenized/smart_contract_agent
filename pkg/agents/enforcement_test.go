@@ -21,7 +21,8 @@ func Test_Freeze_Balances_Valid(t *testing.T) {
 	ctx := logger.ContextWithLogger(context.Background(), true, true, "")
 	agent, test := StartTestAgentWithInstrument(ctx, t)
 
-	balances := state.MockBalances(ctx, &test.caches.TestCaches, test.contract, test.instrument, 500)
+	balances := state.MockBalances(ctx, &test.caches.TestCaches, test.contract, test.instrument,
+		500)
 
 	var freezeBalances []*state.MockBalance
 	var freezeQuantities []uint64

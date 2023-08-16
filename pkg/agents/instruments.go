@@ -810,6 +810,11 @@ func applyInstrumentAmendments(instrumentCreation *actions.InstrumentCreation,
 					return platform.NewRejectError(actions.RejectionsInstrumentNotPermitted,
 						"Amendments on MembershipClass prohibited")
 				}
+			case *instruments.CreditNote:
+				if fip[1] == instruments.CreditNoteFieldFaceValue {
+					return platform.NewRejectError(actions.RejectionsInstrumentNotPermitted,
+						"Amendments on FaceValue prohibited")
+				}
 			}
 
 			applied = true // Amendment already applied

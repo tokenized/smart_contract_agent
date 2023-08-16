@@ -119,6 +119,18 @@ func StartTestAgentWithInstrument(ctx context.Context, t testing.TB) (*Agent, *T
 	return test.agent, test
 }
 
+func StartTestAgentWithInstrumentCreditNote(ctx context.Context, t testing.TB) (*Agent, *TestData) {
+	test := prepareTestData(ctx, t)
+
+	test.contractKey, test.contractLockingScript, test.adminKey, test.adminLockingScript, test.contract, test.instrument = state.MockInstrumentCreditNote(ctx,
+		&test.caches.TestCaches)
+	_, test.feeLockingScript, _ = state.MockKey()
+
+	finalizeTestAgent(ctx, t, test)
+
+	return test.agent, test
+}
+
 func StartTestAgentWithInstrumentWithOracle(ctx context.Context, t testing.TB) (*Agent, *TestData) {
 	test := prepareTestData(ctx, t)
 

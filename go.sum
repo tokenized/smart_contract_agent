@@ -111,8 +111,8 @@ github.com/tokenized/metrics v0.1.0/go.mod h1:mL3Vm5rNdp90hZrfY5oVk9b8GpM89YqYGy
 github.com/tokenized/pkg v0.6.0/go.mod h1:reIXdZflcfFbuX1RvX90yAjlYVJaUiYDc5CWJ6qCQww=
 github.com/tokenized/pkg v0.7.1-0.20230518151913-31bef1f54301 h1:x6meCB+cO0ItyljfJd0wgXm5uQzhLj8cAD/8RIRLLPc=
 github.com/tokenized/pkg v0.7.1-0.20230518151913-31bef1f54301/go.mod h1:c1xkP+9ON6kwoMQB9LMpy34YcqUwqNXjPMlltYTYZIc=
-github.com/tokenized/specification v1.3.1 h1:LGRQ9qYA5pR2Z//7Q2TfWzE/Qbwop4K3HzkJ08CzjEg=
-github.com/tokenized/specification v1.3.1/go.mod h1:edRKt2d/KAuQsSGfAY/juRYjf7xS1b2IGfZt89HWrtE=
+github.com/tokenized/specification v1.3.2-0.20230816151309-83f0a96c74d0 h1:iCMh5m7ppLukCP5ylKHm+R524EDaXqrapA+MdMfBgRg=
+github.com/tokenized/specification v1.3.2-0.20230816151309-83f0a96c74d0/go.mod h1:edRKt2d/KAuQsSGfAY/juRYjf7xS1b2IGfZt89HWrtE=
 github.com/tokenized/spynode v0.4.2-0.20230522183007-0a8d8adba851 h1:34Ph6X7UznhehxegRw4w7f4qz8EG9znG3UKHJgwD0pI=
 github.com/tokenized/spynode v0.4.2-0.20230522183007-0a8d8adba851/go.mod h1:Ac9PBhL16TC69dGNAxels7Ql1rZR+tkcPYUlMJnhhhc=
 github.com/tokenized/threads v0.1.2 h1:olWOi2kZ4GLX4XmRbgHJzMbaTxp7CKMdiMbHJjKZaRQ=
