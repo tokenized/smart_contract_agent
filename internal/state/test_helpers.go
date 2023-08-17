@@ -316,7 +316,7 @@ func MockInstrumentCreditNote(ctx context.Context,
 		caches)
 
 	creditNote := &instruments.CreditNote{
-		Name: "USD Note",
+		// Name: "USD Note", // deprecated
 		FaceValue: &instruments.FixedCurrencyValueField{
 			Value:        1,
 			CurrencyCode: instruments.CurrenciesUnitedStatesDollar,

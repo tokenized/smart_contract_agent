@@ -194,7 +194,7 @@ func Test_Instruments_CRN_Definition_BadFaceValue(t *testing.T) {
 	agent, test := StartTestAgentWithContract(ctx, t)
 
 	creditNotePayload := &instruments.CreditNote{
-		Name: "Australian Dollar Note",
+		// Name: "Australian Dollar Note", // deprecated
 		FaceValue: &instruments.FixedCurrencyValueField{
 			Value:        0,
 			CurrencyCode: instruments.CurrenciesAustralianDollar,
