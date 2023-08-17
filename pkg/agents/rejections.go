@@ -6,6 +6,8 @@ import (
 	"github.com/tokenized/bitcoin_interpreter"
 	"github.com/tokenized/bitcoin_interpreter/agent_bitcoin_transfer"
 	"github.com/tokenized/bitcoin_interpreter/p2pkh"
+	"github.com/tokenized/channels"
+	"github.com/tokenized/envelope/pkg/golang/envelope/base"
 	"github.com/tokenized/logger"
 	"github.com/tokenized/pkg/bitcoin"
 	"github.com/tokenized/pkg/expanded_tx"
@@ -570,6 +572,18 @@ func (a *Agent) createRejection(ctx context.Context, transaction *transactions.T
 	if err := a.Sign(ctx, rejectTx, changeLockingScript, agentBitcoinTransferUnlocker); err != nil {
 		if errors.Cause(err) == txbuilder.ErrInsufficientValue {
 			logger.Warn(ctx, "Insufficient tx funding for reject : %s", err)
+
+			response := &channels.Response{
+				Status:         channels.StatusReject,
+				CodeProtocolID: base.ProtocolID(protocol.ProtocolID),
+				Code:           actions.RejectionsInsufficientValue,
+				Note:           err.Error(),
+			}
+
+			if err := a.AddTxIDResponse(ctx, txid, response); err != nil {
+				return nil, errors.Wrap(err, "respond")
+			}
+
 			return nil, nil
 		}
 
