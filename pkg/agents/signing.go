@@ -51,10 +51,45 @@ func (a *Agent) Sign(ctx context.Context, tx *txbuilder.TxBuilder,
 	}
 
 	if fee < int64(feeEstimate) {
-		description := fmt.Sprintf("%d funding < %d needed + %d tx fee", inputsValue,
-			outputsValue, feeEstimate)
-		logger.Warn(ctx, "Insufficient tx funding : %s", description)
-		return errors.Wrapf(txbuilder.ErrInsufficientValue, description)
+		var deficit uint64
+		if fee > 0 {
+			deficit = feeEstimate - uint64(fee)
+		} else {
+			deficit = feeEstimate + uint64(-fee)
+		}
+
+		logger.WarnWithFields(ctx, []logger.Field{
+			logger.Uint64("inputs", inputsValue),
+			logger.Uint64("outputs", outputsValue),
+			logger.Uint64("needed_tx_fee", feeEstimate),
+			logger.Int64("current_tx_fee", fee),
+			logger.Uint64("deficit", deficit),
+		}, "Insufficient tx funding")
+
+		// Change fee locking script output.
+		feeLockingScript := a.FeeLockingScript()
+		for _, txout := range tx.MsgTx.TxOut {
+			if !txout.LockingScript.Equal(feeLockingScript) {
+				continue
+			}
+
+			dust := fees.DustLimitForLockingScript(feeLockingScript, config.DustFeeRate)
+			if txout.Value > dust && txout.Value-dust > deficit {
+				logger.WarnWithFields(ctx, []logger.Field{
+					logger.Uint64("deficit", deficit),
+					logger.Uint64("previous_value", txout.Value),
+					logger.Uint64("new_value", txout.Value-deficit),
+				}, "Reducing contract fee to fund rejection")
+				txout.Value -= deficit
+				fee += int64(txout.Value)
+			}
+		}
+
+		if fee < int64(feeEstimate) {
+			description := fmt.Sprintf("%d funding < %d (+%d tx fee) needed", inputsValue,
+				outputsValue, feeEstimate)
+			return errors.Wrapf(txbuilder.ErrInsufficientValue, description)
+		}
 	}
 
 	if fee > int64(feeEstimate) && len(changeLockingScript) > 0 { // There is some change

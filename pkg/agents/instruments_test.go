@@ -328,6 +328,145 @@ func Test_Instruments_CRN_Definition_BadFaceValue(t *testing.T) {
 	StopTestAgent(ctx, t, test)
 }
 
+func Test_Instruments_CRN_Definition_Reject_LowFee(t *testing.T) {
+	ctx := logger.ContextWithLogger(context.Background(), true, true, "")
+	agent, test := StartTestAgentWithContract(ctx, t)
+
+	creditNotePayload := &instruments.CreditNote{
+		// Name: "Australian Dollar Note", // deprecated
+		FaceValue: &instruments.FixedCurrencyValueField{
+			Value:        0,
+			CurrencyCode: instruments.CurrenciesAustralianDollar,
+		},
+	}
+
+	creditNoteBuf := &bytes.Buffer{}
+	if err := creditNotePayload.Serialize(creditNoteBuf); err != nil {
+		panic(fmt.Sprintf("Failed to serialize instrument payload : %s", err))
+	}
+
+	definition := &actions.InstrumentDefinition{
+		// InstrumentPermissions            []byte
+		// EnforcementOrdersPermitted       bool
+		// VotingRights                     bool
+		// VoteMultiplier                   uint32
+		// AdministrationProposal           bool
+		// HolderProposal                   bool
+		// InstrumentModificationGovernance uint32
+		AuthorizedTokenQty: uint64(mathRand.Intn(100000)),
+		InstrumentType:     instruments.CodeCreditNote,
+		InstrumentPayload:  creditNoteBuf.Bytes(),
+		TradeRestrictions:  []string{actions.PolitiesAustralia},
+	}
+
+	tx := txbuilder.NewTxBuilder(0.05, 0.0)
+
+	// Add input
+	outpoint := state.MockOutPoint(test.adminLockingScript, 1)
+	spentOutputs := []*expanded_tx.Output{
+		{
+			LockingScript: test.adminLockingScript,
+			Value:         1,
+		},
+	}
+
+	if err := tx.AddInput(*outpoint, test.adminLockingScript, 1); err != nil {
+		t.Fatalf("Failed to add input : %s", err)
+	}
+
+	// Add contract output
+	if err := tx.AddOutput(test.contractLockingScript, 110, false, false); err != nil {
+		t.Fatalf("Failed to add contract output : %s", err)
+	}
+
+	// Add action output
+	definitionScript, err := protocol.Serialize(definition, true)
+	if err != nil {
+		t.Fatalf("Failed to serialize instrument definition action : %s", err)
+	}
+
+	definitionScriptOutputIndex := len(tx.Outputs)
+	if err := tx.AddOutput(definitionScript, 0, false, false); err != nil {
+		t.Fatalf("Failed to add instrument definition action output : %s", err)
+	}
+
+	// Add funding
+	fundingKey, fundingLockingScript, _ := state.MockKey()
+	fundingOutpoint := state.MockOutPoint(fundingLockingScript, 300)
+	spentOutputs = append(spentOutputs, &expanded_tx.Output{
+		LockingScript: fundingLockingScript,
+		Value:         300,
+	})
+
+	if err := tx.AddInput(*fundingOutpoint, fundingLockingScript, 300); err != nil {
+		t.Fatalf("Failed to add input : %s", err)
+	}
+
+	_, changeLockingScript, _ := state.MockKey()
+	tx.SetChangeLockingScript(changeLockingScript, "")
+
+	if _, err := tx.Sign([]bitcoin.Key{test.adminKey, fundingKey}); err != nil {
+		t.Fatalf("Failed to sign tx : %s", err)
+	}
+
+	t.Logf("Created tx : %s", tx.String(bitcoin.MainNet))
+
+	addTransaction := &transactions.Transaction{
+		Tx:           tx.MsgTx,
+		SpentOutputs: spentOutputs,
+	}
+
+	transaction, err := test.caches.Transactions.Add(ctx, addTransaction)
+	if err != nil {
+		t.Fatalf("Failed to add transaction : %s", err)
+	}
+
+	if err := agent.Process(ctx, transaction, []Action{{
+		OutputIndex: definitionScriptOutputIndex,
+		Action:      definition,
+		Agents: []ActionAgent{
+			{
+				LockingScript: test.contractLockingScript,
+				IsRequest:     true,
+			},
+		},
+	}}); err != nil {
+		t.Fatalf("Failed to process transaction : %s", err)
+	}
+
+	test.caches.Transactions.Release(ctx, transaction.GetTxID())
+
+	responseTx := test.broadcaster.GetLastTx()
+	if responseTx == nil {
+		t.Fatalf("No response tx")
+	}
+
+	t.Logf("Response Tx : %s", responseTx)
+
+	// Find rejection action
+	var rejection *actions.Rejection
+	for _, txout := range responseTx.Tx.TxOut {
+		action, err := protocol.Deserialize(txout.LockingScript, true)
+		if err != nil {
+			continue
+		}
+
+		if a, ok := action.(*actions.Rejection); ok {
+			rejection = a
+			break
+		}
+	}
+
+	if rejection == nil {
+		t.Fatalf("Missing rejection action")
+	}
+
+	js, _ := json.MarshalIndent(rejection, "", "  ")
+	t.Logf("Rejection : %s", js)
+
+	StopTestAgent(ctx, t, test)
+}
+
 func Test_Instruments_Amendment_Basic(t *testing.T) {
 	ctx := logger.ContextWithLogger(context.Background(), true, true, "")
 	agent, test := StartTestAgentWithInstrument(ctx, t)
