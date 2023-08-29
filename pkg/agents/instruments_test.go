@@ -375,7 +375,7 @@ func Test_Instruments_CRN_Definition_Reject_LowFee(t *testing.T) {
 	}
 
 	// Add contract output
-	if err := tx.AddOutput(test.contractLockingScript, 110, false, false); err != nil {
+	if err := tx.AddOutput(test.contractLockingScript, 117, false, false); err != nil {
 		t.Fatalf("Failed to add contract output : %s", err)
 	}
 

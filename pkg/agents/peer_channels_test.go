@@ -488,7 +488,7 @@ func Test_Responder_Request_Reject_InsufficientValue(t *testing.T) {
 		})
 
 	// Add contract output
-	if err := tx.AddOutput(test.contractLockingScript, 20, false, false); err != nil {
+	if err := tx.AddOutput(test.contractLockingScript, 10, false, false); err != nil {
 		t.Fatalf("Failed to add contract output : %s", err)
 	}
 
@@ -504,14 +504,15 @@ func Test_Responder_Request_Reject_InsufficientValue(t *testing.T) {
 	}
 
 	// Add funding
+	fundingValue := uint64(300)
 	fundingKey, fundingLockingScript, _ := state.MockKey()
-	fundingTx, fundingOutpoint := state.MockOutPointTx(fundingLockingScript, 300)
+	fundingTx, fundingOutpoint := state.MockOutPointTx(fundingLockingScript, fundingValue)
 	spentOutputs = append(spentOutputs, &expanded_tx.Output{
 		LockingScript: fundingLockingScript,
-		Value:         300,
+		Value:         fundingValue,
 	})
 
-	if err := tx.AddInput(*fundingOutpoint, fundingLockingScript, 300); err != nil {
+	if err := tx.AddInput(*fundingOutpoint, fundingLockingScript, fundingValue); err != nil {
 		t.Fatalf("Failed to add input : %s", err)
 	}
 

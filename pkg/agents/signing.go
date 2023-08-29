@@ -9,6 +9,8 @@ import (
 	"github.com/tokenized/bitcoin_interpreter/p2pkh"
 	"github.com/tokenized/logger"
 	"github.com/tokenized/pkg/bitcoin"
+	"github.com/tokenized/specification/dist/golang/actions"
+	"github.com/tokenized/specification/dist/golang/protocol"
 	"github.com/tokenized/txbuilder"
 	"github.com/tokenized/txbuilder/fees"
 
@@ -66,22 +68,41 @@ func (a *Agent) Sign(ctx context.Context, tx *txbuilder.TxBuilder,
 			logger.Uint64("deficit", deficit),
 		}, "Insufficient tx funding")
 
-		// Change fee locking script output.
-		feeLockingScript := a.FeeLockingScript()
-		for _, txout := range tx.MsgTx.TxOut {
-			if !txout.LockingScript.Equal(feeLockingScript) {
-				continue
+		if isReject(tx, config.IsTest) {
+			// Change fee locking script output.
+			feeLockingScript := a.FeeLockingScript()
+			for _, txout := range tx.MsgTx.TxOut {
+				if !txout.LockingScript.Equal(feeLockingScript) {
+					continue
+				}
+
+				dust := fees.DustLimitForLockingScript(feeLockingScript, config.DustFeeRate)
+				if txout.Value > dust && txout.Value-dust > deficit {
+					logger.WarnWithFields(ctx, []logger.Field{
+						logger.Uint64("deficit", deficit),
+						logger.Uint64("previous_value", txout.Value),
+						logger.Uint64("new_value", txout.Value-deficit),
+					}, "Reducing contract fee to fund rejection")
+					txout.Value -= deficit
+					fee += int64(deficit)
+				}
 			}
 
-			dust := fees.DustLimitForLockingScript(feeLockingScript, config.DustFeeRate)
-			if txout.Value > dust && txout.Value-dust > deficit {
-				logger.WarnWithFields(ctx, []logger.Field{
-					logger.Uint64("deficit", deficit),
-					logger.Uint64("previous_value", txout.Value),
-					logger.Uint64("new_value", txout.Value-deficit),
-				}, "Reducing contract fee to fund rejection")
-				txout.Value -= deficit
-				fee += int64(txout.Value)
+			if fee < int64(feeEstimate) {
+				// Remove rejection message. This should probably only happen with zero contract fee
+				// since otherwise the tx fee would have already been taken from the fee output.
+				if removeRejectionMessage(ctx, tx, config.IsTest) {
+					// Recalculate fee estimate based on smaller transaction size.
+					sizeEstimate, err = fees.EstimateSize(tx, unlockers)
+					if err != nil {
+						return errors.Wrap(err, "estimate size")
+					}
+
+					feeEstimate = fees.EstimateFeeValue(sizeEstimate, config.FeeRate)
+					if err != nil {
+						return errors.Wrap(err, "estimate fee")
+					}
+				}
 			}
 		}
 
@@ -177,4 +198,49 @@ func (a *Agent) Sign(ctx context.Context, tx *txbuilder.TxBuilder,
 	}
 
 	return nil
+}
+
+func isReject(tx *txbuilder.TxBuilder, isTest bool) bool {
+	for _, txout := range tx.MsgTx.TxOut {
+		act, err := protocol.Deserialize(txout.LockingScript, isTest)
+		if err != nil {
+			continue
+		}
+
+		if _, ok := act.(*actions.Rejection); ok {
+			return true
+		}
+	}
+
+	return false
+}
+
+func removeRejectionMessage(ctx context.Context, tx *txbuilder.TxBuilder, isTest bool) bool {
+	println("removing rejection message")
+	for _, txout := range tx.MsgTx.TxOut {
+		act, err := protocol.Deserialize(txout.LockingScript, isTest)
+		if err != nil {
+			continue
+		}
+
+		rejection, ok := act.(*actions.Rejection)
+		if !ok {
+			continue
+		}
+
+		logger.WarnWithFields(ctx, []logger.Field{
+			logger.String("message", rejection.Message),
+		}, "Removing rejection message to fix funding")
+		rejection.Message = ""
+
+		script, err := protocol.Serialize(rejection, isTest)
+		if err != nil {
+			return false
+		}
+
+		txout.LockingScript = script
+		return true
+	}
+
+	return false
 }
