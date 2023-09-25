@@ -115,7 +115,8 @@ func (a *Agent) processSettlementRequest(ctx context.Context, transaction *trans
 		return nil, platform.NewRejectError(actions.RejectionsSignatureNotSigHashAll, "")
 	}
 
-	if err := a.CheckContractIsAvailable(now); err != nil {
+	contractFee, err := a.CheckContractIsAvailable(now)
+	if err != nil {
 		return nil, platform.NewDefaultRejectError(err)
 	}
 
@@ -303,12 +304,12 @@ func (a *Agent) processSettlementRequest(ctx context.Context, transaction *trans
 			}
 		}
 
-		for _, contractFee := range settlementRequest.ContractFees {
-			if contractFee.Quantity == 0 {
+		for _, instrumentContractFee := range settlementRequest.ContractFees {
+			if instrumentContractFee.Quantity == 0 {
 				continue
 			}
 
-			ra, err := bitcoin.DecodeRawAddress(contractFee.Address)
+			ra, err := bitcoin.DecodeRawAddress(instrumentContractFee.Address)
 			if err != nil {
 				logger.Warn(ctx, "Invalid contract fee address : %s", err)
 				allBalances.Revert(transferTxID)
@@ -322,7 +323,7 @@ func (a *Agent) processSettlementRequest(ctx context.Context, transaction *trans
 				return nil, platform.NewRejectError(actions.RejectionsMsgMalformed, err.Error())
 			}
 
-			if err := settlementTx.AddOutput(lockingScript, contractFee.Quantity, false,
+			if err := settlementTx.AddOutput(lockingScript, instrumentContractFee.Quantity, false,
 				false); err != nil {
 				allBalances.Revert(transferTxID)
 				return nil, errors.Wrap(err, "add contract fee")
@@ -330,8 +331,8 @@ func (a *Agent) processSettlementRequest(ctx context.Context, transaction *trans
 		}
 
 		// Add the contract fee for this agent.
-		if a.ContractFee() > 0 {
-			if err := settlementTx.AddOutput(a.FeeLockingScript(), a.ContractFee(), true,
+		if contractFee > 0 {
+			if err := settlementTx.AddOutput(a.FeeLockingScript(), contractFee, true,
 				false); err != nil {
 				allBalances.Revert(transferTxID)
 				return nil, errors.Wrap(err, "add contract fee")

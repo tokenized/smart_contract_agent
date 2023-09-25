@@ -15,37 +15,65 @@ import (
 )
 
 type MockClient struct {
-	operatorKey bitcoin.Key
-	contractFee uint64
-	agentKeys   []bitcoin.Key
+	operatorKey        bitcoin.Key
+	minimumContractFee uint64
+	agentKeys          []bitcoin.Key
+	agents             []*MockAgent
 }
 
-func NewMockClient(operatorKey bitcoin.Key, contractFee uint64) (*MockClient, error) {
+type MockAgent struct {
+	AdminLockingScript  bitcoin.Script `json:"admin_locking_script"`
+	LockingScript       bitcoin.Script `json:"locking_script"`
+	MinimumContractFee  uint64         `json:"minimum_contract_fee"`
+	FeeLockingScript    bitcoin.Script `json:"fee_locking_script"`
+	MasterLockingScript bitcoin.Script `json:"master_locking_script"`
+}
+
+func NewMockClient(operatorKey bitcoin.Key, minimumContractFee uint64) (*MockClient, error) {
 	return &MockClient{
-		operatorKey: operatorKey,
-		contractFee: contractFee,
+		operatorKey:        operatorKey,
+		minimumContractFee: minimumContractFee,
 	}, nil
 }
 
 // RequestNewAgent requests a new smart contract agent be created.
 func (c *MockClient) RequestNewAgent(ctx context.Context,
-	adminLockingScript bitcoin.Script) (*contract_operator.Agent, error) {
+	adminLockingScript, feeLockingScript, masterLockingScript bitcoin.Script,
+	minimumContractFee uint64) (*contract_operator.Agent, error) {
 
 	key, _ := bitcoin.GenerateKey(bitcoin.MainNet)
 	lockingScript, _ := key.LockingScript()
 	c.agentKeys = append(c.agentKeys, key)
 
-	masterKey, _ := bitcoin.GenerateKey(bitcoin.MainNet)
-	masterLockingScript, _ := masterKey.LockingScript()
+	if len(masterLockingScript) == 0 {
+		masterKey, _ := bitcoin.GenerateKey(bitcoin.MainNet)
+		masterLockingScript, _ = masterKey.LockingScript()
+	}
+
+	if minimumContractFee < c.minimumContractFee {
+		return nil, errors.New("Minimum contract fee too low")
+	}
+
+	c.agents = append(c.agents, &MockAgent{
+		AdminLockingScript:  adminLockingScript,
+		LockingScript:       lockingScript,
+		MinimumContractFee:  minimumContractFee,
+		FeeLockingScript:    feeLockingScript,
+		MasterLockingScript: masterLockingScript,
+	})
 
 	result := &contract_operator.Agent{
 		LockingScript:       lockingScript,
-		ContractFee:         c.contractFee,
+		MinimumContractFee:  minimumContractFee,
 		MasterLockingScript: masterLockingScript,
 		PeerChannel:         nil,
 	}
 
 	return result, nil
+}
+
+func (c *MockClient) GetAgents() []*MockAgent {
+	return c.agents
 }
 
 func (c *MockClient) SignContractOffer(ctx context.Context,

@@ -22,22 +22,22 @@ import (
 type MockOperator struct {
 	operatorKey bitcoin.Key
 
-	clientPublicKey bitcoin.PublicKey
-	channelID       string
-	contractFee     uint64
-	agentKeys       []bitcoin.Key
+	clientPublicKey    bitcoin.PublicKey
+	channelID          string
+	minimumContractFee uint64
+	agentKeys          []bitcoin.Key
 
 	peerChannelFactory *peer_channels.Factory
 }
 
 func NewMockOperator(peerChannelFactory *peer_channels.Factory, operatorKey bitcoin.Key,
-	clientPublicKey bitcoin.PublicKey, channelID string, contractFee uint64) *MockOperator {
+	clientPublicKey bitcoin.PublicKey, channelID string, minimumContractFee uint64) *MockOperator {
 
 	return &MockOperator{
 		operatorKey:        operatorKey,
 		clientPublicKey:    clientPublicKey,
 		channelID:          channelID,
-		contractFee:        contractFee,
+		minimumContractFee: minimumContractFee,
 		peerChannelFactory: peerChannelFactory,
 	}
 }
@@ -129,12 +129,15 @@ func (o *MockOperator) createAgent(ctx context.Context, replyTo *channels.ReplyT
 	lockingScript, _ := key.LockingScript()
 	o.agentKeys = append(o.agentKeys, key)
 
-	masterKey, _ := bitcoin.GenerateKey(bitcoin.MainNet)
-	masterLockingScript, _ := masterKey.LockingScript()
+	masterLockingScript := request.MasterLockingScript
+	if len(masterLockingScript) == 0 {
+		masterKey, _ := bitcoin.GenerateKey(bitcoin.MainNet)
+		masterLockingScript, _ = masterKey.LockingScript()
+	}
 
 	agent := &contract_operator.Agent{
 		LockingScript:       lockingScript,
-		ContractFee:         o.contractFee,
+		MinimumContractFee:  o.minimumContractFee,
 		MasterLockingScript: masterLockingScript,
 		PeerChannel:         nil,
 	}

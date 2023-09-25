@@ -139,10 +139,10 @@ func (a *Agent) processContractOffer(ctx context.Context, transaction *transacti
 		}
 	}
 
-	contractFee := a.ContractFee()
-	if offer.ContractFee != contractFee {
+	minimumContractFee := a.MinimumContractFee()
+	if offer.ContractFee < minimumContractFee {
 		return nil, platform.NewRejectError(actions.RejectionsContractNotPermitted,
-			fmt.Sprintf("ContractFee: must be %d, got %d", contractFee, offer.ContractFee))
+			fmt.Sprintf("ContractFee: %d < %d", offer.ContractFee, minimumContractFee))
 	}
 
 	if _, err := permissions.PermissionsFromBytes(offer.ContractPermissions,
@@ -218,8 +218,8 @@ func (a *Agent) processContractOffer(ctx context.Context, transaction *transacti
 	}
 
 	// Add the contract fee.
-	if contractFee > 0 {
-		if err := formationTx.AddOutput(a.FeeLockingScript(), contractFee, true,
+	if offer.ContractFee > 0 {
+		if err := formationTx.AddOutput(a.FeeLockingScript(), offer.ContractFee, true,
 			false); err != nil {
 			return nil, errors.Wrap(err, "add contract fee")
 		}
@@ -614,10 +614,10 @@ func (a *Agent) processContractAmendment(ctx context.Context, transaction *trans
 		}
 	}
 
-	contractFee := a.ContractFee()
-	if formation.ContractFee != contractFee {
+	minimumContractFee := a.MinimumContractFee()
+	if formation.ContractFee < minimumContractFee {
 		return nil, platform.NewRejectError(actions.RejectionsContractNotPermitted,
-			fmt.Sprintf("ContractFee: must be %d, got %d", contractFee, formation.ContractFee))
+			fmt.Sprintf("ContractFee: %d < %d", formation.ContractFee, minimumContractFee))
 	}
 
 	// Check admin identity oracle signatures
@@ -665,8 +665,8 @@ func (a *Agent) processContractAmendment(ctx context.Context, transaction *trans
 	}
 
 	// Add the contract fee.
-	if contractFee > 0 {
-		if err := formationTx.AddOutput(a.FeeLockingScript(), contractFee, true,
+	if formation.ContractFee > 0 {
+		if err := formationTx.AddOutput(a.FeeLockingScript(), formation.ContractFee, true,
 			false); err != nil {
 			return nil, errors.Wrap(err, "add contract fee")
 		}

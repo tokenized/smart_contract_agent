@@ -17,8 +17,11 @@ var (
 // Client is the interface for interacting with an contract operator service.
 type Client interface {
 	// RequestNewAgent requests a new smart contract agent be created.
+	// feeLockingScript and masterLockingScript can be left empty and will be provided by the
+	// contract operator.
 	RequestNewAgent(ctx context.Context,
-		adminLockingScript bitcoin.Script) (*contract_operator.Agent, error)
+		adminLockingScript, feeLockingScript, masterLockingScript bitcoin.Script,
+		minimumContractFee uint64) (*contract_operator.Agent, error)
 
 	// SignContractOffer adds a signed input and an output to a contract offer transaction.
 	// The input will be added as the second input so it is the contract's "operator" input.

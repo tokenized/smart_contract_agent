@@ -39,8 +39,8 @@ func (a *Agent) processProposal(ctx context.Context, transaction *transactions.T
 	transaction.Unlock()
 
 	now := a.Now()
-
-	if err := a.CheckContractIsAvailable(now); err != nil {
+	contractFee, err := a.CheckContractIsAvailable(now)
+	if err != nil {
 		return nil, platform.NewDefaultRejectError(err)
 	}
 
@@ -79,8 +79,6 @@ func (a *Agent) processProposal(ctx context.Context, transaction *transactions.T
 
 	contract := a.Contract()
 	contract.Lock()
-
-	contractFee := contract.Formation.ContractFee
 
 	adminAddress, err := bitcoin.DecodeRawAddress(contract.Formation.AdminAddress)
 	if err != nil {
@@ -613,8 +611,8 @@ func (a *Agent) processBallotCast(ctx context.Context, transaction *transactions
 	ctx = logger.ContextWithLogFields(ctx, logger.Stringer("ballot_locking_script", lockingScript))
 
 	now := a.Now()
-
-	if err := a.CheckContractIsAvailable(now); err != nil {
+	contractFee, err := a.CheckContractIsAvailable(now)
+	if err != nil {
 		return nil, platform.NewDefaultRejectError(err)
 	}
 
@@ -722,10 +720,6 @@ func (a *Agent) processBallotCast(ctx context.Context, transaction *transactions
 	}
 
 	// Add the contract fee and holder proposal fee.
-	contract := a.Contract()
-	contract.Lock()
-	contractFee := contract.Formation.ContractFee
-	contract.Unlock()
 	if contractFee > 0 {
 		if err := ballotCountedTx.AddOutput(a.FeeLockingScript(), contractFee, true,
 			false); err != nil {

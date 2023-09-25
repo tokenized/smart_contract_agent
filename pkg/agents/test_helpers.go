@@ -208,11 +208,11 @@ func prepareTestData(ctx context.Context, t testing.TB) *TestData {
 
 func finalizeTestAgent(ctx context.Context, t testing.TB, test *TestData) {
 	test.agentData = AgentData{
-		Key:              test.contractKey,
-		LockingScript:    test.contractLockingScript,
-		FeeLockingScript: test.feeLockingScript,
-		ContractFee:      100,
-		IsActive:         true,
+		Key:                test.contractKey,
+		LockingScript:      test.contractLockingScript,
+		FeeLockingScript:   test.feeLockingScript,
+		MinimumContractFee: 100,
+		IsActive:           true,
 	}
 
 	var err error

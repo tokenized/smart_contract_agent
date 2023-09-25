@@ -64,8 +64,8 @@ type AgentData struct {
 	Key           bitcoin.Key    `bsor:"1" envconfig:"KEY" json:"key" masked:"true"`
 	LockingScript bitcoin.Script `bsor:"2" envconfig:"LOCKING_SCRIPT" json:"locking_script"`
 
-	ContractFee      uint64         `bsor:"3" envconfig:"CONTRACT_FEE" json:"contract_fee"`
-	FeeLockingScript bitcoin.Script `bsor:"4" envconfig:"FEE_LOCKING_SCRIPT" json:"fee_locking_script"`
+	MinimumContractFee uint64         `bsor:"3" envconfig:"MINIMUM_CONTRACT_FEE" json:"minimum_contract_fee"`
+	FeeLockingScript   bitcoin.Script `bsor:"4" envconfig:"FEE_LOCKING_SCRIPT" json:"fee_locking_script"`
 
 	RequestPeerChannel *peer_channels.Channel `bsor:"5" envconfig:"REQUEST_PEER_CHANNEL" json:"request_peer_channel" masked:"true"`
 
@@ -210,11 +210,11 @@ func (a *Agent) ContractHash() state.ContractHash {
 	return state.CalculateContractHash(a.LockingScript())
 }
 
-func (a *Agent) ContractFee() uint64 {
+func (a *Agent) MinimumContractFee() uint64 {
 	a.dataLock.Lock()
 	defer a.dataLock.Unlock()
 
-	return a.data.ContractFee
+	return a.data.MinimumContractFee
 }
 
 func (a *Agent) FeeLockingScript() bitcoin.Script {
@@ -292,11 +292,26 @@ func (a *Agent) Contract() *state.Contract {
 	return a.contract
 }
 
-func (a *Agent) CheckContractIsAvailable(now uint64) error {
+func (a *Agent) CheckContractIsAvailable(now uint64) (uint64, error) {
 	a.contract.Lock()
 	defer a.contract.Unlock()
 
-	return a.contract.CheckIsAvailable(now)
+	if err := a.contract.CheckIsAvailable(now); err != nil {
+		return 0, err
+	}
+
+	return a.contract.Formation.ContractFee, nil
+}
+
+func (a *Agent) ContractFee() uint64 {
+	a.contract.Lock()
+	defer a.contract.Unlock()
+
+	if a.contract.Formation == nil {
+		return 0
+	}
+
+	return a.contract.Formation.ContractFee
 }
 
 func (a *Agent) Config() Config {
@@ -378,7 +393,7 @@ func (d AgentData) Copy() AgentData {
 	result := AgentData{
 		Key:                d.Key.Copy(),
 		LockingScript:      d.LockingScript.Copy(),
-		ContractFee:        d.ContractFee,
+		MinimumContractFee: d.MinimumContractFee,
 		FeeLockingScript:   d.FeeLockingScript.Copy(),
 		AdminLockingScript: d.AdminLockingScript.Copy(),
 		IsActive:           d.IsActive,

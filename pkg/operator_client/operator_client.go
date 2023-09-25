@@ -51,12 +51,18 @@ type PeerChannelsClient struct {
 }
 
 // RequestNewAgent requests a new smart contract agent be created.
+// feeLockingScript and masterLockingScript can be left empty and will be provided by the contract
+// operator.
 func (c *PeerChannelsClient) RequestNewAgent(ctx context.Context,
-	adminLockingScript bitcoin.Script) (*contract_operator.Agent, error) {
+	adminLockingScript, feeLockingScript, masterLockingScript bitcoin.Script,
+	minimumContractFee uint64) (*contract_operator.Agent, error) {
 
 	requestID := uuid.New()
 	createAgent := &contract_operator.CreateAgent{
-		AdminLockingScript: adminLockingScript,
+		AdminLockingScript:  adminLockingScript,
+		MasterLockingScript: masterLockingScript,
+		MinimumContractFee:  minimumContractFee,
+		FeeLockingScript:    feeLockingScript,
 	}
 
 	requestScript, err := WrapRequest(createAgent, requestID, c.responsePeerChannel, c.clientKey)

@@ -189,7 +189,8 @@ func (a *Agent) processSignatureRequest(ctx context.Context, transaction *transa
 		return nil, platform.NewRejectError(actions.RejectionsSignatureNotSigHashAll, "")
 	}
 
-	if err := a.CheckContractIsAvailable(now); err != nil {
+	contractFee, err := a.CheckContractIsAvailable(now)
+	if err != nil {
 		return nil, platform.NewDefaultRejectError(err)
 	}
 
@@ -293,7 +294,6 @@ func (a *Agent) processSignatureRequest(ctx context.Context, transaction *transa
 	}
 
 	// Verify contract fee
-	contractFee := a.ContractFee()
 	feeLockingScript := a.FeeLockingScript()
 	if contractFee > 0 {
 		if !findBitcoinOutput(settlementTx.MsgTx, feeLockingScript, contractFee) {

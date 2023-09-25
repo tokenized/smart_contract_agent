@@ -1332,11 +1332,11 @@ func Test_Transfers_Multi_Basic(t *testing.T) {
 	_, feeLockingScript1, _ := state.MockKey()
 
 	agentData1 := AgentData{
-		Key:              contractKey1,
-		LockingScript:    contractLockingScript1,
-		ContractFee:      contract1.Formation.ContractFee,
-		FeeLockingScript: feeLockingScript1,
-		IsActive:         true,
+		Key:                contractKey1,
+		LockingScript:      contractLockingScript1,
+		MinimumContractFee: contract1.Formation.ContractFee,
+		FeeLockingScript:   feeLockingScript1,
+		IsActive:           true,
 	}
 
 	agent1, err := NewAgent(ctx, agentData1, DefaultConfig(), test.caches.Caches,
@@ -1351,11 +1351,11 @@ func Test_Transfers_Multi_Basic(t *testing.T) {
 	_, feeLockingScript2, _ := state.MockKey()
 
 	agentData2 := AgentData{
-		Key:              contractKey2,
-		LockingScript:    contractLockingScript2,
-		ContractFee:      contract2.Formation.ContractFee,
-		FeeLockingScript: feeLockingScript2,
-		IsActive:         true,
+		Key:                contractKey2,
+		LockingScript:      contractLockingScript2,
+		MinimumContractFee: contract2.Formation.ContractFee,
+		FeeLockingScript:   feeLockingScript2,
+		IsActive:           true,
 	}
 
 	agent2, err := NewAgent(ctx, agentData2, DefaultConfig(), test.caches.Caches,
@@ -2064,11 +2064,11 @@ func Test_Transfers_Bitcoin_Refund(t *testing.T) {
 	bitcoinKey, bitcoinLockingScript, _ := state.MockKey()
 
 	agentData := AgentData{
-		Key:              contractKey,
-		LockingScript:    contractLockingScript,
-		ContractFee:      contract1.Formation.ContractFee,
-		FeeLockingScript: feeLockingScript,
-		IsActive:         true,
+		Key:                contractKey,
+		LockingScript:      contractLockingScript,
+		MinimumContractFee: contract1.Formation.ContractFee,
+		FeeLockingScript:   feeLockingScript,
+		IsActive:           true,
 	}
 
 	agent, err := NewAgent(ctx, agentData, DefaultConfig(), test.caches.Caches,
@@ -2329,11 +2329,11 @@ func Test_Transfers_Bitcoin_Approve(t *testing.T) {
 	bitcoinKey, bitcoinLockingScript, _ := state.MockKey()
 
 	agentData := AgentData{
-		Key:              contractKey,
-		LockingScript:    contractLockingScript,
-		ContractFee:      contract1.Formation.ContractFee,
-		FeeLockingScript: feeLockingScript,
-		IsActive:         true,
+		Key:                contractKey,
+		LockingScript:      contractLockingScript,
+		MinimumContractFee: contract1.Formation.ContractFee,
+		FeeLockingScript:   feeLockingScript,
+		IsActive:           true,
 	}
 
 	agent, err := NewAgent(ctx, agentData, DefaultConfig(), test.caches.Caches,
@@ -2675,11 +2675,11 @@ func Test_Transfers_Multi_Expire(t *testing.T) {
 		&test.caches.TestCaches)
 
 	agentData1 := AgentData{
-		Key:              contractKey1,
-		LockingScript:    contractLockingScript1,
-		ContractFee:      contract1.Formation.ContractFee,
-		FeeLockingScript: feeLockingScript,
-		IsActive:         true,
+		Key:                contractKey1,
+		LockingScript:      contractLockingScript1,
+		MinimumContractFee: contract1.Formation.ContractFee,
+		FeeLockingScript:   feeLockingScript,
+		IsActive:           true,
 	}
 
 	agent1, err := NewAgent(ctx, agentData1, config, test.caches.Caches, test.caches.Transactions,
@@ -2695,11 +2695,11 @@ func Test_Transfers_Multi_Expire(t *testing.T) {
 		&test.caches.TestCaches)
 
 	agentData2 := AgentData{
-		Key:              contractKey2,
-		LockingScript:    contractLockingScript2,
-		ContractFee:      contract2.Formation.ContractFee,
-		FeeLockingScript: feeLockingScript,
-		IsActive:         true,
+		Key:                contractKey2,
+		LockingScript:      contractLockingScript2,
+		MinimumContractFee: contract2.Formation.ContractFee,
+		FeeLockingScript:   feeLockingScript,
+		IsActive:           true,
 	}
 
 	agent2, err := NewAgent(ctx, agentData2, config, test.caches.Caches, test.caches.Transactions,
@@ -3169,11 +3169,11 @@ func Test_Transfers_Multi_Reject_First(t *testing.T) {
 	_, feeLockingScript1, _ := state.MockKey()
 
 	agentData1 := AgentData{
-		Key:              contractKey1,
-		LockingScript:    contractLockingScript1,
-		ContractFee:      contract1.Formation.ContractFee,
-		FeeLockingScript: feeLockingScript1,
-		IsActive:         true,
+		Key:                contractKey1,
+		LockingScript:      contractLockingScript1,
+		MinimumContractFee: contract1.Formation.ContractFee,
+		FeeLockingScript:   feeLockingScript1,
+		IsActive:           true,
 	}
 
 	agent1, err := NewAgent(ctx, agentData1, DefaultConfig(), test.caches.Caches,
@@ -3188,11 +3188,11 @@ func Test_Transfers_Multi_Reject_First(t *testing.T) {
 	_, feeLockingScript2, _ := state.MockKey()
 
 	agentData2 := AgentData{
-		Key:              contractKey2,
-		LockingScript:    contractLockingScript2,
-		ContractFee:      contract2.Formation.ContractFee,
-		FeeLockingScript: feeLockingScript2,
-		IsActive:         true,
+		Key:                contractKey2,
+		LockingScript:      contractLockingScript2,
+		MinimumContractFee: contract2.Formation.ContractFee,
+		FeeLockingScript:   feeLockingScript2,
+		IsActive:           true,
 	}
 
 	agent2, err := NewAgent(ctx, agentData2, DefaultConfig(), test.caches.Caches,
@@ -3438,11 +3438,11 @@ func Test_Transfers_Multi_Reject_Second(t *testing.T) {
 	_, feeLockingScript1, _ := state.MockKey()
 
 	agentData1 := AgentData{
-		Key:              contractKey1,
-		LockingScript:    contractLockingScript1,
-		ContractFee:      contract1.Formation.ContractFee,
-		FeeLockingScript: feeLockingScript1,
-		IsActive:         true,
+		Key:                contractKey1,
+		LockingScript:      contractLockingScript1,
+		MinimumContractFee: contract1.Formation.ContractFee,
+		FeeLockingScript:   feeLockingScript1,
+		IsActive:           true,
 	}
 
 	agent1, err := NewAgent(ctx, agentData1, DefaultConfig(), test.caches.Caches,
@@ -3457,11 +3457,11 @@ func Test_Transfers_Multi_Reject_Second(t *testing.T) {
 	_, feeLockingScript2, _ := state.MockKey()
 
 	agentData2 := AgentData{
-		Key:              contractKey2,
-		LockingScript:    contractLockingScript2,
-		ContractFee:      contract2.Formation.ContractFee,
-		FeeLockingScript: feeLockingScript2,
-		IsActive:         true,
+		Key:                contractKey2,
+		LockingScript:      contractLockingScript2,
+		MinimumContractFee: contract2.Formation.ContractFee,
+		FeeLockingScript:   feeLockingScript2,
+		IsActive:           true,
 	}
 
 	agent2, err := NewAgent(ctx, agentData2, DefaultConfig(), test.caches.Caches,

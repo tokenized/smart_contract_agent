@@ -58,8 +58,8 @@ func (a *Agent) processTransfer(ctx context.Context, transaction *transactions.T
 	}
 
 	now := a.Now()
-
-	if err := a.CheckContractIsAvailable(now); err != nil {
+	contractFee, err := a.CheckContractIsAvailable(now)
+	if err != nil {
 		return nil, platform.NewDefaultRejectError(err)
 	}
 
@@ -233,16 +233,16 @@ func (a *Agent) processTransfer(ctx context.Context, transaction *transactions.T
 		if err != nil {
 			allBalances.Revert(txid)
 			logger.Warn(ctx, "Invalid exchange fee address : %s", err)
-			return nil, platform.NewRejectErrorWithOutputIndex(actions.RejectionsMsgMalformed, err.Error(),
-				transferContracts.FirstContractOutputIndex)
+			return nil, platform.NewRejectErrorWithOutputIndex(actions.RejectionsMsgMalformed,
+				err.Error(), transferContracts.FirstContractOutputIndex)
 		}
 
 		lockingScript, err := ra.LockingScript()
 		if err != nil {
 			allBalances.Revert(txid)
 			logger.Warn(ctx, "Invalid exchange fee locking script : %s", err)
-			return nil, platform.NewRejectErrorWithOutputIndex(actions.RejectionsMsgMalformed, err.Error(),
-				transferContracts.FirstContractOutputIndex)
+			return nil, platform.NewRejectErrorWithOutputIndex(actions.RejectionsMsgMalformed,
+				err.Error(), transferContracts.FirstContractOutputIndex)
 		}
 
 		if err := settlementTx.AddOutput(lockingScript, transfer.ExchangeFee, false,
@@ -253,8 +253,8 @@ func (a *Agent) processTransfer(ctx context.Context, transaction *transactions.T
 	}
 
 	// Add the contract fee
-	if a.ContractFee() > 0 {
-		if err := settlementTx.AddOutput(a.FeeLockingScript(), a.ContractFee(), true,
+	if contractFee > 0 {
+		if err := settlementTx.AddOutput(a.FeeLockingScript(), contractFee, true,
 			false); err != nil {
 			allBalances.Revert(txid)
 			return nil, errors.Wrap(err, "add contract fee")

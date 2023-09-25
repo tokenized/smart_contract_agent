@@ -111,7 +111,7 @@ func Test_RequestNewAgent(t *testing.T) {
 	adminKey, _ := bitcoin.GenerateKey(bitcoin.MainNet)
 	adminLockingScript, _ := adminKey.LockingScript()
 
-	responseAgent, err := client.RequestNewAgent(ctx, adminLockingScript)
+	responseAgent, err := client.RequestNewAgent(ctx, adminLockingScript, nil, nil, 1000)
 	if err != nil {
 		t.Fatalf("Failed to request new agent : %s", err)
 	}
