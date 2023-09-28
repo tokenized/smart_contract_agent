@@ -58,7 +58,7 @@ func (a *Agent) processSettlementRequest(ctx context.Context, transaction *trans
 		logger.Stringer("transfer_txid", transferTxID),
 	}, "TransferTxID")
 
-	transferTransaction, err := a.transactions.Get(ctx, transferTxID)
+	transferTransaction, err := a.transactions.GetTxWithAncestors(ctx, transferTxID)
 	if err != nil {
 		return nil, errors.Wrap(err, "get transfer tx")
 	}
@@ -624,7 +624,7 @@ func (a *Agent) createSettlementRequestRejection(ctx context.Context,
 	}
 	transferTxID := *newTransferTxID
 
-	transferTransaction, err := a.transactions.Get(ctx, transferTxID)
+	transferTransaction, err := a.transactions.GetTxWithAncestors(ctx, transferTxID)
 	if err != nil {
 		return nil, errors.Wrap(err, "get transfer tx")
 	}

@@ -81,7 +81,7 @@ func (a *Agent) processSignatureRequest(ctx context.Context, transaction *transa
 		logger.Stringer("transfer_txid", transferTxID),
 	}, "TransferTxID")
 
-	transferTransaction, err := a.transactions.Get(ctx, transferTxID)
+	transferTransaction, err := a.transactions.GetTxWithAncestors(ctx, transferTxID)
 	if err != nil {
 		return nil, errors.Wrap(err, "get transfer tx")
 	}
@@ -622,7 +622,7 @@ func (a *Agent) createSignatureRequestRejection(ctx context.Context,
 		logger.Stringer("transfer_txid", transferTxID),
 	}, "TransferTxID")
 
-	transferTransaction, err := a.transactions.Get(ctx, transferTxID)
+	transferTransaction, err := a.transactions.GetTxWithAncestors(ctx, transferTxID)
 	if err != nil {
 		return nil, errors.Wrap(err, "get transfer tx")
 	}

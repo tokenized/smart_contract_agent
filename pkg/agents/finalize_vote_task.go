@@ -135,7 +135,7 @@ func (a *Agent) FinalizeVote(ctx context.Context,
 
 	proposalTxID := *vote.ProposalTxID
 
-	proposalTransaction, err := a.transactions.Get(ctx, proposalTxID)
+	proposalTransaction, err := a.transactions.GetTxWithAncestors(ctx, proposalTxID)
 	if err != nil {
 		return nil, errors.Wrap(err, "get proposal tx")
 	}

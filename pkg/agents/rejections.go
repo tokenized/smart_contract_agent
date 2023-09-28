@@ -220,12 +220,18 @@ func (a *Agent) traceToTransfer(ctx context.Context,
 				continue
 			}
 
-			switch a := action.(type) {
+			switch act := action.(type) {
 			case *actions.Transfer:
+				if err := a.transactions.PopulateAncestors(ctx,
+					previousTransaction); err != nil {
+					previousTransaction.Unlock()
+					return nil, nil, 0, errors.Wrap(err, "populate ancestors")
+				}
 				previousTransaction.Unlock()
-				return previousTransaction, a, i, nil
+
+				return previousTransaction, act, i, nil
 			case *actions.Message:
-				message = a
+				message = act
 			}
 		}
 		previousTransaction.Unlock()

@@ -113,7 +113,7 @@ func (a *Agent) CancelPendingTransfer(ctx context.Context,
 	agentLockingScript := a.LockingScript()
 
 	// Get transfer transaction and action.
-	transferTransaction, err := a.transactions.Get(ctx, transferTxID)
+	transferTransaction, err := a.transactions.GetTxWithAncestors(ctx, transferTxID)
 	if err != nil {
 		return nil, errors.Wrap(err, "get tx")
 	}

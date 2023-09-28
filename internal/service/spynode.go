@@ -33,7 +33,7 @@ func (s *Service) HandleTx(ctx context.Context, spyNodeTx *spynodeClient.Tx) {
 }
 
 func (s *Service) HandleTxUpdate(ctx context.Context, txUpdate *spynodeClient.TxUpdate) {
-	transaction, err := s.transactions.Get(ctx, txUpdate.TxID)
+	transaction, err := s.transactions.GetTxWithAncestors(ctx, txUpdate.TxID)
 	if err != nil {
 		logger.ErrorWithFields(ctx, []logger.Field{
 			logger.Stringer("txid", txUpdate.TxID),

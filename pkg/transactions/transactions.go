@@ -144,6 +144,10 @@ func (c *TransactionCache) AddExpandedTx(ctx context.Context,
 		return nil, errors.Wrapf(err, "add: %s", txid)
 	}
 
+	tx.Lock()
+	tx.addAncestors(etx.Ancestors)
+	tx.Unlock()
+
 	return tx, nil
 }
 
@@ -241,7 +245,7 @@ func (tx *Transaction) AddMerkleProof(merkleProof *merkle_proof.MerkleProof) boo
 func (c *TransactionCache) ExpandedTx(ctx context.Context,
 	transaction *Transaction) (*expanded_tx.ExpandedTx, error) {
 
-	if err := c.populateAncestors(ctx, transaction); err != nil {
+	if err := c.PopulateAncestors(ctx, transaction); err != nil {
 		return nil, errors.Wrap(err, "populate ancestors")
 	}
 
@@ -288,7 +292,7 @@ func (c *TransactionCache) GetTxWithAncestors(ctx context.Context,
 
 	transaction := item.(*Transaction)
 	transaction.Lock()
-	if err := c.populateAncestors(ctx, transaction); err != nil {
+	if err := c.PopulateAncestors(ctx, transaction); err != nil {
 		transaction.Unlock()
 		c.Release(ctx, txid)
 		return nil, errors.Wrap(err, "populate ancestors")
@@ -297,7 +301,7 @@ func (c *TransactionCache) GetTxWithAncestors(ctx context.Context,
 	return transaction, nil
 }
 
-func (c *TransactionCache) populateAncestors(ctx context.Context, transaction *Transaction) error {
+func (c *TransactionCache) PopulateAncestors(ctx context.Context, transaction *Transaction) error {
 	// Fetch ancestors
 	for _, txin := range transaction.Tx.TxIn {
 		atx := transaction.Ancestors.GetTx(txin.PreviousOutPoint.Hash)
@@ -327,6 +331,20 @@ func (c *TransactionCache) populateAncestors(ctx context.Context, transaction *T
 	}
 
 	return nil
+}
+
+func (tx *Transaction) addAncestors(ancestors expanded_tx.AncestorTxs) {
+	for _, ancestor := range ancestors {
+		atxid := ancestor.GetTxID()
+		if atxid == nil {
+			continue
+		}
+
+		parentTx := tx.Ancestors.GetTx(*atxid)
+		if parentTx == nil {
+			tx.Ancestors = append(tx.Ancestors, ancestor)
+		}
+	}
 }
 
 func (c *TransactionCache) Get(ctx context.Context, txid bitcoin.Hash32) (*Transaction, error) {
