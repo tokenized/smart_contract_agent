@@ -425,7 +425,7 @@ func MockContractWithVoteSystems(ctx context.Context, caches *TestCaches,
 }
 
 type MockBalance struct {
-	Key           bitcoin.Key
+	Keys          []bitcoin.Key
 	LockingScript bitcoin.Script
 	Quantity      uint64
 }
@@ -437,7 +437,7 @@ func MockBalances(ctx context.Context, caches *TestCaches, contract *Contract,
 	balancesToAdd := make(Balances, count)
 	for i := 0; i < count; i++ {
 		key, lockingScript, _ := MockKey()
-		quantity := uint64(rand.Intn(1000))
+		quantity := uint64(rand.Intn(100000000) + 1)
 
 		balance := &Balance{
 			LockingScript: lockingScript,
@@ -448,7 +448,72 @@ func MockBalances(ctx context.Context, caches *TestCaches, contract *Contract,
 		rand.Read(balance.TxID[:])
 
 		balances[i] = &MockBalance{
-			Key:           key,
+			Keys:          []bitcoin.Key{key},
+			LockingScript: lockingScript,
+			Quantity:      quantity,
+		}
+
+		balancesToAdd[i] = balance
+	}
+
+	contract.Lock()
+	contractLockingScript := contract.LockingScript
+	contract.Unlock()
+
+	instrument.Lock()
+	instrumentCode := instrument.InstrumentCode
+	instrument.Unlock()
+
+	addedBalances, err := caches.Caches.Balances.AddMulti(ctx, contractLockingScript,
+		instrumentCode, balancesToAdd)
+	if err != nil {
+		panic(fmt.Sprintf("Failed to add balances : %s", err))
+	}
+
+	if err := caches.Caches.Balances.ReleaseMulti(ctx, contractLockingScript, instrumentCode,
+		addedBalances); err != nil {
+		panic(fmt.Sprintf("Failed to release balances : %s", err))
+	}
+
+	return balances
+}
+
+func MockBalancesMultiSig(ctx context.Context, caches *TestCaches, contract *Contract,
+	instrument *Instrument, signingThreshold, signerCount, balanceCount int) []*MockBalance {
+
+	balances := make([]*MockBalance, balanceCount)
+	balancesToAdd := make(Balances, balanceCount)
+	for i := 0; i < balanceCount; i++ {
+		keys := make([]bitcoin.Key, signerCount)
+		publicKeys := make([]bitcoin.PublicKey, signerCount)
+		for j := 0; j < signerCount; j++ {
+			key, _, _ := MockKey()
+			keys[j] = key
+			publicKeys[j] = key.PublicKey()
+		}
+
+		template, err := bitcoin.NewMultiPKHTemplate(uint32(signingThreshold), uint32(signerCount))
+		if err != nil {
+			panic(fmt.Sprintf("multi-pkh template: %s", err))
+		}
+
+		lockingScript, err := template.LockingScript(publicKeys)
+		if err != nil {
+			panic(fmt.Sprintf("multi-pkh locking script: %s", err))
+		}
+
+		quantity := uint64(rand.Intn(100000000) + 1)
+
+		balance := &Balance{
+			LockingScript: lockingScript,
+			Quantity:      quantity,
+			Timestamp:     uint64(time.Now().UnixNano()),
+			TxID:          &bitcoin.Hash32{},
+		}
+		rand.Read(balance.TxID[:])
+
+		balances[i] = &MockBalance{
+			Keys:          keys,
 			LockingScript: lockingScript,
 			Quantity:      quantity,
 		}

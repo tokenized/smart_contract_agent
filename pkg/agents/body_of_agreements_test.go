@@ -20,8 +20,8 @@ func Test_BodyOfAgreement_Offer_Valid(t *testing.T) {
 	ctx := logger.ContextWithLogger(context.Background(), true, true, "")
 	agent, test := StartTestAgentWithContract(ctx, t)
 
-	test.contract.Formation.BodyOfAgreementType = actions.ContractBodyOfAgreementTypeFull
-	test.contract.MarkModified()
+	test.Contract.Formation.BodyOfAgreementType = actions.ContractBodyOfAgreementTypeFull
+	test.Contract.MarkModified()
 
 	offer := &actions.BodyOfAgreementOffer{
 		Chapters: []*actions.ChapterField{
@@ -53,20 +53,20 @@ func Test_BodyOfAgreement_Offer_Valid(t *testing.T) {
 	tx := txbuilder.NewTxBuilder(0.05, 0.0)
 
 	// Add input
-	outpoint := state.MockOutPoint(test.adminLockingScript, 1)
+	outpoint := state.MockOutPoint(test.AdminLockingScript, 1)
 	spentOutputs := []*expanded_tx.Output{
 		{
-			LockingScript: test.adminLockingScript,
+			LockingScript: test.AdminLockingScript,
 			Value:         1,
 		},
 	}
 
-	if err := tx.AddInput(*outpoint, test.adminLockingScript, 1); err != nil {
+	if err := tx.AddInput(*outpoint, test.AdminLockingScript, 1); err != nil {
 		t.Fatalf("Failed to add input : %s", err)
 	}
 
 	// Add contract output
-	if err := tx.AddOutput(test.contractLockingScript, 150, false, false); err != nil {
+	if err := tx.AddOutput(test.ContractLockingScript, 150, false, false); err != nil {
 		t.Fatalf("Failed to add contract output : %s", err)
 	}
 
@@ -96,7 +96,7 @@ func Test_BodyOfAgreement_Offer_Valid(t *testing.T) {
 	_, changeLockingScript, _ := state.MockKey()
 	tx.SetChangeLockingScript(changeLockingScript, "")
 
-	if _, err := tx.Sign([]bitcoin.Key{test.adminKey, fundingKey}); err != nil {
+	if _, err := tx.Sign([]bitcoin.Key{test.AdminKey, fundingKey}); err != nil {
 		t.Fatalf("Failed to sign tx : %s", err)
 	}
 
@@ -107,7 +107,7 @@ func Test_BodyOfAgreement_Offer_Valid(t *testing.T) {
 		SpentOutputs: spentOutputs,
 	}
 
-	transaction, err := test.caches.Transactions.Add(ctx, addTransaction)
+	transaction, err := test.Caches.Transactions.Add(ctx, addTransaction)
 	if err != nil {
 		t.Fatalf("Failed to add transaction : %s", err)
 	}
@@ -117,7 +117,7 @@ func Test_BodyOfAgreement_Offer_Valid(t *testing.T) {
 		OutputIndex: offerScriptOutputIndex,
 		Agents: []ActionAgent{
 			{
-				LockingScript: test.contractLockingScript,
+				LockingScript: test.ContractLockingScript,
 				IsRequest:     true,
 			},
 		},
@@ -125,9 +125,9 @@ func Test_BodyOfAgreement_Offer_Valid(t *testing.T) {
 		t.Fatalf("Failed to process transaction : %s", err)
 	}
 
-	test.caches.Transactions.Release(ctx, transaction.GetTxID())
+	test.Caches.Transactions.Release(ctx, transaction.GetTxID())
 
-	responseTx := test.broadcaster.GetLastTx()
+	responseTx := test.Broadcaster.GetLastTx()
 	if responseTx == nil {
 		t.Fatalf("No response tx")
 	}
@@ -192,20 +192,20 @@ func Test_BodyOfAgreement_Offer_UnreferencedTerm(t *testing.T) {
 	tx := txbuilder.NewTxBuilder(0.05, 0.0)
 
 	// Add input
-	outpoint := state.MockOutPoint(test.adminLockingScript, 1)
+	outpoint := state.MockOutPoint(test.AdminLockingScript, 1)
 	spentOutputs := []*expanded_tx.Output{
 		{
-			LockingScript: test.adminLockingScript,
+			LockingScript: test.AdminLockingScript,
 			Value:         1,
 		},
 	}
 
-	if err := tx.AddInput(*outpoint, test.adminLockingScript, 1); err != nil {
+	if err := tx.AddInput(*outpoint, test.AdminLockingScript, 1); err != nil {
 		t.Fatalf("Failed to add input : %s", err)
 	}
 
 	// Add contract output
-	if err := tx.AddOutput(test.contractLockingScript, 150, false, false); err != nil {
+	if err := tx.AddOutput(test.ContractLockingScript, 150, false, false); err != nil {
 		t.Fatalf("Failed to add contract output : %s", err)
 	}
 
@@ -235,7 +235,7 @@ func Test_BodyOfAgreement_Offer_UnreferencedTerm(t *testing.T) {
 	_, changeLockingScript, _ := state.MockKey()
 	tx.SetChangeLockingScript(changeLockingScript, "")
 
-	if _, err := tx.Sign([]bitcoin.Key{test.adminKey, fundingKey}); err != nil {
+	if _, err := tx.Sign([]bitcoin.Key{test.AdminKey, fundingKey}); err != nil {
 		t.Fatalf("Failed to sign tx : %s", err)
 	}
 
@@ -246,7 +246,7 @@ func Test_BodyOfAgreement_Offer_UnreferencedTerm(t *testing.T) {
 		SpentOutputs: spentOutputs,
 	}
 
-	transaction, err := test.caches.Transactions.Add(ctx, addTransaction)
+	transaction, err := test.Caches.Transactions.Add(ctx, addTransaction)
 	if err != nil {
 		t.Fatalf("Failed to add transaction : %s", err)
 	}
@@ -256,7 +256,7 @@ func Test_BodyOfAgreement_Offer_UnreferencedTerm(t *testing.T) {
 		Action:      offer,
 		Agents: []ActionAgent{
 			{
-				LockingScript: test.contractLockingScript,
+				LockingScript: test.ContractLockingScript,
 				IsRequest:     true,
 			},
 		},
@@ -264,9 +264,9 @@ func Test_BodyOfAgreement_Offer_UnreferencedTerm(t *testing.T) {
 		t.Fatalf("Failed to process transaction : %s", err)
 	}
 
-	test.caches.Transactions.Release(ctx, transaction.GetTxID())
+	test.Caches.Transactions.Release(ctx, transaction.GetTxID())
 
-	responseTx := test.broadcaster.GetLastTx()
+	responseTx := test.Broadcaster.GetLastTx()
 	if responseTx == nil {
 		t.Fatalf("No response tx")
 	}
@@ -306,9 +306,9 @@ func Test_BodyOfAgreement_Amendment_Basic(t *testing.T) {
 	ctx := logger.ContextWithLogger(context.Background(), true, true, "")
 	agent, test := StartTestAgentWithContract(ctx, t)
 
-	test.contract.Lock()
-	test.contract.Formation.BodyOfAgreementType = actions.ContractBodyOfAgreementTypeFull
-	test.contract.BodyOfAgreementFormation = &actions.BodyOfAgreementFormation{
+	test.Contract.Lock()
+	test.Contract.Formation.BodyOfAgreementType = actions.ContractBodyOfAgreementTypeFull
+	test.Contract.BodyOfAgreementFormation = &actions.BodyOfAgreementFormation{
 		Chapters: []*actions.ChapterField{
 			{
 				Title:    "Chapter 1",
@@ -334,17 +334,17 @@ func Test_BodyOfAgreement_Amendment_Basic(t *testing.T) {
 			},
 		},
 	}
-	test.contract.BodyOfAgreementFormationTxID = &bitcoin.Hash32{}
-	rand.Read(test.contract.BodyOfAgreementFormationTxID[:])
-	test.contract.MarkModified()
-	test.contract.Unlock()
+	test.Contract.BodyOfAgreementFormationTxID = &bitcoin.Hash32{}
+	rand.Read(test.Contract.BodyOfAgreementFormationTxID[:])
+	test.Contract.MarkModified()
+	test.Contract.Unlock()
 
-	js, _ := json.MarshalIndent(test.contract.BodyOfAgreementFormation, "", "  ")
+	js, _ := json.MarshalIndent(test.Contract.BodyOfAgreementFormation, "", "  ")
 	t.Logf("Original BodyOfAgreementFormation : %s", js)
 
 	newOffer := &actions.BodyOfAgreementOffer{
-		Chapters:    test.contract.BodyOfAgreementFormation.Chapters,
-		Definitions: test.contract.BodyOfAgreementFormation.Definitions,
+		Chapters:    test.Contract.BodyOfAgreementFormation.Chapters,
+		Definitions: test.Contract.BodyOfAgreementFormation.Definitions,
 	}
 
 	newOffer.Chapters = append(newOffer.Chapters, &actions.ChapterField{
@@ -355,7 +355,7 @@ func Test_BodyOfAgreement_Amendment_Basic(t *testing.T) {
 	js, _ = json.MarshalIndent(newOffer, "", "  ")
 	t.Logf("New BodyOfAgreementOffer : %s", js)
 
-	amendments, err := test.contract.BodyOfAgreementFormation.CreateAmendments(newOffer)
+	amendments, err := test.Contract.BodyOfAgreementFormation.CreateAmendments(newOffer)
 	if err != nil {
 		t.Fatalf("Failed to create amendments : %s", err)
 	}
@@ -375,20 +375,20 @@ func Test_BodyOfAgreement_Amendment_Basic(t *testing.T) {
 	tx := txbuilder.NewTxBuilder(0.05, 0.0)
 
 	// Add input
-	outpoint := state.MockOutPoint(test.adminLockingScript, 1)
+	outpoint := state.MockOutPoint(test.AdminLockingScript, 1)
 	spentOutputs := []*expanded_tx.Output{
 		{
-			LockingScript: test.adminLockingScript,
+			LockingScript: test.AdminLockingScript,
 			Value:         1,
 		},
 	}
 
-	if err := tx.AddInput(*outpoint, test.adminLockingScript, 1); err != nil {
+	if err := tx.AddInput(*outpoint, test.AdminLockingScript, 1); err != nil {
 		t.Fatalf("Failed to add input : %s", err)
 	}
 
 	// Add contract output
-	if err := tx.AddOutput(test.contractLockingScript, 150, false, false); err != nil {
+	if err := tx.AddOutput(test.ContractLockingScript, 150, false, false); err != nil {
 		t.Fatalf("Failed to add contract output : %s", err)
 	}
 
@@ -418,7 +418,7 @@ func Test_BodyOfAgreement_Amendment_Basic(t *testing.T) {
 	_, changeLockingScript, _ := state.MockKey()
 	tx.SetChangeLockingScript(changeLockingScript, "")
 
-	if _, err := tx.Sign([]bitcoin.Key{test.adminKey, fundingKey}); err != nil {
+	if _, err := tx.Sign([]bitcoin.Key{test.AdminKey, fundingKey}); err != nil {
 		t.Fatalf("Failed to sign tx : %s", err)
 	}
 
@@ -429,7 +429,7 @@ func Test_BodyOfAgreement_Amendment_Basic(t *testing.T) {
 		SpentOutputs: spentOutputs,
 	}
 
-	transaction, err := test.caches.Transactions.Add(ctx, addTransaction)
+	transaction, err := test.Caches.Transactions.Add(ctx, addTransaction)
 	if err != nil {
 		t.Fatalf("Failed to add transaction : %s", err)
 	}
@@ -439,7 +439,7 @@ func Test_BodyOfAgreement_Amendment_Basic(t *testing.T) {
 		Action:      bodyAmendment,
 		Agents: []ActionAgent{
 			{
-				LockingScript: test.contractLockingScript,
+				LockingScript: test.ContractLockingScript,
 				IsRequest:     true,
 			},
 		},
@@ -447,9 +447,9 @@ func Test_BodyOfAgreement_Amendment_Basic(t *testing.T) {
 		t.Fatalf("Failed to process transaction : %s", err)
 	}
 
-	test.caches.Transactions.Release(ctx, transaction.GetTxID())
+	test.Caches.Transactions.Release(ctx, transaction.GetTxID())
 
-	responseTx := test.broadcaster.GetLastTx()
+	responseTx := test.Broadcaster.GetLastTx()
 	if responseTx == nil {
 		t.Fatalf("No response tx")
 	}
@@ -484,9 +484,9 @@ func Test_BodyOfAgreement_Amendment_Child(t *testing.T) {
 	ctx := logger.ContextWithLogger(context.Background(), true, true, "")
 	agent, test := StartTestAgentWithContract(ctx, t)
 
-	test.contract.Lock()
-	test.contract.Formation.BodyOfAgreementType = actions.ContractBodyOfAgreementTypeFull
-	test.contract.BodyOfAgreementFormation = &actions.BodyOfAgreementFormation{
+	test.Contract.Lock()
+	test.Contract.Formation.BodyOfAgreementType = actions.ContractBodyOfAgreementTypeFull
+	test.Contract.BodyOfAgreementFormation = &actions.BodyOfAgreementFormation{
 		Chapters: []*actions.ChapterField{
 			{
 				Title:    "Chapter 1",
@@ -512,15 +512,15 @@ func Test_BodyOfAgreement_Amendment_Child(t *testing.T) {
 			},
 		},
 	}
-	test.contract.BodyOfAgreementFormationTxID = &bitcoin.Hash32{}
-	rand.Read(test.contract.BodyOfAgreementFormationTxID[:])
-	test.contract.MarkModified()
-	test.contract.Unlock()
+	test.Contract.BodyOfAgreementFormationTxID = &bitcoin.Hash32{}
+	rand.Read(test.Contract.BodyOfAgreementFormationTxID[:])
+	test.Contract.MarkModified()
+	test.Contract.Unlock()
 
-	js, _ := json.MarshalIndent(test.contract.BodyOfAgreementFormation, "", "  ")
+	js, _ := json.MarshalIndent(test.Contract.BodyOfAgreementFormation, "", "  ")
 	t.Logf("Original BodyOfAgreementFormation : %s", js)
 
-	copyScript, err := protocol.Serialize(test.contract.BodyOfAgreementFormation, true)
+	copyScript, err := protocol.Serialize(test.Contract.BodyOfAgreementFormation, true)
 	if err != nil {
 		t.Fatalf("Failed to serialize formation : %s", err)
 	}
@@ -548,7 +548,7 @@ func Test_BodyOfAgreement_Amendment_Child(t *testing.T) {
 	js, _ = json.MarshalIndent(newOffer, "", "  ")
 	t.Logf("New BodyOfAgreementOffer : %s", js)
 
-	amendments, err := test.contract.BodyOfAgreementFormation.CreateAmendments(newOffer)
+	amendments, err := test.Contract.BodyOfAgreementFormation.CreateAmendments(newOffer)
 	if err != nil {
 		t.Fatalf("Failed to create amendments : %s", err)
 	}
@@ -568,20 +568,20 @@ func Test_BodyOfAgreement_Amendment_Child(t *testing.T) {
 	tx := txbuilder.NewTxBuilder(0.05, 0.0)
 
 	// Add input
-	outpoint := state.MockOutPoint(test.adminLockingScript, 1)
+	outpoint := state.MockOutPoint(test.AdminLockingScript, 1)
 	spentOutputs := []*expanded_tx.Output{
 		{
-			LockingScript: test.adminLockingScript,
+			LockingScript: test.AdminLockingScript,
 			Value:         1,
 		},
 	}
 
-	if err := tx.AddInput(*outpoint, test.adminLockingScript, 1); err != nil {
+	if err := tx.AddInput(*outpoint, test.AdminLockingScript, 1); err != nil {
 		t.Fatalf("Failed to add input : %s", err)
 	}
 
 	// Add contract output
-	if err := tx.AddOutput(test.contractLockingScript, 150, false, false); err != nil {
+	if err := tx.AddOutput(test.ContractLockingScript, 150, false, false); err != nil {
 		t.Fatalf("Failed to add contract output : %s", err)
 	}
 
@@ -611,7 +611,7 @@ func Test_BodyOfAgreement_Amendment_Child(t *testing.T) {
 	_, changeLockingScript, _ := state.MockKey()
 	tx.SetChangeLockingScript(changeLockingScript, "")
 
-	if _, err := tx.Sign([]bitcoin.Key{test.adminKey, fundingKey}); err != nil {
+	if _, err := tx.Sign([]bitcoin.Key{test.AdminKey, fundingKey}); err != nil {
 		t.Fatalf("Failed to sign tx : %s", err)
 	}
 
@@ -622,7 +622,7 @@ func Test_BodyOfAgreement_Amendment_Child(t *testing.T) {
 		SpentOutputs: spentOutputs,
 	}
 
-	transaction, err := test.caches.Transactions.Add(ctx, addTransaction)
+	transaction, err := test.Caches.Transactions.Add(ctx, addTransaction)
 	if err != nil {
 		t.Fatalf("Failed to add transaction : %s", err)
 	}
@@ -632,7 +632,7 @@ func Test_BodyOfAgreement_Amendment_Child(t *testing.T) {
 		Action:      bodyAmendment,
 		Agents: []ActionAgent{
 			{
-				LockingScript: test.contractLockingScript,
+				LockingScript: test.ContractLockingScript,
 				IsRequest:     true,
 			},
 		},
@@ -640,9 +640,9 @@ func Test_BodyOfAgreement_Amendment_Child(t *testing.T) {
 		t.Fatalf("Failed to process transaction : %s", err)
 	}
 
-	test.caches.Transactions.Release(ctx, transaction.GetTxID())
+	test.Caches.Transactions.Release(ctx, transaction.GetTxID())
 
-	responseTx := test.broadcaster.GetLastTx()
+	responseTx := test.Broadcaster.GetLastTx()
 	if responseTx == nil {
 		t.Fatalf("No response tx")
 	}
@@ -689,9 +689,9 @@ func Test_BodyOfAgreement_Amendment_Proposal(t *testing.T) {
 
 	agent, test := StartTestAgentWithVoteSystems(ctx, t, votingSystems)
 
-	test.contract.Lock()
-	test.contract.Formation.BodyOfAgreementType = actions.ContractBodyOfAgreementTypeFull
-	test.contract.BodyOfAgreementFormation = &actions.BodyOfAgreementFormation{
+	test.Contract.Lock()
+	test.Contract.Formation.BodyOfAgreementType = actions.ContractBodyOfAgreementTypeFull
+	test.Contract.BodyOfAgreementFormation = &actions.BodyOfAgreementFormation{
 		Chapters: []*actions.ChapterField{
 			{
 				Title:    "Chapter 1",
@@ -717,17 +717,17 @@ func Test_BodyOfAgreement_Amendment_Proposal(t *testing.T) {
 			},
 		},
 	}
-	test.contract.BodyOfAgreementFormationTxID = &bitcoin.Hash32{}
-	rand.Read(test.contract.BodyOfAgreementFormationTxID[:])
-	test.contract.MarkModified()
-	test.contract.Unlock()
+	test.Contract.BodyOfAgreementFormationTxID = &bitcoin.Hash32{}
+	rand.Read(test.Contract.BodyOfAgreementFormationTxID[:])
+	test.Contract.MarkModified()
+	test.Contract.Unlock()
 
-	js, _ := json.MarshalIndent(test.contract.BodyOfAgreementFormation, "", "  ")
+	js, _ := json.MarshalIndent(test.Contract.BodyOfAgreementFormation, "", "  ")
 	t.Logf("Original BodyOfAgreementFormation : %s", js)
 
 	newOffer := &actions.BodyOfAgreementOffer{
-		Chapters:    test.contract.BodyOfAgreementFormation.Chapters,
-		Definitions: test.contract.BodyOfAgreementFormation.Definitions,
+		Chapters:    test.Contract.BodyOfAgreementFormation.Chapters,
+		Definitions: test.Contract.BodyOfAgreementFormation.Definitions,
 	}
 
 	newOffer.Chapters = append(newOffer.Chapters, &actions.ChapterField{
@@ -738,7 +738,7 @@ func Test_BodyOfAgreement_Amendment_Proposal(t *testing.T) {
 	js, _ = json.MarshalIndent(newOffer, "", "  ")
 	t.Logf("New BodyOfAgreementOffer : %s", js)
 
-	amendments, err := test.contract.BodyOfAgreementFormation.CreateAmendments(newOffer)
+	amendments, err := test.Contract.BodyOfAgreementFormation.CreateAmendments(newOffer)
 	if err != nil {
 		t.Fatalf("Failed to create amendments : %s", err)
 	}
@@ -750,8 +750,8 @@ func Test_BodyOfAgreement_Amendment_Proposal(t *testing.T) {
 	js, _ = json.MarshalIndent(amendments, "", "  ")
 	t.Logf("Amendments : %s", js)
 
-	vote := MockVoteContractAmendmentCompleted(ctx, test.caches, test.adminLockingScript,
-		test.contractLockingScript, 0, amendments)
+	vote := MockVoteContractAmendmentCompleted(ctx, test.Caches, test.AdminLockingScript,
+		test.ContractLockingScript, 0, amendments)
 	vote.Lock()
 	voteTxID := *vote.VoteTxID
 	refTxID := *vote.ResultTxID
@@ -769,20 +769,20 @@ func Test_BodyOfAgreement_Amendment_Proposal(t *testing.T) {
 	tx := txbuilder.NewTxBuilder(0.05, 0.0)
 
 	// Add input
-	outpoint := state.MockOutPoint(test.adminLockingScript, 1)
+	outpoint := state.MockOutPoint(test.AdminLockingScript, 1)
 	spentOutputs := []*expanded_tx.Output{
 		{
-			LockingScript: test.adminLockingScript,
+			LockingScript: test.AdminLockingScript,
 			Value:         1,
 		},
 	}
 
-	if err := tx.AddInput(*outpoint, test.adminLockingScript, 1); err != nil {
+	if err := tx.AddInput(*outpoint, test.AdminLockingScript, 1); err != nil {
 		t.Fatalf("Failed to add input : %s", err)
 	}
 
 	// Add contract output
-	if err := tx.AddOutput(test.contractLockingScript, 150, false, false); err != nil {
+	if err := tx.AddOutput(test.ContractLockingScript, 150, false, false); err != nil {
 		t.Fatalf("Failed to add contract output : %s", err)
 	}
 
@@ -812,7 +812,7 @@ func Test_BodyOfAgreement_Amendment_Proposal(t *testing.T) {
 	_, changeLockingScript, _ := state.MockKey()
 	tx.SetChangeLockingScript(changeLockingScript, "")
 
-	if _, err := tx.Sign([]bitcoin.Key{test.adminKey, fundingKey}); err != nil {
+	if _, err := tx.Sign([]bitcoin.Key{test.AdminKey, fundingKey}); err != nil {
 		t.Fatalf("Failed to sign tx : %s", err)
 	}
 
@@ -823,7 +823,7 @@ func Test_BodyOfAgreement_Amendment_Proposal(t *testing.T) {
 		SpentOutputs: spentOutputs,
 	}
 
-	transaction, err := test.caches.Transactions.Add(ctx, addTransaction)
+	transaction, err := test.Caches.Transactions.Add(ctx, addTransaction)
 	if err != nil {
 		t.Fatalf("Failed to add transaction : %s", err)
 	}
@@ -833,7 +833,7 @@ func Test_BodyOfAgreement_Amendment_Proposal(t *testing.T) {
 		Action:      bodyAmendment,
 		Agents: []ActionAgent{
 			{
-				LockingScript: test.contractLockingScript,
+				LockingScript: test.ContractLockingScript,
 				IsRequest:     true,
 			},
 		},
@@ -841,9 +841,9 @@ func Test_BodyOfAgreement_Amendment_Proposal(t *testing.T) {
 		t.Fatalf("Failed to process transaction : %s", err)
 	}
 
-	test.caches.Transactions.Release(ctx, transaction.GetTxID())
+	test.Caches.Transactions.Release(ctx, transaction.GetTxID())
 
-	responseTx := test.broadcaster.GetLastTx()
+	responseTx := test.Broadcaster.GetLastTx()
 	if responseTx == nil {
 		t.Fatalf("No response tx")
 	}
@@ -871,6 +871,6 @@ func Test_BodyOfAgreement_Amendment_Proposal(t *testing.T) {
 	js, _ = json.MarshalIndent(formation, "", "  ")
 	t.Logf("BodyOfAgreementFormation : %s", js)
 
-	test.caches.Caches.Votes.Release(ctx, test.contractLockingScript, voteTxID)
+	test.Caches.Caches.Votes.Release(ctx, test.ContractLockingScript, voteTxID)
 	StopTestAgent(ctx, t, test)
 }

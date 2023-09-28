@@ -25,20 +25,20 @@ func Test_Contracts_Offer_Invalid(t *testing.T) {
 	tx := txbuilder.NewTxBuilder(0.05, 0.0)
 
 	// Add input
-	outpoint := state.MockOutPoint(test.adminLockingScript, 1)
+	outpoint := state.MockOutPoint(test.AdminLockingScript, 1)
 	spentOutputs := []*expanded_tx.Output{
 		{
-			LockingScript: test.adminLockingScript,
+			LockingScript: test.AdminLockingScript,
 			Value:         1,
 		},
 	}
 
-	if err := tx.AddInput(*outpoint, test.adminLockingScript, 1); err != nil {
+	if err := tx.AddInput(*outpoint, test.AdminLockingScript, 1); err != nil {
 		t.Fatalf("Failed to add input : %s", err)
 	}
 
 	// Add contract output
-	if err := tx.AddOutput(test.contractLockingScript, 150, false, false); err != nil {
+	if err := tx.AddOutput(test.ContractLockingScript, 150, false, false); err != nil {
 		t.Fatalf("Failed to add contract output : %s", err)
 	}
 
@@ -73,7 +73,7 @@ func Test_Contracts_Offer_Invalid(t *testing.T) {
 	_, changeLockingScript, _ := state.MockKey()
 	tx.SetChangeLockingScript(changeLockingScript, "")
 
-	if _, err := tx.Sign([]bitcoin.Key{test.adminKey, fundingKey}); err != nil {
+	if _, err := tx.Sign([]bitcoin.Key{test.AdminKey, fundingKey}); err != nil {
 		t.Fatalf("Failed to sign tx : %s", err)
 	}
 
@@ -84,7 +84,7 @@ func Test_Contracts_Offer_Invalid(t *testing.T) {
 		SpentOutputs: spentOutputs,
 	}
 
-	transaction, err := test.caches.Transactions.Add(ctx, addTransaction)
+	transaction, err := test.Caches.Transactions.Add(ctx, addTransaction)
 	if err != nil {
 		t.Fatalf("Failed to add transaction : %s", err)
 	}
@@ -94,7 +94,7 @@ func Test_Contracts_Offer_Invalid(t *testing.T) {
 		Action:      contractOffer,
 		Agents: []ActionAgent{
 			{
-				LockingScript: test.contractLockingScript,
+				LockingScript: test.ContractLockingScript,
 				IsRequest:     true,
 			},
 		},
@@ -102,7 +102,7 @@ func Test_Contracts_Offer_Invalid(t *testing.T) {
 		t.Fatalf("Failed to process transaction : %s", err)
 	}
 
-	responseTx := test.broadcaster.GetLastTx()
+	responseTx := test.Broadcaster.GetLastTx()
 	if responseTx == nil {
 		t.Fatalf("No response tx")
 	}
@@ -140,7 +140,7 @@ func Test_Contracts_Offer_Invalid(t *testing.T) {
 	js, _ := json.MarshalIndent(rejection, "", "  ")
 	t.Logf("Rejection : %s", js)
 
-	test.caches.Transactions.Release(ctx, transaction.GetTxID())
+	test.Caches.Transactions.Release(ctx, transaction.GetTxID())
 
 	StopTestAgent(ctx, t, test)
 }
@@ -154,20 +154,20 @@ func Test_Contracts_Offer_Valid(t *testing.T) {
 	tx := txbuilder.NewTxBuilder(0.05, 0.0)
 
 	// Add input
-	outpoint := state.MockOutPoint(test.adminLockingScript, 1)
+	outpoint := state.MockOutPoint(test.AdminLockingScript, 1)
 	spentOutputs := []*expanded_tx.Output{
 		{
-			LockingScript: test.adminLockingScript,
+			LockingScript: test.AdminLockingScript,
 			Value:         1,
 		},
 	}
 
-	if err := tx.AddInput(*outpoint, test.adminLockingScript, 1); err != nil {
+	if err := tx.AddInput(*outpoint, test.AdminLockingScript, 1); err != nil {
 		t.Fatalf("Failed to add input : %s", err)
 	}
 
 	// Add contract output
-	if err := tx.AddOutput(test.contractLockingScript, 150, false, false); err != nil {
+	if err := tx.AddOutput(test.ContractLockingScript, 150, false, false); err != nil {
 		t.Fatalf("Failed to add contract output : %s", err)
 	}
 
@@ -207,7 +207,7 @@ func Test_Contracts_Offer_Valid(t *testing.T) {
 	_, changeLockingScript, _ := state.MockKey()
 	tx.SetChangeLockingScript(changeLockingScript, "")
 
-	if _, err := tx.Sign([]bitcoin.Key{test.adminKey, fundingKey}); err != nil {
+	if _, err := tx.Sign([]bitcoin.Key{test.AdminKey, fundingKey}); err != nil {
 		t.Fatalf("Failed to sign tx : %s", err)
 	}
 
@@ -218,7 +218,7 @@ func Test_Contracts_Offer_Valid(t *testing.T) {
 		SpentOutputs: spentOutputs,
 	}
 
-	transaction, err := test.caches.Transactions.Add(ctx, addTransaction)
+	transaction, err := test.Caches.Transactions.Add(ctx, addTransaction)
 	if err != nil {
 		t.Fatalf("Failed to add transaction : %s", err)
 	}
@@ -228,7 +228,7 @@ func Test_Contracts_Offer_Valid(t *testing.T) {
 		Action:      contractOffer,
 		Agents: []ActionAgent{
 			{
-				LockingScript: test.contractLockingScript,
+				LockingScript: test.ContractLockingScript,
 				IsRequest:     true,
 			},
 		},
@@ -236,9 +236,9 @@ func Test_Contracts_Offer_Valid(t *testing.T) {
 		t.Fatalf("Failed to process transaction : %s", err)
 	}
 
-	test.caches.Transactions.Release(ctx, transaction.GetTxID())
+	test.Caches.Transactions.Release(ctx, transaction.GetTxID())
 
-	responseTx := test.broadcaster.GetLastTx()
+	responseTx := test.Broadcaster.GetLastTx()
 	if responseTx == nil {
 		t.Fatalf("No response tx")
 	}
@@ -272,9 +272,9 @@ func Test_Contracts_Offer_Valid(t *testing.T) {
 	js, _ := json.MarshalIndent(formation, "", "  ")
 	t.Logf("ContractFormation : %s", js)
 
-	if !responseTx.Tx.TxOut[0].LockingScript.Equal(test.contractLockingScript) {
+	if !responseTx.Tx.TxOut[0].LockingScript.Equal(test.ContractLockingScript) {
 		t.Errorf("Wrong contract output locking script : got %s, want %s",
-			responseTx.Tx.TxOut[0].LockingScript, test.contractLockingScript)
+			responseTx.Tx.TxOut[0].LockingScript, test.ContractLockingScript)
 	}
 
 	if formation.ContractName != "Test Contract Name" {
@@ -299,26 +299,26 @@ func Test_Contracts_Offer_Valid(t *testing.T) {
 			masterAddress.Bytes())
 	}
 
-	adminAddress, _ := bitcoin.RawAddressFromLockingScript(test.adminLockingScript)
+	adminAddress, _ := bitcoin.RawAddressFromLockingScript(test.AdminLockingScript)
 	if !bytes.Equal(formation.AdminAddress, adminAddress.Bytes()) {
 		t.Errorf("Wrong formation test.admin address : got %x, want %x", formation.AdminAddress,
 			adminAddress.Bytes())
 	}
 
-	test.contract.Lock()
-	if test.contract.Formation == nil {
+	test.Contract.Lock()
+	if test.Contract.Formation == nil {
 		t.Errorf("Missing state contract formation")
-	} else if !test.contract.Formation.Equal(formation) {
+	} else if !test.Contract.Formation.Equal(formation) {
 		t.Errorf("State contract formation doesn't equal tx action")
 	}
 
-	if test.contract.FormationTxID == nil {
+	if test.Contract.FormationTxID == nil {
 		t.Errorf("Missing state contract formation txid")
-	} else if !test.contract.FormationTxID.Equal(&responseTxID) {
-		t.Errorf("Wrong state contract formation txid : got %s, want %s", test.contract.FormationTxID,
+	} else if !test.Contract.FormationTxID.Equal(&responseTxID) {
+		t.Errorf("Wrong state contract formation txid : got %s, want %s", test.Contract.FormationTxID,
 			responseTxID)
 	}
-	test.contract.Unlock()
+	test.Contract.Unlock()
 
 	StopTestAgent(ctx, t, test)
 }
@@ -330,28 +330,28 @@ func Test_Contracts_Offer_AlreadyExists(t *testing.T) {
 	var formationTxID bitcoin.Hash32
 	rand.Read(formationTxID[:])
 
-	test.contract.Formation = &actions.ContractFormation{
+	test.Contract.Formation = &actions.ContractFormation{
 		ContractName: "Existing Contract Name",
 	}
-	test.contract.FormationTxID = &formationTxID
+	test.Contract.FormationTxID = &formationTxID
 
 	tx := txbuilder.NewTxBuilder(0.05, 0.0)
 
 	// Add input
-	outpoint := state.MockOutPoint(test.adminLockingScript, 1)
+	outpoint := state.MockOutPoint(test.AdminLockingScript, 1)
 	spentOutputs := []*expanded_tx.Output{
 		{
-			LockingScript: test.adminLockingScript,
+			LockingScript: test.AdminLockingScript,
 			Value:         1,
 		},
 	}
 
-	if err := tx.AddInput(*outpoint, test.adminLockingScript, 1); err != nil {
+	if err := tx.AddInput(*outpoint, test.AdminLockingScript, 1); err != nil {
 		t.Fatalf("Failed to add input : %s", err)
 	}
 
 	// Add contract output
-	if err := tx.AddOutput(test.contractLockingScript, 150, false, false); err != nil {
+	if err := tx.AddOutput(test.ContractLockingScript, 150, false, false); err != nil {
 		t.Fatalf("Failed to add contract output : %s", err)
 	}
 
@@ -385,7 +385,7 @@ func Test_Contracts_Offer_AlreadyExists(t *testing.T) {
 	_, changeLockingScript, _ := state.MockKey()
 	tx.SetChangeLockingScript(changeLockingScript, "")
 
-	if _, err := tx.Sign([]bitcoin.Key{test.adminKey, fundingKey}); err != nil {
+	if _, err := tx.Sign([]bitcoin.Key{test.AdminKey, fundingKey}); err != nil {
 		t.Fatalf("Failed to sign tx : %s", err)
 	}
 
@@ -396,7 +396,7 @@ func Test_Contracts_Offer_AlreadyExists(t *testing.T) {
 		SpentOutputs: spentOutputs,
 	}
 
-	transaction, err := test.caches.Transactions.Add(ctx, addTransaction)
+	transaction, err := test.Caches.Transactions.Add(ctx, addTransaction)
 	if err != nil {
 		t.Fatalf("Failed to add transaction : %s", err)
 	}
@@ -406,7 +406,7 @@ func Test_Contracts_Offer_AlreadyExists(t *testing.T) {
 		Action:      contractOffer,
 		Agents: []ActionAgent{
 			{
-				LockingScript: test.contractLockingScript,
+				LockingScript: test.ContractLockingScript,
 				IsRequest:     true,
 			},
 		},
@@ -414,7 +414,7 @@ func Test_Contracts_Offer_AlreadyExists(t *testing.T) {
 		t.Fatalf("Failed to process transaction : %s", err)
 	}
 
-	responseTx := test.broadcaster.GetLastTx()
+	responseTx := test.Broadcaster.GetLastTx()
 	if responseTx == nil {
 		t.Fatalf("No response tx")
 	}
@@ -452,7 +452,7 @@ func Test_Contracts_Offer_AlreadyExists(t *testing.T) {
 	js, _ := json.MarshalIndent(rejection, "", "  ")
 	t.Logf("Rejection : %s", js)
 
-	test.caches.Transactions.Release(ctx, transaction.GetTxID())
+	test.Caches.Transactions.Release(ctx, transaction.GetTxID())
 
 	StopTestAgent(ctx, t, test)
 }
@@ -464,36 +464,36 @@ func Test_Contracts_Amendment_Valid(t *testing.T) {
 	tx := txbuilder.NewTxBuilder(0.05, 0.0)
 
 	// Add input
-	outpoint := state.MockOutPoint(test.adminLockingScript, 1)
+	outpoint := state.MockOutPoint(test.AdminLockingScript, 1)
 	spentOutputs := []*expanded_tx.Output{
 		{
-			LockingScript: test.adminLockingScript,
+			LockingScript: test.AdminLockingScript,
 			Value:         1,
 		},
 	}
 
-	if err := tx.AddInput(*outpoint, test.adminLockingScript, 1); err != nil {
+	if err := tx.AddInput(*outpoint, test.AdminLockingScript, 1); err != nil {
 		t.Fatalf("Failed to add input : %s", err)
 	}
 
 	// Add contract output
-	if err := tx.AddOutput(test.contractLockingScript, 150, false, false); err != nil {
+	if err := tx.AddOutput(test.ContractLockingScript, 150, false, false); err != nil {
 		t.Fatalf("Failed to add contract output : %s", err)
 	}
 
-	js, _ := json.MarshalIndent(test.contract.Formation, "", "  ")
+	js, _ := json.MarshalIndent(test.Contract.Formation, "", "  ")
 	t.Logf("Original ContractFormation : %s", js)
 
 	newOffer := &actions.ContractOffer{
 		ContractName:           "New Test Name",
-		ContractFee:            test.contract.Formation.ContractFee,
-		ContractType:           test.contract.Formation.ContractType,
-		AdministrationProposal: test.contract.Formation.AdministrationProposal,
-		HolderProposal:         test.contract.Formation.HolderProposal,
-		EntityContract:         test.contract.Formation.EntityContract,
+		ContractFee:            test.Contract.Formation.ContractFee,
+		ContractType:           test.Contract.Formation.ContractType,
+		AdministrationProposal: test.Contract.Formation.AdministrationProposal,
+		HolderProposal:         test.Contract.Formation.HolderProposal,
+		EntityContract:         test.Contract.Formation.EntityContract,
 	}
 
-	amendments, err := test.contract.Formation.CreateAmendments(newOffer)
+	amendments, err := test.Contract.Formation.CreateAmendments(newOffer)
 	if err != nil {
 		t.Fatalf("Failed to create amendments : %s", err)
 	}
@@ -548,7 +548,7 @@ func Test_Contracts_Amendment_Valid(t *testing.T) {
 	_, changeLockingScript, _ := state.MockKey()
 	tx.SetChangeLockingScript(changeLockingScript, "")
 
-	if _, err := tx.Sign([]bitcoin.Key{test.adminKey, fundingKey}); err != nil {
+	if _, err := tx.Sign([]bitcoin.Key{test.AdminKey, fundingKey}); err != nil {
 		t.Fatalf("Failed to sign tx : %s", err)
 	}
 
@@ -559,7 +559,7 @@ func Test_Contracts_Amendment_Valid(t *testing.T) {
 		SpentOutputs: spentOutputs,
 	}
 
-	transaction, err := test.caches.Transactions.Add(ctx, addTransaction)
+	transaction, err := test.Caches.Transactions.Add(ctx, addTransaction)
 	if err != nil {
 		t.Fatalf("Failed to add transaction : %s", err)
 	}
@@ -569,7 +569,7 @@ func Test_Contracts_Amendment_Valid(t *testing.T) {
 		Action:      contractAmendment,
 		Agents: []ActionAgent{
 			{
-				LockingScript: test.contractLockingScript,
+				LockingScript: test.ContractLockingScript,
 				IsRequest:     true,
 			},
 		},
@@ -577,9 +577,9 @@ func Test_Contracts_Amendment_Valid(t *testing.T) {
 		t.Fatalf("Failed to process transaction : %s", err)
 	}
 
-	test.caches.Transactions.Release(ctx, transaction.GetTxID())
+	test.Caches.Transactions.Release(ctx, transaction.GetTxID())
 
-	responseTx := test.broadcaster.GetLastTx()
+	responseTx := test.Broadcaster.GetLastTx()
 	if responseTx == nil {
 		t.Fatalf("No response tx")
 	}
@@ -587,9 +587,9 @@ func Test_Contracts_Amendment_Valid(t *testing.T) {
 
 	t.Logf("Response Tx : %s", responseTx)
 
-	if !responseTx.Tx.TxOut[0].LockingScript.Equal(test.contractLockingScript) {
+	if !responseTx.Tx.TxOut[0].LockingScript.Equal(test.ContractLockingScript) {
 		t.Errorf("Wrong contract output locking script : got %s, want %s",
-			responseTx.Tx.TxOut[0].LockingScript, test.contractLockingScript)
+			responseTx.Tx.TxOut[0].LockingScript, test.ContractLockingScript)
 	}
 
 	// Find formation action
@@ -618,20 +618,20 @@ func Test_Contracts_Amendment_Valid(t *testing.T) {
 			"New Test Name")
 	}
 
-	test.contract.Lock()
-	if test.contract.Formation == nil {
+	test.Contract.Lock()
+	if test.Contract.Formation == nil {
 		t.Errorf("Missing state contract formation")
-	} else if !test.contract.Formation.Equal(formation) {
+	} else if !test.Contract.Formation.Equal(formation) {
 		t.Errorf("State contract formation doesn't equal tx action")
 	}
 
-	if test.contract.FormationTxID == nil {
+	if test.Contract.FormationTxID == nil {
 		t.Errorf("Missing state contract formation txid")
-	} else if !test.contract.FormationTxID.Equal(&responseTxID) {
-		t.Errorf("Wrong state contract formation txid : got %s, want %s", test.contract.FormationTxID,
+	} else if !test.Contract.FormationTxID.Equal(&responseTxID) {
+		t.Errorf("Wrong state contract formation txid : got %s, want %s", test.Contract.FormationTxID,
 			responseTxID)
 	}
-	test.contract.Unlock()
+	test.Contract.Unlock()
 
 	StopTestAgent(ctx, t, test)
 }
@@ -645,15 +645,15 @@ func Test_Contracts_Amendment_AdminChange(t *testing.T) {
 	tx := txbuilder.NewTxBuilder(0.05, 0.0)
 
 	// Add test.admin input
-	outpoint := state.MockOutPoint(test.adminLockingScript, 1)
+	outpoint := state.MockOutPoint(test.AdminLockingScript, 1)
 	spentOutputs := []*expanded_tx.Output{
 		{
-			LockingScript: test.adminLockingScript,
+			LockingScript: test.AdminLockingScript,
 			Value:         1,
 		},
 	}
 
-	if err := tx.AddInput(*outpoint, test.adminLockingScript, 1); err != nil {
+	if err := tx.AddInput(*outpoint, test.AdminLockingScript, 1); err != nil {
 		t.Fatalf("Failed to add input : %s", err)
 	}
 
@@ -669,11 +669,11 @@ func Test_Contracts_Amendment_AdminChange(t *testing.T) {
 	}
 
 	// Add contract output
-	if err := tx.AddOutput(test.contractLockingScript, 150, false, false); err != nil {
+	if err := tx.AddOutput(test.ContractLockingScript, 150, false, false); err != nil {
 		t.Fatalf("Failed to add contract output : %s", err)
 	}
 
-	js, _ := json.MarshalIndent(test.contract.Formation, "", "  ")
+	js, _ := json.MarshalIndent(test.Contract.Formation, "", "  ")
 	t.Logf("Original ContractFormation : %s", js)
 
 	contractAmendment := &actions.ContractAmendment{
@@ -710,7 +710,7 @@ func Test_Contracts_Amendment_AdminChange(t *testing.T) {
 	_, changeLockingScript, _ := state.MockKey()
 	tx.SetChangeLockingScript(changeLockingScript, "")
 
-	if _, err := tx.Sign([]bitcoin.Key{test.adminKey, newAdminKey, fundingKey}); err != nil {
+	if _, err := tx.Sign([]bitcoin.Key{test.AdminKey, newAdminKey, fundingKey}); err != nil {
 		t.Fatalf("Failed to sign tx : %s", err)
 	}
 
@@ -721,7 +721,7 @@ func Test_Contracts_Amendment_AdminChange(t *testing.T) {
 		SpentOutputs: spentOutputs,
 	}
 
-	transaction, err := test.caches.Transactions.Add(ctx, addTransaction)
+	transaction, err := test.Caches.Transactions.Add(ctx, addTransaction)
 	if err != nil {
 		t.Fatalf("Failed to add transaction : %s", err)
 	}
@@ -731,7 +731,7 @@ func Test_Contracts_Amendment_AdminChange(t *testing.T) {
 		Action:      contractAmendment,
 		Agents: []ActionAgent{
 			{
-				LockingScript: test.contractLockingScript,
+				LockingScript: test.ContractLockingScript,
 				IsRequest:     true,
 			},
 		},
@@ -739,9 +739,9 @@ func Test_Contracts_Amendment_AdminChange(t *testing.T) {
 		t.Fatalf("Failed to process transaction : %s", err)
 	}
 
-	test.caches.Transactions.Release(ctx, transaction.GetTxID())
+	test.Caches.Transactions.Release(ctx, transaction.GetTxID())
 
-	responseTx := test.broadcaster.GetLastTx()
+	responseTx := test.Broadcaster.GetLastTx()
 	if responseTx == nil {
 		t.Fatalf("No response tx")
 	}
@@ -749,9 +749,9 @@ func Test_Contracts_Amendment_AdminChange(t *testing.T) {
 
 	t.Logf("Response Tx : %s", responseTx)
 
-	if !responseTx.Tx.TxOut[0].LockingScript.Equal(test.contractLockingScript) {
+	if !responseTx.Tx.TxOut[0].LockingScript.Equal(test.ContractLockingScript) {
 		t.Errorf("Wrong contract output locking script : got %s, want %s",
-			responseTx.Tx.TxOut[0].LockingScript, test.contractLockingScript)
+			responseTx.Tx.TxOut[0].LockingScript, test.ContractLockingScript)
 	}
 
 	// Find formation action
@@ -780,20 +780,20 @@ func Test_Contracts_Amendment_AdminChange(t *testing.T) {
 			newAdminAddress.Bytes())
 	}
 
-	test.contract.Lock()
-	if test.contract.Formation == nil {
+	test.Contract.Lock()
+	if test.Contract.Formation == nil {
 		t.Errorf("Missing state contract formation")
-	} else if !test.contract.Formation.Equal(formation) {
+	} else if !test.Contract.Formation.Equal(formation) {
 		t.Errorf("State contract formation doesn't equal tx action")
 	}
 
-	if test.contract.FormationTxID == nil {
+	if test.Contract.FormationTxID == nil {
 		t.Errorf("Missing state contract formation txid")
-	} else if !test.contract.FormationTxID.Equal(&responseTxID) {
-		t.Errorf("Wrong state contract formation txid : got %s, want %s", test.contract.FormationTxID,
+	} else if !test.Contract.FormationTxID.Equal(&responseTxID) {
+		t.Errorf("Wrong state contract formation txid : got %s, want %s", test.Contract.FormationTxID,
 			responseTxID)
 	}
-	test.contract.Unlock()
+	test.Contract.Unlock()
 
 	StopTestAgent(ctx, t, test)
 }
@@ -817,38 +817,38 @@ func Test_Contracts_Amendment_Proposal(t *testing.T) {
 	tx := txbuilder.NewTxBuilder(0.05, 0.0)
 
 	// Add input
-	outpoint := state.MockOutPoint(test.adminLockingScript, 1)
+	outpoint := state.MockOutPoint(test.AdminLockingScript, 1)
 	spentOutputs := []*expanded_tx.Output{
 		{
-			LockingScript: test.adminLockingScript,
+			LockingScript: test.AdminLockingScript,
 			Value:         1,
 		},
 	}
 
-	if err := tx.AddInput(*outpoint, test.adminLockingScript, 1); err != nil {
+	if err := tx.AddInput(*outpoint, test.AdminLockingScript, 1); err != nil {
 		t.Fatalf("Failed to add input : %s", err)
 	}
 
 	// Add contract output
-	if err := tx.AddOutput(test.contractLockingScript, 150, false, false); err != nil {
+	if err := tx.AddOutput(test.ContractLockingScript, 150, false, false); err != nil {
 		t.Fatalf("Failed to add contract output : %s", err)
 	}
 
-	js, _ := json.MarshalIndent(test.contract.Formation, "", "  ")
+	js, _ := json.MarshalIndent(test.Contract.Formation, "", "  ")
 	t.Logf("Original ContractFormation : %s", js)
 
 	newOffer := &actions.ContractOffer{
 		ContractName:           "New Test Name",
-		ContractFee:            test.contract.Formation.ContractFee,
-		ContractType:           test.contract.Formation.ContractType,
-		EntityContract:         test.contract.Formation.EntityContract,
-		VotingSystems:          test.contract.Formation.VotingSystems,
-		AdministrationProposal: test.contract.Formation.AdministrationProposal,
-		HolderProposal:         test.contract.Formation.HolderProposal,
-		ContractPermissions:    test.contract.Formation.ContractPermissions,
+		ContractFee:            test.Contract.Formation.ContractFee,
+		ContractType:           test.Contract.Formation.ContractType,
+		EntityContract:         test.Contract.Formation.EntityContract,
+		VotingSystems:          test.Contract.Formation.VotingSystems,
+		AdministrationProposal: test.Contract.Formation.AdministrationProposal,
+		HolderProposal:         test.Contract.Formation.HolderProposal,
+		ContractPermissions:    test.Contract.Formation.ContractPermissions,
 	}
 
-	amendments, err := test.contract.Formation.CreateAmendments(newOffer)
+	amendments, err := test.Contract.Formation.CreateAmendments(newOffer)
 	if err != nil {
 		t.Fatalf("Failed to create amendments : %s", err)
 	}
@@ -860,8 +860,8 @@ func Test_Contracts_Amendment_Proposal(t *testing.T) {
 	js, _ = json.MarshalIndent(amendments, "", "  ")
 	t.Logf("Amendments : %s", js)
 
-	vote := MockVoteContractAmendmentCompleted(ctx, test.caches, test.adminLockingScript,
-		test.contractLockingScript, 0, amendments)
+	vote := MockVoteContractAmendmentCompleted(ctx, test.Caches, test.AdminLockingScript,
+		test.ContractLockingScript, 0, amendments)
 	vote.Lock()
 	voteTxID := *vote.VoteTxID
 
@@ -903,7 +903,7 @@ func Test_Contracts_Amendment_Proposal(t *testing.T) {
 	_, changeLockingScript, _ := state.MockKey()
 	tx.SetChangeLockingScript(changeLockingScript, "")
 
-	if _, err := tx.Sign([]bitcoin.Key{test.adminKey, fundingKey}); err != nil {
+	if _, err := tx.Sign([]bitcoin.Key{test.AdminKey, fundingKey}); err != nil {
 		t.Fatalf("Failed to sign tx : %s", err)
 	}
 
@@ -914,7 +914,7 @@ func Test_Contracts_Amendment_Proposal(t *testing.T) {
 		SpentOutputs: spentOutputs,
 	}
 
-	transaction, err := test.caches.Transactions.Add(ctx, addTransaction)
+	transaction, err := test.Caches.Transactions.Add(ctx, addTransaction)
 	if err != nil {
 		t.Fatalf("Failed to add transaction : %s", err)
 	}
@@ -924,7 +924,7 @@ func Test_Contracts_Amendment_Proposal(t *testing.T) {
 		Action:      contractAmendment,
 		Agents: []ActionAgent{
 			{
-				LockingScript: test.contractLockingScript,
+				LockingScript: test.ContractLockingScript,
 				IsRequest:     true,
 			},
 		},
@@ -932,9 +932,9 @@ func Test_Contracts_Amendment_Proposal(t *testing.T) {
 		t.Fatalf("Failed to process transaction : %s", err)
 	}
 
-	test.caches.Transactions.Release(ctx, transaction.GetTxID())
+	test.Caches.Transactions.Release(ctx, transaction.GetTxID())
 
-	responseTx := test.broadcaster.GetLastTx()
+	responseTx := test.Broadcaster.GetLastTx()
 	if responseTx == nil {
 		t.Fatalf("No response tx")
 	}
@@ -942,9 +942,9 @@ func Test_Contracts_Amendment_Proposal(t *testing.T) {
 
 	t.Logf("Response Tx : %s", responseTx)
 
-	if !responseTx.Tx.TxOut[0].LockingScript.Equal(test.contractLockingScript) {
+	if !responseTx.Tx.TxOut[0].LockingScript.Equal(test.ContractLockingScript) {
 		t.Errorf("Wrong contract output locking script : got %s, want %s",
-			responseTx.Tx.TxOut[0].LockingScript, test.contractLockingScript)
+			responseTx.Tx.TxOut[0].LockingScript, test.ContractLockingScript)
 	}
 
 	// Find formation action
@@ -973,22 +973,22 @@ func Test_Contracts_Amendment_Proposal(t *testing.T) {
 			"New Test Name")
 	}
 
-	test.contract.Lock()
-	if test.contract.Formation == nil {
+	test.Contract.Lock()
+	if test.Contract.Formation == nil {
 		t.Errorf("Missing state contract formation")
-	} else if !test.contract.Formation.Equal(formation) {
+	} else if !test.Contract.Formation.Equal(formation) {
 		t.Errorf("State contract formation doesn't equal tx action")
 	}
 
-	if test.contract.FormationTxID == nil {
+	if test.Contract.FormationTxID == nil {
 		t.Errorf("Missing state contract formation txid")
-	} else if !test.contract.FormationTxID.Equal(&responseTxID) {
-		t.Errorf("Wrong state contract formation txid : got %s, want %s", test.contract.FormationTxID,
+	} else if !test.Contract.FormationTxID.Equal(&responseTxID) {
+		t.Errorf("Wrong state contract formation txid : got %s, want %s", test.Contract.FormationTxID,
 			responseTxID)
 	}
-	test.contract.Unlock()
+	test.Contract.Unlock()
 
-	test.caches.Caches.Votes.Release(ctx, test.contractLockingScript, voteTxID)
+	test.Caches.Caches.Votes.Release(ctx, test.ContractLockingScript, voteTxID)
 
 	StopTestAgent(ctx, t, test)
 }

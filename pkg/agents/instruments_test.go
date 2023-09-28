@@ -60,20 +60,20 @@ func Test_Instruments_Definition_Valid(t *testing.T) {
 		tx := txbuilder.NewTxBuilder(0.05, 0.0)
 
 		// Add input
-		outpoint := state.MockOutPoint(test.adminLockingScript, 1)
+		outpoint := state.MockOutPoint(test.AdminLockingScript, 1)
 		spentOutputs := []*expanded_tx.Output{
 			{
-				LockingScript: test.adminLockingScript,
+				LockingScript: test.AdminLockingScript,
 				Value:         1,
 			},
 		}
 
-		if err := tx.AddInput(*outpoint, test.adminLockingScript, 1); err != nil {
+		if err := tx.AddInput(*outpoint, test.AdminLockingScript, 1); err != nil {
 			t.Fatalf("Failed to add input : %s", err)
 		}
 
 		// Add contract output
-		if err := tx.AddOutput(test.contractLockingScript, 150, false, false); err != nil {
+		if err := tx.AddOutput(test.ContractLockingScript, 150, false, false); err != nil {
 			t.Fatalf("Failed to add contract output : %s", err)
 		}
 
@@ -103,7 +103,7 @@ func Test_Instruments_Definition_Valid(t *testing.T) {
 		_, changeLockingScript, _ := state.MockKey()
 		tx.SetChangeLockingScript(changeLockingScript, "")
 
-		if _, err := tx.Sign([]bitcoin.Key{test.adminKey, fundingKey}); err != nil {
+		if _, err := tx.Sign([]bitcoin.Key{test.AdminKey, fundingKey}); err != nil {
 			t.Fatalf("Failed to sign tx : %s", err)
 		}
 
@@ -114,7 +114,7 @@ func Test_Instruments_Definition_Valid(t *testing.T) {
 			SpentOutputs: spentOutputs,
 		}
 
-		transaction, err := test.caches.Transactions.Add(ctx, addTransaction)
+		transaction, err := test.Caches.Transactions.Add(ctx, addTransaction)
 		if err != nil {
 			t.Fatalf("Failed to add transaction : %s", err)
 		}
@@ -124,7 +124,7 @@ func Test_Instruments_Definition_Valid(t *testing.T) {
 			Action:      definition,
 			Agents: []ActionAgent{
 				{
-					LockingScript: test.contractLockingScript,
+					LockingScript: test.ContractLockingScript,
 					IsRequest:     true,
 				},
 			},
@@ -132,9 +132,9 @@ func Test_Instruments_Definition_Valid(t *testing.T) {
 			t.Fatalf("Failed to process transaction : %s", err)
 		}
 
-		test.caches.Transactions.Release(ctx, transaction.GetTxID())
+		test.Caches.Transactions.Release(ctx, transaction.GetTxID())
 
-		responseTx := test.broadcaster.GetLastTx()
+		responseTx := test.Broadcaster.GetLastTx()
 		if responseTx == nil {
 			t.Fatalf("No response tx")
 		}
@@ -223,20 +223,20 @@ func Test_Instruments_CRN_Definition_BadFaceValue(t *testing.T) {
 	tx := txbuilder.NewTxBuilder(0.05, 0.0)
 
 	// Add input
-	outpoint := state.MockOutPoint(test.adminLockingScript, 1)
+	outpoint := state.MockOutPoint(test.AdminLockingScript, 1)
 	spentOutputs := []*expanded_tx.Output{
 		{
-			LockingScript: test.adminLockingScript,
+			LockingScript: test.AdminLockingScript,
 			Value:         1,
 		},
 	}
 
-	if err := tx.AddInput(*outpoint, test.adminLockingScript, 1); err != nil {
+	if err := tx.AddInput(*outpoint, test.AdminLockingScript, 1); err != nil {
 		t.Fatalf("Failed to add input : %s", err)
 	}
 
 	// Add contract output
-	if err := tx.AddOutput(test.contractLockingScript, 150, false, false); err != nil {
+	if err := tx.AddOutput(test.ContractLockingScript, 150, false, false); err != nil {
 		t.Fatalf("Failed to add contract output : %s", err)
 	}
 
@@ -266,7 +266,7 @@ func Test_Instruments_CRN_Definition_BadFaceValue(t *testing.T) {
 	_, changeLockingScript, _ := state.MockKey()
 	tx.SetChangeLockingScript(changeLockingScript, "")
 
-	if _, err := tx.Sign([]bitcoin.Key{test.adminKey, fundingKey}); err != nil {
+	if _, err := tx.Sign([]bitcoin.Key{test.AdminKey, fundingKey}); err != nil {
 		t.Fatalf("Failed to sign tx : %s", err)
 	}
 
@@ -277,7 +277,7 @@ func Test_Instruments_CRN_Definition_BadFaceValue(t *testing.T) {
 		SpentOutputs: spentOutputs,
 	}
 
-	transaction, err := test.caches.Transactions.Add(ctx, addTransaction)
+	transaction, err := test.Caches.Transactions.Add(ctx, addTransaction)
 	if err != nil {
 		t.Fatalf("Failed to add transaction : %s", err)
 	}
@@ -287,7 +287,7 @@ func Test_Instruments_CRN_Definition_BadFaceValue(t *testing.T) {
 		Action:      definition,
 		Agents: []ActionAgent{
 			{
-				LockingScript: test.contractLockingScript,
+				LockingScript: test.ContractLockingScript,
 				IsRequest:     true,
 			},
 		},
@@ -295,9 +295,9 @@ func Test_Instruments_CRN_Definition_BadFaceValue(t *testing.T) {
 		t.Fatalf("Failed to process transaction : %s", err)
 	}
 
-	test.caches.Transactions.Release(ctx, transaction.GetTxID())
+	test.Caches.Transactions.Release(ctx, transaction.GetTxID())
 
-	responseTx := test.broadcaster.GetLastTx()
+	responseTx := test.Broadcaster.GetLastTx()
 	if responseTx == nil {
 		t.Fatalf("No response tx")
 	}
@@ -362,20 +362,20 @@ func Test_Instruments_CRN_Definition_Reject_LowFee(t *testing.T) {
 	tx := txbuilder.NewTxBuilder(0.05, 0.0)
 
 	// Add input
-	outpoint := state.MockOutPoint(test.adminLockingScript, 1)
+	outpoint := state.MockOutPoint(test.AdminLockingScript, 1)
 	spentOutputs := []*expanded_tx.Output{
 		{
-			LockingScript: test.adminLockingScript,
+			LockingScript: test.AdminLockingScript,
 			Value:         1,
 		},
 	}
 
-	if err := tx.AddInput(*outpoint, test.adminLockingScript, 1); err != nil {
+	if err := tx.AddInput(*outpoint, test.AdminLockingScript, 1); err != nil {
 		t.Fatalf("Failed to add input : %s", err)
 	}
 
 	// Add contract output
-	if err := tx.AddOutput(test.contractLockingScript, 117, false, false); err != nil {
+	if err := tx.AddOutput(test.ContractLockingScript, 117, false, false); err != nil {
 		t.Fatalf("Failed to add contract output : %s", err)
 	}
 
@@ -405,7 +405,7 @@ func Test_Instruments_CRN_Definition_Reject_LowFee(t *testing.T) {
 	_, changeLockingScript, _ := state.MockKey()
 	tx.SetChangeLockingScript(changeLockingScript, "")
 
-	if _, err := tx.Sign([]bitcoin.Key{test.adminKey, fundingKey}); err != nil {
+	if _, err := tx.Sign([]bitcoin.Key{test.AdminKey, fundingKey}); err != nil {
 		t.Fatalf("Failed to sign tx : %s", err)
 	}
 
@@ -416,7 +416,7 @@ func Test_Instruments_CRN_Definition_Reject_LowFee(t *testing.T) {
 		SpentOutputs: spentOutputs,
 	}
 
-	transaction, err := test.caches.Transactions.Add(ctx, addTransaction)
+	transaction, err := test.Caches.Transactions.Add(ctx, addTransaction)
 	if err != nil {
 		t.Fatalf("Failed to add transaction : %s", err)
 	}
@@ -426,7 +426,7 @@ func Test_Instruments_CRN_Definition_Reject_LowFee(t *testing.T) {
 		Action:      definition,
 		Agents: []ActionAgent{
 			{
-				LockingScript: test.contractLockingScript,
+				LockingScript: test.ContractLockingScript,
 				IsRequest:     true,
 			},
 		},
@@ -434,9 +434,9 @@ func Test_Instruments_CRN_Definition_Reject_LowFee(t *testing.T) {
 		t.Fatalf("Failed to process transaction : %s", err)
 	}
 
-	test.caches.Transactions.Release(ctx, transaction.GetTxID())
+	test.Caches.Transactions.Release(ctx, transaction.GetTxID())
 
-	responseTx := test.broadcaster.GetLastTx()
+	responseTx := test.Broadcaster.GetLastTx()
 	if responseTx == nil {
 		t.Fatalf("No response tx")
 	}
@@ -472,13 +472,13 @@ func Test_Instruments_Amendment_Basic(t *testing.T) {
 	agent, test := StartTestAgentWithInstrument(ctx, t)
 
 	newDefinition := &actions.InstrumentDefinition{
-		AuthorizedTokenQty:         test.instrument.Creation.AuthorizedTokenQty + 10,
+		AuthorizedTokenQty:         test.Instrument.Creation.AuthorizedTokenQty + 10,
 		EnforcementOrdersPermitted: true,
-		InstrumentType:             test.instrument.Creation.InstrumentType,
-		InstrumentPayload:          test.instrument.Creation.InstrumentPayload,
+		InstrumentType:             test.Instrument.Creation.InstrumentType,
+		InstrumentPayload:          test.Instrument.Creation.InstrumentPayload,
 	}
 
-	amendments, err := test.instrument.Creation.CreateAmendments(newDefinition)
+	amendments, err := test.Instrument.Creation.CreateAmendments(newDefinition)
 	if err != nil {
 		t.Fatalf("Failed to create amendments : %s", err)
 	}
@@ -491,8 +491,8 @@ func Test_Instruments_Amendment_Basic(t *testing.T) {
 	t.Logf("Amendments : %s", js)
 
 	modification := &actions.InstrumentModification{
-		InstrumentType:     test.instrument.Creation.InstrumentType,
-		InstrumentCode:     test.instrument.Creation.InstrumentCode,
+		InstrumentType:     test.Instrument.Creation.InstrumentType,
+		InstrumentCode:     test.Instrument.Creation.InstrumentCode,
 		InstrumentRevision: 0,
 		Amendments:         amendments,
 	}
@@ -500,20 +500,20 @@ func Test_Instruments_Amendment_Basic(t *testing.T) {
 	tx := txbuilder.NewTxBuilder(0.05, 0.0)
 
 	// Add input
-	outpoint := state.MockOutPoint(test.adminLockingScript, 1)
+	outpoint := state.MockOutPoint(test.AdminLockingScript, 1)
 	spentOutputs := []*expanded_tx.Output{
 		{
-			LockingScript: test.adminLockingScript,
+			LockingScript: test.AdminLockingScript,
 			Value:         1,
 		},
 	}
 
-	if err := tx.AddInput(*outpoint, test.adminLockingScript, 1); err != nil {
+	if err := tx.AddInput(*outpoint, test.AdminLockingScript, 1); err != nil {
 		t.Fatalf("Failed to add input : %s", err)
 	}
 
 	// Add contract output
-	if err := tx.AddOutput(test.contractLockingScript, 150, false, false); err != nil {
+	if err := tx.AddOutput(test.ContractLockingScript, 150, false, false); err != nil {
 		t.Fatalf("Failed to add contract output : %s", err)
 	}
 
@@ -543,7 +543,7 @@ func Test_Instruments_Amendment_Basic(t *testing.T) {
 	_, changeLockingScript, _ := state.MockKey()
 	tx.SetChangeLockingScript(changeLockingScript, "")
 
-	if _, err := tx.Sign([]bitcoin.Key{test.adminKey, fundingKey}); err != nil {
+	if _, err := tx.Sign([]bitcoin.Key{test.AdminKey, fundingKey}); err != nil {
 		t.Fatalf("Failed to sign tx : %s", err)
 	}
 
@@ -554,7 +554,7 @@ func Test_Instruments_Amendment_Basic(t *testing.T) {
 		SpentOutputs: spentOutputs,
 	}
 
-	transaction, err := test.caches.Transactions.Add(ctx, addTransaction)
+	transaction, err := test.Caches.Transactions.Add(ctx, addTransaction)
 	if err != nil {
 		t.Fatalf("Failed to add transaction : %s", err)
 	}
@@ -564,7 +564,7 @@ func Test_Instruments_Amendment_Basic(t *testing.T) {
 		Action:      modification,
 		Agents: []ActionAgent{
 			{
-				LockingScript: test.contractLockingScript,
+				LockingScript: test.ContractLockingScript,
 				IsRequest:     true,
 			},
 		},
@@ -572,9 +572,9 @@ func Test_Instruments_Amendment_Basic(t *testing.T) {
 		t.Fatalf("Failed to process transaction : %s", err)
 	}
 
-	test.caches.Transactions.Release(ctx, transaction.GetTxID())
+	test.Caches.Transactions.Release(ctx, transaction.GetTxID())
 
-	responseTx := test.broadcaster.GetLastTx()
+	responseTx := test.Broadcaster.GetLastTx()
 	if responseTx == nil {
 		t.Fatalf("No response tx")
 	}
@@ -623,8 +623,8 @@ func Test_Instruments_Amendment_Payload(t *testing.T) {
 	ctx := logger.ContextWithLogger(context.Background(), true, true, "")
 	agent, test := StartTestAgentWithInstrument(ctx, t)
 
-	payload, err := instruments.Deserialize([]byte(test.instrument.Creation.InstrumentType),
-		test.instrument.Creation.InstrumentPayload)
+	payload, err := instruments.Deserialize([]byte(test.Instrument.Creation.InstrumentType),
+		test.Instrument.Creation.InstrumentPayload)
 	if err != nil {
 		t.Fatalf("Failed to deserialize payload : %s", err)
 	}
@@ -642,13 +642,13 @@ func Test_Instruments_Amendment_Payload(t *testing.T) {
 	}
 
 	newDefinition := &actions.InstrumentDefinition{
-		AuthorizedTokenQty:         test.instrument.Creation.AuthorizedTokenQty,
+		AuthorizedTokenQty:         test.Instrument.Creation.AuthorizedTokenQty,
 		EnforcementOrdersPermitted: true,
-		InstrumentType:             test.instrument.Creation.InstrumentType,
+		InstrumentType:             test.Instrument.Creation.InstrumentType,
 		InstrumentPayload:          currencyBuf.Bytes(),
 	}
 
-	amendments, err := test.instrument.Creation.CreateAmendments(newDefinition)
+	amendments, err := test.Instrument.Creation.CreateAmendments(newDefinition)
 	if err != nil {
 		t.Fatalf("Failed to create amendments : %s", err)
 	}
@@ -661,8 +661,8 @@ func Test_Instruments_Amendment_Payload(t *testing.T) {
 	t.Logf("Amendments : %s", js)
 
 	modification := &actions.InstrumentModification{
-		InstrumentType:     test.instrument.Creation.InstrumentType,
-		InstrumentCode:     test.instrument.Creation.InstrumentCode,
+		InstrumentType:     test.Instrument.Creation.InstrumentType,
+		InstrumentCode:     test.Instrument.Creation.InstrumentCode,
 		InstrumentRevision: 0,
 		Amendments:         amendments,
 	}
@@ -670,20 +670,20 @@ func Test_Instruments_Amendment_Payload(t *testing.T) {
 	tx := txbuilder.NewTxBuilder(0.05, 0.0)
 
 	// Add input
-	outpoint := state.MockOutPoint(test.adminLockingScript, 1)
+	outpoint := state.MockOutPoint(test.AdminLockingScript, 1)
 	spentOutputs := []*expanded_tx.Output{
 		{
-			LockingScript: test.adminLockingScript,
+			LockingScript: test.AdminLockingScript,
 			Value:         1,
 		},
 	}
 
-	if err := tx.AddInput(*outpoint, test.adminLockingScript, 1); err != nil {
+	if err := tx.AddInput(*outpoint, test.AdminLockingScript, 1); err != nil {
 		t.Fatalf("Failed to add input : %s", err)
 	}
 
 	// Add contract output
-	if err := tx.AddOutput(test.contractLockingScript, 150, false, false); err != nil {
+	if err := tx.AddOutput(test.ContractLockingScript, 150, false, false); err != nil {
 		t.Fatalf("Failed to add contract output : %s", err)
 	}
 
@@ -713,7 +713,7 @@ func Test_Instruments_Amendment_Payload(t *testing.T) {
 	_, changeLockingScript, _ := state.MockKey()
 	tx.SetChangeLockingScript(changeLockingScript, "")
 
-	if _, err := tx.Sign([]bitcoin.Key{test.adminKey, fundingKey}); err != nil {
+	if _, err := tx.Sign([]bitcoin.Key{test.AdminKey, fundingKey}); err != nil {
 		t.Fatalf("Failed to sign tx : %s", err)
 	}
 
@@ -724,7 +724,7 @@ func Test_Instruments_Amendment_Payload(t *testing.T) {
 		SpentOutputs: spentOutputs,
 	}
 
-	transaction, err := test.caches.Transactions.Add(ctx, addTransaction)
+	transaction, err := test.Caches.Transactions.Add(ctx, addTransaction)
 	if err != nil {
 		t.Fatalf("Failed to add transaction : %s", err)
 	}
@@ -734,7 +734,7 @@ func Test_Instruments_Amendment_Payload(t *testing.T) {
 		Action:      modification,
 		Agents: []ActionAgent{
 			{
-				LockingScript: test.contractLockingScript,
+				LockingScript: test.ContractLockingScript,
 				IsRequest:     true,
 			},
 		},
@@ -742,9 +742,9 @@ func Test_Instruments_Amendment_Payload(t *testing.T) {
 		t.Fatalf("Failed to process transaction : %s", err)
 	}
 
-	test.caches.Transactions.Release(ctx, transaction.GetTxID())
+	test.Caches.Transactions.Release(ctx, transaction.GetTxID())
 
-	responseTx := test.broadcaster.GetLastTx()
+	responseTx := test.Broadcaster.GetLastTx()
 	if responseTx == nil {
 		t.Fatalf("No response tx")
 	}
@@ -809,7 +809,7 @@ func Test_Instruments_Amendment_Proposal(t *testing.T) {
 	}
 	agent, test := StartTestAgentWithVoteSystems(ctx, t, votingSystems)
 
-	instrument := state.MockInstrumentOnly(ctx, &test.caches.TestCaches, test.contract)
+	instrument := state.MockInstrumentOnly(ctx, &test.Caches.TestCaches, test.Contract)
 
 	newDefinition := &actions.InstrumentDefinition{
 		AuthorizedTokenQty: instrument.Creation.AuthorizedTokenQty + 10,
@@ -830,9 +830,9 @@ func Test_Instruments_Amendment_Proposal(t *testing.T) {
 	js, _ := json.MarshalIndent(amendments, "", "  ")
 	t.Logf("Amendments : %s", js)
 
-	vote := MockVoteInstrumentAmendmentCompleted(ctx, test.caches,
-		instrument.Creation.InstrumentType, instrument.Creation.InstrumentCode, test.adminLockingScript,
-		test.contractLockingScript, 0, amendments)
+	vote := MockVoteInstrumentAmendmentCompleted(ctx, test.Caches,
+		instrument.Creation.InstrumentType, instrument.Creation.InstrumentCode, test.AdminLockingScript,
+		test.ContractLockingScript, 0, amendments)
 	vote.Lock()
 	voteTxID := *vote.VoteTxID
 
@@ -851,20 +851,20 @@ func Test_Instruments_Amendment_Proposal(t *testing.T) {
 	tx := txbuilder.NewTxBuilder(0.05, 0.0)
 
 	// Add input
-	outpoint := state.MockOutPoint(test.adminLockingScript, 1)
+	outpoint := state.MockOutPoint(test.AdminLockingScript, 1)
 	spentOutputs := []*expanded_tx.Output{
 		{
-			LockingScript: test.adminLockingScript,
+			LockingScript: test.AdminLockingScript,
 			Value:         1,
 		},
 	}
 
-	if err := tx.AddInput(*outpoint, test.adminLockingScript, 1); err != nil {
+	if err := tx.AddInput(*outpoint, test.AdminLockingScript, 1); err != nil {
 		t.Fatalf("Failed to add input : %s", err)
 	}
 
 	// Add contract output
-	if err := tx.AddOutput(test.contractLockingScript, 150, false, false); err != nil {
+	if err := tx.AddOutput(test.ContractLockingScript, 150, false, false); err != nil {
 		t.Fatalf("Failed to add contract output : %s", err)
 	}
 
@@ -894,7 +894,7 @@ func Test_Instruments_Amendment_Proposal(t *testing.T) {
 	_, changeLockingScript, _ := state.MockKey()
 	tx.SetChangeLockingScript(changeLockingScript, "")
 
-	if _, err := tx.Sign([]bitcoin.Key{test.adminKey, fundingKey}); err != nil {
+	if _, err := tx.Sign([]bitcoin.Key{test.AdminKey, fundingKey}); err != nil {
 		t.Fatalf("Failed to sign tx : %s", err)
 	}
 
@@ -905,7 +905,7 @@ func Test_Instruments_Amendment_Proposal(t *testing.T) {
 		SpentOutputs: spentOutputs,
 	}
 
-	transaction, err := test.caches.Transactions.Add(ctx, addTransaction)
+	transaction, err := test.Caches.Transactions.Add(ctx, addTransaction)
 	if err != nil {
 		t.Fatalf("Failed to add transaction : %s", err)
 	}
@@ -915,7 +915,7 @@ func Test_Instruments_Amendment_Proposal(t *testing.T) {
 		Action:      modification,
 		Agents: []ActionAgent{
 			{
-				LockingScript: test.contractLockingScript,
+				LockingScript: test.ContractLockingScript,
 				IsRequest:     true,
 			},
 		},
@@ -923,9 +923,9 @@ func Test_Instruments_Amendment_Proposal(t *testing.T) {
 		t.Fatalf("Failed to process transaction : %s", err)
 	}
 
-	test.caches.Transactions.Release(ctx, transaction.GetTxID())
+	test.Caches.Transactions.Release(ctx, transaction.GetTxID())
 
-	responseTx := test.broadcaster.GetLastTx()
+	responseTx := test.Broadcaster.GetLastTx()
 	if responseTx == nil {
 		t.Fatalf("No response tx")
 	}
@@ -966,8 +966,8 @@ func Test_Instruments_Amendment_Proposal(t *testing.T) {
 		t.Errorf("Instrument payload not a currency")
 	}
 
-	test.caches.Caches.Votes.Release(ctx, test.contractLockingScript, voteTxID)
-	test.caches.Caches.Instruments.Release(ctx, test.contractLockingScript, instrument.InstrumentCode)
+	test.Caches.Caches.Votes.Release(ctx, test.ContractLockingScript, voteTxID)
+	test.Caches.Caches.Instruments.Release(ctx, test.ContractLockingScript, instrument.InstrumentCode)
 
 	StopTestAgent(ctx, t, test)
 }
@@ -976,8 +976,8 @@ func Test_Instruments_Amendment_CRN_FaceValue_Prohibited(t *testing.T) {
 	ctx := logger.ContextWithLogger(context.Background(), true, true, "")
 	agent, test := StartTestAgentWithInstrumentCreditNote(ctx, t)
 
-	payload, err := instruments.Deserialize([]byte(test.instrument.Creation.InstrumentType),
-		test.instrument.Creation.InstrumentPayload)
+	payload, err := instruments.Deserialize([]byte(test.Instrument.Creation.InstrumentType),
+		test.Instrument.Creation.InstrumentPayload)
 	if err != nil {
 		t.Fatalf("Failed to deserialize payload : %s", err)
 	}
@@ -995,13 +995,13 @@ func Test_Instruments_Amendment_CRN_FaceValue_Prohibited(t *testing.T) {
 	}
 
 	newDefinition := &actions.InstrumentDefinition{
-		AuthorizedTokenQty:         test.instrument.Creation.AuthorizedTokenQty,
+		AuthorizedTokenQty:         test.Instrument.Creation.AuthorizedTokenQty,
 		EnforcementOrdersPermitted: true,
-		InstrumentType:             test.instrument.Creation.InstrumentType,
+		InstrumentType:             test.Instrument.Creation.InstrumentType,
 		InstrumentPayload:          currencyBuf.Bytes(),
 	}
 
-	amendments, err := test.instrument.Creation.CreateAmendments(newDefinition)
+	amendments, err := test.Instrument.Creation.CreateAmendments(newDefinition)
 	if err != nil {
 		t.Fatalf("Failed to create amendments : %s", err)
 	}
@@ -1014,8 +1014,8 @@ func Test_Instruments_Amendment_CRN_FaceValue_Prohibited(t *testing.T) {
 	t.Logf("Amendments : %s", js)
 
 	modification := &actions.InstrumentModification{
-		InstrumentType:     test.instrument.Creation.InstrumentType,
-		InstrumentCode:     test.instrument.Creation.InstrumentCode,
+		InstrumentType:     test.Instrument.Creation.InstrumentType,
+		InstrumentCode:     test.Instrument.Creation.InstrumentCode,
 		InstrumentRevision: 0,
 		Amendments:         amendments,
 	}
@@ -1023,20 +1023,20 @@ func Test_Instruments_Amendment_CRN_FaceValue_Prohibited(t *testing.T) {
 	tx := txbuilder.NewTxBuilder(0.05, 0.0)
 
 	// Add input
-	outpoint := state.MockOutPoint(test.adminLockingScript, 1)
+	outpoint := state.MockOutPoint(test.AdminLockingScript, 1)
 	spentOutputs := []*expanded_tx.Output{
 		{
-			LockingScript: test.adminLockingScript,
+			LockingScript: test.AdminLockingScript,
 			Value:         1,
 		},
 	}
 
-	if err := tx.AddInput(*outpoint, test.adminLockingScript, 1); err != nil {
+	if err := tx.AddInput(*outpoint, test.AdminLockingScript, 1); err != nil {
 		t.Fatalf("Failed to add input : %s", err)
 	}
 
 	// Add contract output
-	if err := tx.AddOutput(test.contractLockingScript, 150, false, false); err != nil {
+	if err := tx.AddOutput(test.ContractLockingScript, 150, false, false); err != nil {
 		t.Fatalf("Failed to add contract output : %s", err)
 	}
 
@@ -1066,7 +1066,7 @@ func Test_Instruments_Amendment_CRN_FaceValue_Prohibited(t *testing.T) {
 	_, changeLockingScript, _ := state.MockKey()
 	tx.SetChangeLockingScript(changeLockingScript, "")
 
-	if _, err := tx.Sign([]bitcoin.Key{test.adminKey, fundingKey}); err != nil {
+	if _, err := tx.Sign([]bitcoin.Key{test.AdminKey, fundingKey}); err != nil {
 		t.Fatalf("Failed to sign tx : %s", err)
 	}
 
@@ -1077,7 +1077,7 @@ func Test_Instruments_Amendment_CRN_FaceValue_Prohibited(t *testing.T) {
 		SpentOutputs: spentOutputs,
 	}
 
-	transaction, err := test.caches.Transactions.Add(ctx, addTransaction)
+	transaction, err := test.Caches.Transactions.Add(ctx, addTransaction)
 	if err != nil {
 		t.Fatalf("Failed to add transaction : %s", err)
 	}
@@ -1087,7 +1087,7 @@ func Test_Instruments_Amendment_CRN_FaceValue_Prohibited(t *testing.T) {
 		Action:      modification,
 		Agents: []ActionAgent{
 			{
-				LockingScript: test.contractLockingScript,
+				LockingScript: test.ContractLockingScript,
 				IsRequest:     true,
 			},
 		},
@@ -1095,9 +1095,9 @@ func Test_Instruments_Amendment_CRN_FaceValue_Prohibited(t *testing.T) {
 		t.Fatalf("Failed to process transaction : %s", err)
 	}
 
-	test.caches.Transactions.Release(ctx, transaction.GetTxID())
+	test.Caches.Transactions.Release(ctx, transaction.GetTxID())
 
-	responseTx := test.broadcaster.GetLastTx()
+	responseTx := test.Broadcaster.GetLastTx()
 	if responseTx == nil {
 		t.Fatalf("No response tx")
 	}
@@ -1125,8 +1125,8 @@ func Test_Instruments_Amendment_CRN_FaceValue_Prohibited(t *testing.T) {
 	js, _ = json.MarshalIndent(rejection, "", "  ")
 	t.Logf("Rejection : %s", js)
 
-	instrument, err := test.caches.Caches.Instruments.Get(ctx, test.contractLockingScript,
-		test.instrument.InstrumentCode)
+	instrument, err := test.Caches.Caches.Instruments.Get(ctx, test.ContractLockingScript,
+		test.Instrument.InstrumentCode)
 	if err != nil {
 		t.Fatalf("Failed to get instrument : %s", err)
 	}

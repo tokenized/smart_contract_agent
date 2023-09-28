@@ -107,7 +107,7 @@ func (a *Agent) Sign(ctx context.Context, tx *txbuilder.TxBuilder,
 		}
 
 		if fee < int64(feeEstimate) {
-			description := fmt.Sprintf("%d funding < %d (+%d tx fee) needed", inputsValue,
+			description := fmt.Sprintf("inputs: %d < outputs: %d (+ tx fee: %d)", inputsValue,
 				outputsValue, feeEstimate)
 			return errors.Wrapf(txbuilder.ErrInsufficientValue, description)
 		}

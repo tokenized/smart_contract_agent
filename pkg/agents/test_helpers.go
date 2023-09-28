@@ -35,36 +35,117 @@ type TestCaches struct {
 }
 
 type TestData struct {
-	store               *storage.MockStorage
-	broadcaster         *state.MockTxBroadcaster
-	caches              *TestCaches
-	locker              *locker.InlineLocker
-	peerChannelsFactory *peer_channels.Factory
+	Store               *storage.MockStorage
+	Broadcaster         *state.MockTxBroadcaster
+	Caches              *TestCaches
+	Locker              *locker.InlineLocker
+	PeerChannelsFactory *peer_channels.Factory
 
 	peerChannelResponder         *PeerChannelResponder
 	peerChannelResponsesComplete chan interface{}
-	peerChannelResponses         chan PeerChannelResponse
+	PeerChannelResponses         chan PeerChannelResponse
 
 	schedulerInterrupt chan interface{}
 	schedulerComplete  chan interface{}
 	scheduler          *scheduler.Scheduler
 	headers            *state.MockHeaders
 
-	contractKey           bitcoin.Key
-	contractLockingScript bitcoin.Script
-	adminKey              bitcoin.Key
-	adminLockingScript    bitcoin.Script
-	feeLockingScript      bitcoin.Script
+	ContractKey           bitcoin.Key
+	ContractLockingScript bitcoin.Script
+	AdminKey              bitcoin.Key
+	AdminLockingScript    bitcoin.Script
+	FeeLockingScript      bitcoin.Script
 
 	oracleKey bitcoin.Key
 
-	contract   *state.Contract
-	instrument *state.Instrument
+	Contract   *state.Contract
+	Instrument *state.Instrument
 
 	mockStore *MockStore
 
 	agentData AgentData
 	agent     *Agent
+}
+
+type TestAgentData struct {
+	Agent *Agent
+
+	Contract   *state.Contract
+	Instrument *state.Instrument
+
+	ContractKey           bitcoin.Key
+	ContractLockingScript bitcoin.Script
+	AdminKey              bitcoin.Key
+	AdminLockingScript    bitcoin.Script
+	FeeLockingScript      bitcoin.Script
+
+	Caches      *TestCaches
+	Broadcaster *state.MockTxBroadcaster
+}
+
+func (t *TestAgentData) ProcessTx(ctx context.Context,
+	etx *expanded_tx.ExpandedTx) *expanded_tx.ExpandedTx {
+
+	transaction, err := t.Caches.Transactions.AddExpandedTx(ctx, etx)
+	if err != nil {
+		panic(fmt.Sprintf("Failed to add transaction : %s", err))
+	}
+	defer t.Caches.Transactions.Release(ctx, etx.TxID())
+
+	transaction.Lock()
+	var action actions.Action
+	var actionIndex int
+	for outputIndex, txout := range transaction.Tx.TxOut {
+		act, err := protocol.Deserialize(txout.LockingScript, true)
+		if err != nil {
+			continue
+		}
+
+		action = act
+		actionIndex = outputIndex
+		break
+	}
+	transaction.Unlock()
+
+	// Process transfer transaction on both agents
+	if err := t.Agent.Process(ctx, transaction, []Action{{
+		OutputIndex: actionIndex,
+		Action:      action,
+		Agents: []ActionAgent{
+			{
+				LockingScript: t.ContractLockingScript,
+				IsRequest:     true,
+			},
+		},
+	}}); err != nil {
+		panic(fmt.Sprintf("Failed to process transaction : %s : %s", err, etx))
+	}
+
+	responseTx := t.Broadcaster.GetLastTx()
+	t.Broadcaster.ClearTxs()
+	return responseTx
+}
+
+func TestProcessTx(ctx context.Context, agents []*TestAgentData,
+	etx *expanded_tx.ExpandedTx) []*expanded_tx.ExpandedTx {
+
+	var responses []*expanded_tx.ExpandedTx
+	currentTx := etx
+	for {
+		var currentResponseTx *expanded_tx.ExpandedTx
+		for _, agent := range agents {
+			responseTx := agent.ProcessTx(ctx, currentTx)
+			if responseTx != nil {
+				currentResponseTx = responseTx
+				responses = append(responses, responseTx)
+			}
+		}
+
+		if currentResponseTx == nil {
+			return responses
+		}
+		currentTx = currentResponseTx
+	}
 }
 
 func StartTestData(ctx context.Context, t testing.TB) *TestData {
@@ -76,19 +157,19 @@ func StartTestData(ctx context.Context, t testing.TB) *TestData {
 func StartTestAgent(ctx context.Context, t testing.TB) (*Agent, *TestData) {
 	test := prepareTestData(ctx, t)
 
-	test.contractKey, test.contractLockingScript, _ = state.MockKey()
-	test.adminKey, test.adminLockingScript, _ = state.MockKey()
+	test.ContractKey, test.ContractLockingScript, _ = state.MockKey()
+	test.AdminKey, test.AdminLockingScript, _ = state.MockKey()
 
-	test.contract = &state.Contract{
-		LockingScript: test.contractLockingScript,
+	test.Contract = &state.Contract{
+		LockingScript: test.ContractLockingScript,
 	}
 
 	var err error
-	test.contract, err = test.caches.Caches.Contracts.Add(ctx, test.contract)
+	test.Contract, err = test.Caches.Caches.Contracts.Add(ctx, test.Contract)
 	if err != nil {
 		t.Fatalf("Failed to add contract : %s", err)
 	}
-	_, test.feeLockingScript, _ = state.MockKey()
+	_, test.FeeLockingScript, _ = state.MockKey()
 
 	finalizeTestAgent(ctx, t, test)
 
@@ -98,9 +179,9 @@ func StartTestAgent(ctx context.Context, t testing.TB) (*Agent, *TestData) {
 func StartTestAgentWithContract(ctx context.Context, t testing.TB) (*Agent, *TestData) {
 	test := prepareTestData(ctx, t)
 
-	test.contractKey, test.contractLockingScript, test.adminKey, test.adminLockingScript, test.contract = state.MockContract(ctx,
-		&test.caches.TestCaches)
-	_, test.feeLockingScript, _ = state.MockKey()
+	test.ContractKey, test.ContractLockingScript, test.AdminKey, test.AdminLockingScript, test.Contract = state.MockContract(ctx,
+		&test.Caches.TestCaches)
+	_, test.FeeLockingScript, _ = state.MockKey()
 
 	finalizeTestAgent(ctx, t, test)
 
@@ -110,9 +191,9 @@ func StartTestAgentWithContract(ctx context.Context, t testing.TB) (*Agent, *Tes
 func StartTestAgentWithInstrument(ctx context.Context, t testing.TB) (*Agent, *TestData) {
 	test := prepareTestData(ctx, t)
 
-	test.contractKey, test.contractLockingScript, test.adminKey, test.adminLockingScript, test.contract, test.instrument = state.MockInstrument(ctx,
-		&test.caches.TestCaches)
-	_, test.feeLockingScript, _ = state.MockKey()
+	test.ContractKey, test.ContractLockingScript, test.AdminKey, test.AdminLockingScript, test.Contract, test.Instrument = state.MockInstrument(ctx,
+		&test.Caches.TestCaches)
+	_, test.FeeLockingScript, _ = state.MockKey()
 
 	finalizeTestAgent(ctx, t, test)
 
@@ -122,9 +203,9 @@ func StartTestAgentWithInstrument(ctx context.Context, t testing.TB) (*Agent, *T
 func StartTestAgentWithInstrumentCreditNote(ctx context.Context, t testing.TB) (*Agent, *TestData) {
 	test := prepareTestData(ctx, t)
 
-	test.contractKey, test.contractLockingScript, test.adminKey, test.adminLockingScript, test.contract, test.instrument = state.MockInstrumentCreditNote(ctx,
-		&test.caches.TestCaches)
-	_, test.feeLockingScript, _ = state.MockKey()
+	test.ContractKey, test.ContractLockingScript, test.AdminKey, test.AdminLockingScript, test.Contract, test.Instrument = state.MockInstrumentCreditNote(ctx,
+		&test.Caches.TestCaches)
+	_, test.FeeLockingScript, _ = state.MockKey()
 
 	finalizeTestAgent(ctx, t, test)
 
@@ -134,9 +215,9 @@ func StartTestAgentWithInstrumentCreditNote(ctx context.Context, t testing.TB) (
 func StartTestAgentWithInstrumentWithOracle(ctx context.Context, t testing.TB) (*Agent, *TestData) {
 	test := prepareTestData(ctx, t)
 
-	test.contractKey, test.contractLockingScript, test.adminKey, test.adminLockingScript, test.contract, test.instrument, test.oracleKey = MockInstrumentWithOracle(ctx,
-		test.caches)
-	_, test.feeLockingScript, _ = state.MockKey()
+	test.ContractKey, test.ContractLockingScript, test.AdminKey, test.AdminLockingScript, test.Contract, test.Instrument, test.oracleKey = MockInstrumentWithOracle(ctx,
+		test.Caches)
+	_, test.FeeLockingScript, _ = state.MockKey()
 
 	finalizeTestAgent(ctx, t, test)
 
@@ -147,9 +228,9 @@ func StartTestAgentWithVoteSystems(ctx context.Context, t testing.TB,
 	votingSystems []*actions.VotingSystemField) (*Agent, *TestData) {
 	test := prepareTestData(ctx, t)
 
-	test.contractKey, test.contractLockingScript, test.adminKey, test.adminLockingScript, test.contract = state.MockContractWithVoteSystems(ctx,
-		&test.caches.TestCaches, votingSystems)
-	_, test.feeLockingScript, _ = state.MockKey()
+	test.ContractKey, test.ContractLockingScript, test.AdminKey, test.AdminLockingScript, test.Contract = state.MockContractWithVoteSystems(ctx,
+		&test.Caches.TestCaches, votingSystems)
+	_, test.FeeLockingScript, _ = state.MockKey()
 
 	finalizeTestAgent(ctx, t, test)
 
@@ -158,31 +239,31 @@ func StartTestAgentWithVoteSystems(ctx context.Context, t testing.TB,
 
 func prepareTestData(ctx context.Context, t testing.TB) *TestData {
 	test := &TestData{
-		store:                        storage.NewMockStorage(),
-		broadcaster:                  state.NewMockTxBroadcaster(),
-		locker:                       locker.NewInlineLocker(),
-		peerChannelsFactory:          peer_channels.NewFactory(),
+		Store:                        storage.NewMockStorage(),
+		Broadcaster:                  state.NewMockTxBroadcaster(),
+		Locker:                       locker.NewInlineLocker(),
+		PeerChannelsFactory:          peer_channels.NewFactory(),
 		peerChannelResponsesComplete: make(chan interface{}),
-		peerChannelResponses:         make(chan PeerChannelResponse),
+		PeerChannelResponses:         make(chan PeerChannelResponse),
 		schedulerInterrupt:           make(chan interface{}),
 		schedulerComplete:            make(chan interface{}),
 		headers:                      state.NewMockHeaders(),
 	}
 
-	test.scheduler = scheduler.NewScheduler(test.broadcaster, time.Second)
+	test.scheduler = scheduler.NewScheduler(test.Broadcaster, time.Second)
 
-	test.caches = StartTestCaches(ctx, t, test.store, time.Second)
+	test.Caches = StartTestCaches(ctx, t, test.Store, time.Second)
 
-	if test.caches.Transactions == nil {
+	if test.Caches.Transactions == nil {
 		t.Fatalf("Transactions is nil")
 	}
 
-	test.mockStore = NewMockStore(DefaultConfig(), test.feeLockingScript, test.caches.Caches,
-		test.caches.Transactions, test.caches.Services, test.locker, test.store, test.broadcaster,
-		nil, nil, test.scheduler, test.peerChannelsFactory, test.peerChannelResponses)
+	test.mockStore = NewMockStore(DefaultConfig(), test.FeeLockingScript, test.Caches.Caches,
+		test.Caches.Transactions, test.Caches.Services, test.Locker, test.Store, test.Broadcaster,
+		nil, nil, test.scheduler, test.PeerChannelsFactory, test.PeerChannelResponses)
 
-	test.peerChannelResponder = NewPeerChannelResponder(test.caches.Caches,
-		test.peerChannelsFactory)
+	test.peerChannelResponder = NewPeerChannelResponder(test.Caches.Caches,
+		test.PeerChannelsFactory)
 
 	go func() {
 		defer func() {
@@ -199,7 +280,7 @@ func prepareTestData(ctx context.Context, t testing.TB) *TestData {
 	}()
 
 	go func() {
-		ProcessResponses(ctx, test.peerChannelResponder, test.peerChannelResponses)
+		ProcessResponses(ctx, test.peerChannelResponder, test.PeerChannelResponses)
 		close(test.peerChannelResponsesComplete)
 	}()
 
@@ -208,25 +289,25 @@ func prepareTestData(ctx context.Context, t testing.TB) *TestData {
 
 func finalizeTestAgent(ctx context.Context, t testing.TB, test *TestData) {
 	test.agentData = AgentData{
-		Key:                test.contractKey,
-		LockingScript:      test.contractLockingScript,
-		FeeLockingScript:   test.feeLockingScript,
+		Key:                test.ContractKey,
+		LockingScript:      test.ContractLockingScript,
+		FeeLockingScript:   test.FeeLockingScript,
 		MinimumContractFee: 100,
 		IsActive:           true,
 	}
 
 	var err error
-	test.agent, err = NewAgent(ctx, test.agentData, DefaultConfig(), test.caches.Caches,
-		test.caches.Transactions, test.caches.Services, test.locker, test.store,
-		test.broadcaster, nil, test.headers, test.scheduler, test.mockStore,
-		test.peerChannelsFactory, test.peerChannelResponses)
+	test.agent, err = NewAgent(ctx, test.agentData, DefaultConfig(), test.Caches.Caches,
+		test.Caches.Transactions, test.Caches.Services, test.Locker, test.Store,
+		test.Broadcaster, nil, test.headers, test.scheduler, test.mockStore,
+		test.PeerChannelsFactory, test.PeerChannelResponses)
 	if err != nil {
 		t.Fatalf("Failed to create agent : %s", err)
 	}
 }
 
 func StopTestAgent(ctx context.Context, t *testing.T, test *TestData) {
-	close(test.peerChannelResponses)
+	close(test.PeerChannelResponses)
 	select {
 	case <-test.peerChannelResponsesComplete:
 	case <-time.After(time.Second):
@@ -243,14 +324,14 @@ func StopTestAgent(ctx context.Context, t *testing.T, test *TestData) {
 	if test.agent != nil {
 		test.agent.Release(ctx)
 	}
-	if test.instrument != nil {
-		test.caches.Caches.Instruments.Release(ctx, test.contractLockingScript,
-			test.instrument.InstrumentCode)
+	if test.Instrument != nil {
+		test.Caches.Caches.Instruments.Release(ctx, test.ContractLockingScript,
+			test.Instrument.InstrumentCode)
 	}
-	if test.contract != nil {
-		test.caches.Caches.Contracts.Release(ctx, test.contractLockingScript)
+	if test.Contract != nil {
+		test.Caches.Caches.Contracts.Release(ctx, test.ContractLockingScript)
 	}
-	test.caches.StopTestCaches()
+	test.Caches.StopTestCaches()
 }
 
 func StartTestCaches(ctx context.Context, t testing.TB, store storage.StreamStorage,
