@@ -71,20 +71,44 @@ func (a *Agent) Sign(ctx context.Context, tx *txbuilder.TxBuilder,
 		if isReject(tx, config.IsTest) {
 			// Change fee locking script output.
 			feeLockingScript := a.FeeLockingScript()
-			for _, txout := range tx.MsgTx.TxOut {
+			for outputIndex, txout := range tx.MsgTx.TxOut {
 				if !txout.LockingScript.Equal(feeLockingScript) {
 					continue
 				}
 
 				dust := fees.DustLimitForLockingScript(feeLockingScript, config.DustFeeRate)
-				if txout.Value > dust && txout.Value-dust > deficit {
-					logger.WarnWithFields(ctx, []logger.Field{
-						logger.Uint64("deficit", deficit),
-						logger.Uint64("previous_value", txout.Value),
-						logger.Uint64("new_value", txout.Value-deficit),
-					}, "Reducing contract fee to fund rejection")
-					txout.Value -= deficit
-					fee += int64(deficit)
+				if txout.Value > dust {
+					if txout.Value-dust > deficit {
+						logger.WarnWithFields(ctx, []logger.Field{
+							logger.Uint64("deficit", deficit),
+							logger.Uint64("previous_value", txout.Value),
+							logger.Uint64("new_value", txout.Value-deficit),
+						}, "Reducing contract fee to fund rejection")
+						txout.Value -= deficit
+						outputsValue -= deficit
+						fee += int64(deficit)
+						break
+					} else {
+						logger.WarnWithFields(ctx, []logger.Field{
+							logger.Uint64("deficit", deficit),
+							logger.Uint64("value", txout.Value),
+						}, "Removing contract fee output to fund rejection")
+						fee += int64(txout.Value)
+						deficit -= txout.Value
+						outputsValue -= txout.Value
+						tx.RemoveOutput(outputIndex)
+
+						// Recalculate fee estimate based on smaller transaction size.
+						sizeEstimate, err = fees.EstimateSize(tx, unlockers)
+						if err != nil {
+							return errors.Wrap(err, "estimate size")
+						}
+
+						feeEstimate = fees.EstimateFeeValue(sizeEstimate, config.FeeRate)
+						if err != nil {
+							return errors.Wrap(err, "estimate fee")
+						}
+					}
 				}
 			}
 
@@ -216,7 +240,6 @@ func isReject(tx *txbuilder.TxBuilder, isTest bool) bool {
 }
 
 func removeRejectionMessage(ctx context.Context, tx *txbuilder.TxBuilder, isTest bool) bool {
-	println("removing rejection message")
 	for _, txout := range tx.MsgTx.TxOut {
 		act, err := protocol.Deserialize(txout.LockingScript, isTest)
 		if err != nil {
