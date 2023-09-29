@@ -1,6 +1,7 @@
 package funding
 
 import (
+	"github.com/tokenized/bitcoin_interpreter/agent_bitcoin_transfer"
 	"github.com/tokenized/pkg/bitcoin"
 	"github.com/tokenized/pkg/expanded_tx"
 	"github.com/tokenized/specification/dist/golang/actions"
@@ -20,7 +21,7 @@ const (
 	FlatContractInputOutputSize = txbuilder.P2PKHOutputSize + // standard P2PKH output
 		txbuilder.MaximumP2PKHInputSize // P2PKH input
 	FlatInstrumentSize               = 30  // instrument type, code, and count of senders and receivers
-	FlatParticipantSize              = 10  // 2 byte index, max 8 byte quantity
+	FlatParticipantSize              = 10  // settlement entry, 2 byte index, max 8 byte quantity
 	FlatSettlementRequestInitialSize = 8 + // timestamp
 		33 + // transfer txid
 		txbuilder.P2PKHOutputScriptSize + // fee locking script
@@ -30,6 +31,7 @@ const (
 		8 // fee value
 	FlatSignatureRequestInitialSize = 8 + // timestamp
 		8 // message payload size
+	FlatBitcoinTransferSize = 20 // ?
 )
 
 var (
@@ -50,7 +52,7 @@ type OutputFunding struct {
 	InstrumentCount  int
 	ParticipantCount int
 	ParticipantsFee  uint64
-	DustOutputsSize  int
+	OutputsSize      int
 	Dust             uint64
 	ResponseFee      uint64
 }
@@ -59,7 +61,7 @@ func (of OutputFunding) CalculateResponseFee(feeRate float64) uint64 {
 	return fees.EstimateFeeValue(FlatContractSize+
 		(FlatInstrumentSize*of.InstrumentCount)+
 		(FlatParticipantSize*of.ParticipantCount)+
-		of.DustOutputsSize, feeRate)
+		of.OutputsSize, feeRate)
 }
 
 func (of OutputFunding) Value() uint64 {
@@ -67,9 +69,11 @@ func (of OutputFunding) Value() uint64 {
 }
 
 type ResponseFunding struct {
-	FeeRate   float64
-	Contracts []*OutputFunding
-	Boomerang uint64
+	FeeRate                         float64
+	Contracts                       []*OutputFunding
+	BitcoinAgentTransferInputsSize  int
+	BitcoinAgentTransferOutputsSize int
+	Boomerang                       uint64
 }
 
 // Calculate calculates the outputs tx fee based on the accumulated outputs size and fee rate. Also
@@ -82,6 +86,12 @@ func (rf *ResponseFunding) calculate() {
 	// Calculate response tx funding to give to master (first) contract agent.
 	masterContractFunding := rf.Contracts[0]
 	masterContractFunding.ResponseFee += fees.EstimateFeeValue(FlatPayloadSize, rf.FeeRate)
+
+	if rf.BitcoinAgentTransferInputsSize > 0 {
+		masterContractFunding.ResponseFee += fees.EstimateFeeValue(rf.BitcoinAgentTransferInputsSize+
+			rf.BitcoinAgentTransferOutputsSize+
+			FlatBitcoinTransferSize, rf.FeeRate)
+	}
 
 	boomerang := uint64(0)
 	for i, contractFunding := range rf.Contracts {
@@ -145,11 +155,31 @@ func (rf ResponseFunding) EstimatedPayloadSize() int {
 func TransferResponseFunding(tx expanded_tx.TransactionWithOutputs, contractFees []*ContractFee,
 	feeRate, dustFeeRate float64, isTest bool) (*ResponseFunding, error) {
 
+	result := &ResponseFunding{
+		FeeRate: feeRate,
+	}
+
 	// Find transfer
 	var transfer *actions.Transfer
 	outputCount := tx.OutputCount()
 	for i := 0; i < outputCount; i++ {
 		output := tx.Output(i)
+
+		if info, err := agent_bitcoin_transfer.MatchScript(output.LockingScript); err == nil {
+			agentLockingScript := info.AgentLockingScript.Copy()
+			if err := agentLockingScript.RemoveHardVerify(); err != nil {
+				return nil, errors.Wrap(err, "remove hard verify")
+			}
+
+			agentUnlockingSize, err := txbuilder.UnlockingScriptSize(agentLockingScript)
+			if err != nil {
+				return nil, errors.Wrap(err, "agent unlock size")
+			}
+
+			unlockingSize := agent_bitcoin_transfer.ApproveUnlockingSize(agentUnlockingSize)
+			result.BitcoinAgentTransferInputsSize += fees.InputSizeForUnlockingScriptSize(unlockingSize)
+		}
+
 		action, err := protocol.Deserialize(output.LockingScript, isTest)
 		if err != nil {
 			continue
@@ -157,7 +187,6 @@ func TransferResponseFunding(tx expanded_tx.TransactionWithOutputs, contractFees
 
 		if t, ok := action.(*actions.Transfer); ok {
 			transfer = t
-			break
 		}
 	}
 
@@ -165,10 +194,29 @@ func TransferResponseFunding(tx expanded_tx.TransactionWithOutputs, contractFees
 		return nil, ErrMissingAction
 	}
 
-	result := &ResponseFunding{
-		FeeRate: feeRate,
-	}
 	for instrumentIndex, instrumentTransfer := range transfer.Instruments {
+		if instrumentTransfer.InstrumentType == protocol.BSVInstrumentID {
+			// Output for each receiver.
+			for receiverIndex, receiver := range instrumentTransfer.InstrumentReceivers {
+				ra, err := bitcoin.DecodeRawAddress(receiver.Address)
+				if err != nil {
+					return nil, errors.Wrap(ErrMalformed, errors.Wrapf(err,
+						"address: instrument %d, receiver %d", instrumentIndex, receiverIndex).Error())
+				}
+
+				ls, err := ra.LockingScript()
+				if err != nil {
+					return nil, errors.Wrap(ErrMalformed, errors.Wrapf(err,
+						"locking script: instrument %d, receiver %d", instrumentIndex,
+						receiverIndex).Error())
+				}
+
+				result.BitcoinAgentTransferOutputsSize += fees.OutputSize(ls)
+			}
+
+			continue
+		}
+
 		if int(instrumentTransfer.ContractIndex) >= outputCount {
 			return nil, errors.Wrapf(ErrMalformed,
 				"Contract index out of range %d >= %d : instrument %d",
@@ -214,7 +262,7 @@ func TransferResponseFunding(tx expanded_tx.TransactionWithOutputs, contractFees
 					"input output: instrument %d, sender %d", instrumentIndex, senderIndex).Error())
 			}
 
-			contractFunding.DustOutputsSize += fees.OutputSize(output.LockingScript)
+			contractFunding.OutputsSize += fees.OutputSize(output.LockingScript)
 			contractFunding.Dust += fees.DustLimitForLockingScript(output.LockingScript,
 				dustFeeRate)
 			contractFunding.ParticipantsFee += contractFee.ParticipantFee
@@ -235,7 +283,7 @@ func TransferResponseFunding(tx expanded_tx.TransactionWithOutputs, contractFees
 					receiverIndex).Error())
 			}
 
-			contractFunding.DustOutputsSize += fees.OutputSize(ls)
+			contractFunding.OutputsSize += fees.OutputSize(ls)
 			contractFunding.Dust += fees.DustLimitForLockingScript(ls, dustFeeRate)
 			contractFunding.ParticipantsFee += contractFee.ParticipantFee
 			contractFunding.ParticipantCount++
