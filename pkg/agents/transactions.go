@@ -29,7 +29,7 @@ type RecoveryRequest struct {
 
 type ActionAgent struct {
 	LockingScript bitcoin.Script
-	IsRequest     bool
+	IsRequest     bool // this action is a request to this agent.
 }
 
 type Action struct {
@@ -205,7 +205,7 @@ func GetActionAgents(transaction expanded_tx.TransactionWithOutputs,
 			}
 			result = append(result, ActionAgent{
 				LockingScript: inputOutput.LockingScript,
-				IsRequest:     true,
+				IsRequest:     false, // sent from this contract
 			})
 		}
 
@@ -218,7 +218,7 @@ func GetActionAgents(transaction expanded_tx.TransactionWithOutputs,
 			lockingScript := transaction.Output(int(receiverIndex)).LockingScript
 			result = append(result, ActionAgent{
 				LockingScript: lockingScript,
-				IsRequest:     false,
+				IsRequest:     true, // sent to this contract
 			})
 		}
 
@@ -542,6 +542,7 @@ func (a *Agent) processAction(ctx context.Context, agentLockingScript bitcoin.Sc
 		logger.Int("output_index", outputIndex),
 		logger.String("action_code", action.Code()),
 		logger.String("action_name", action.TypeName()),
+		logger.Bool("is_request", isRequest),
 	}, "Processing action")
 
 	if err := action.Validate(); err != nil {

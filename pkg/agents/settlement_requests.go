@@ -535,6 +535,7 @@ func (a *Agent) createSettlementRequest(ctx context.Context,
 	}
 
 	message := &actions.Message{
+		SenderIndexes:   []uint32{0}, // First input is sender of message
 		ReceiverIndexes: []uint32{0}, // First output is receiver of message
 		MessageCode:     settlementRequest.Code(),
 		MessagePayload:  payloadBuffer.Bytes(),

@@ -3720,7 +3720,7 @@ func Test_Transfers_Multi_Reject_Second(t *testing.T) {
 			Agents: []ActionAgent{
 				{
 					LockingScript: contractLockingScript1,
-					IsRequest:     true,
+					IsRequest:     false,
 				},
 			},
 		}}); err != nil {
