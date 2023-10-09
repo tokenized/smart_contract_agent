@@ -49,8 +49,8 @@ type Processed struct {
 	// Contract is the hash of the contract that responded.
 	Contract state.ContractHash `bsor:"1" json:"contract"`
 
-	// OutputIndex is the index of the output containing the action that was responded to.
-	OutputIndex int `bsor:"2" json:"output_index"`
+	// ActionIndex is the index of the output containing the action that was responded to.
+	ActionIndex int `bsor:"2" json:"action_index"`
 
 	// ResponseTxID is the txid of the response.
 	ResponseTxID *bitcoin.Hash32 `bsor:"3" json:"response_txid"`
@@ -410,26 +410,26 @@ func (tx *Transaction) ClearIsProcessing(contract state.ContractHash) {
 	}
 }
 
-func (tx *Transaction) SetProcessed(contract state.ContractHash, outputIndex int) bool {
+func (tx *Transaction) SetProcessed(contract state.ContractHash, actionIndex int) bool {
 	for _, processed := range tx.Processed {
-		if processed.Contract.Equal(contract) && processed.OutputIndex == outputIndex {
+		if processed.Contract.Equal(contract) && processed.ActionIndex == actionIndex {
 			return false
 		}
 	}
 
 	tx.Processed = append(tx.Processed, &Processed{
 		Contract:    contract,
-		OutputIndex: outputIndex,
+		ActionIndex: actionIndex,
 	})
 	tx.isModified = true
 	return true
 }
 
-func (tx *Transaction) AddResponseTxID(contract state.ContractHash, outputIndex int,
+func (tx *Transaction) AddResponseTxID(contract state.ContractHash, actionIndex int,
 	txid bitcoin.Hash32) bool {
 
 	for _, processed := range tx.Processed {
-		if processed.Contract.Equal(contract) && processed.OutputIndex == outputIndex &&
+		if processed.Contract.Equal(contract) && processed.ActionIndex == actionIndex &&
 			processed.ResponseTxID != nil && processed.ResponseTxID.Equal(&txid) {
 			return false
 		}
@@ -437,7 +437,7 @@ func (tx *Transaction) AddResponseTxID(contract state.ContractHash, outputIndex 
 
 	tx.Processed = append(tx.Processed, &Processed{
 		Contract:     contract,
-		OutputIndex:  outputIndex,
+		ActionIndex:  actionIndex,
 		ResponseTxID: &txid,
 	})
 	tx.isModified = true
@@ -445,11 +445,11 @@ func (tx *Transaction) AddResponseTxID(contract state.ContractHash, outputIndex 
 }
 
 func (tx *Transaction) ContractProcessed(contract state.ContractHash,
-	outputIndex int) []*Processed {
+	actionIndex int) []*Processed {
 
 	var result []*Processed
 	for _, r := range tx.Processed {
-		if r.Contract.Equal(contract) && r.OutputIndex == outputIndex {
+		if r.Contract.Equal(contract) && r.ActionIndex == actionIndex {
 			result = append(result, r)
 		}
 	}
@@ -458,10 +458,10 @@ func (tx *Transaction) ContractProcessed(contract state.ContractHash,
 }
 
 func (tx *Transaction) GetContractProcessed(contract state.ContractHash,
-	outputIndex int) []*Processed {
+	actionIndex int) []*Processed {
 	tx.Lock()
 	defer tx.Unlock()
-	return tx.ContractProcessed(contract, outputIndex)
+	return tx.ContractProcessed(contract, actionIndex)
 }
 
 func TransactionPath(txid bitcoin.Hash32) string {
@@ -664,7 +664,7 @@ func (tx *Transaction) Size() uint64 {
 func (r Processed) Copy() Processed {
 	var result Processed
 	copy(result.Contract[:], r.Contract[:])
-	result.OutputIndex = r.OutputIndex
+	result.ActionIndex = r.ActionIndex
 	if r.ResponseTxID != nil {
 		result.ResponseTxID = &bitcoin.Hash32{}
 		copy(result.ResponseTxID[:], r.ResponseTxID[:])

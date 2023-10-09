@@ -20,7 +20,7 @@ import (
 )
 
 func (a *Agent) processOrder(ctx context.Context, transaction *transactions.Transaction,
-	order *actions.Order, outputIndex int) (*expanded_tx.ExpandedTx, error) {
+	order *actions.Order, actionIndex int) (*expanded_tx.ExpandedTx, error) {
 
 	agentLockingScript := a.LockingScript()
 
@@ -124,13 +124,13 @@ func (a *Agent) processOrder(ctx context.Context, transaction *transactions.Tran
 	// Apply logic based on Compliance Action type
 	switch order.ComplianceAction {
 	case actions.ComplianceActionFreeze:
-		return a.processFreezeOrder(ctx, transaction, order, outputIndex)
+		return a.processFreezeOrder(ctx, transaction, order, actionIndex)
 	case actions.ComplianceActionThaw:
-		return a.processThawOrder(ctx, transaction, order, outputIndex)
+		return a.processThawOrder(ctx, transaction, order, actionIndex)
 	case actions.ComplianceActionConfiscation:
-		return a.processConfiscateOrder(ctx, transaction, order, outputIndex)
+		return a.processConfiscateOrder(ctx, transaction, order, actionIndex)
 	case actions.ComplianceActionDeprecatedReconciliation:
-		return a.processReconciliationOrder(ctx, transaction, order, outputIndex)
+		return a.processReconciliationOrder(ctx, transaction, order, actionIndex)
 	default:
 		return nil, platform.NewRejectError(actions.RejectionsMsgMalformed, "ComplianceAction")
 	}
@@ -139,7 +139,7 @@ func (a *Agent) processOrder(ctx context.Context, transaction *transactions.Tran
 }
 
 func (a *Agent) processFreezeOrder(ctx context.Context, transaction *transactions.Transaction,
-	order *actions.Order, outputIndex int) (*expanded_tx.ExpandedTx, error) {
+	order *actions.Order, actionIndex int) (*expanded_tx.ExpandedTx, error) {
 
 	logger.Info(ctx, "Processing freeze order")
 
@@ -410,7 +410,7 @@ func (a *Agent) processFreezeOrder(ctx context.Context, transaction *transaction
 	freezeTransaction.Unlock()
 
 	transaction.Lock()
-	transaction.AddResponseTxID(a.ContractHash(), outputIndex, freezeTxID)
+	transaction.AddResponseTxID(a.ContractHash(), actionIndex, freezeTxID)
 	tx := transaction.Tx.Copy()
 	transaction.Unlock()
 
@@ -431,7 +431,7 @@ func (a *Agent) processFreezeOrder(ctx context.Context, transaction *transaction
 }
 
 func (a *Agent) processThawOrder(ctx context.Context, transaction *transactions.Transaction,
-	order *actions.Order, outputIndex int) (*expanded_tx.ExpandedTx, error) {
+	order *actions.Order, actionIndex int) (*expanded_tx.ExpandedTx, error) {
 
 	logger.Info(ctx, "Processing thaw order")
 
@@ -677,7 +677,7 @@ func (a *Agent) processThawOrder(ctx context.Context, transaction *transactions.
 	freezeTransaction.Unlock()
 
 	transaction.Lock()
-	transaction.AddResponseTxID(a.ContractHash(), outputIndex, thawTxID)
+	transaction.AddResponseTxID(a.ContractHash(), actionIndex, thawTxID)
 	tx := transaction.Tx.Copy()
 	transaction.Unlock()
 
@@ -698,7 +698,7 @@ func (a *Agent) processThawOrder(ctx context.Context, transaction *transactions.
 }
 
 func (a *Agent) processConfiscateOrder(ctx context.Context, transaction *transactions.Transaction,
-	order *actions.Order, outputIndex int) (*expanded_tx.ExpandedTx, error) {
+	order *actions.Order, actionIndex int) (*expanded_tx.ExpandedTx, error) {
 
 	logger.Info(ctx, "Processing confiscation order")
 
@@ -971,7 +971,7 @@ func (a *Agent) processConfiscateOrder(ctx context.Context, transaction *transac
 	confiscationTransaction.Unlock()
 
 	transaction.Lock()
-	transaction.AddResponseTxID(a.ContractHash(), outputIndex, confiscationTxID)
+	transaction.AddResponseTxID(a.ContractHash(), actionIndex, confiscationTxID)
 	tx := transaction.Tx.Copy()
 	transaction.Unlock()
 
@@ -993,14 +993,14 @@ func (a *Agent) processConfiscateOrder(ctx context.Context, transaction *transac
 }
 
 func (a *Agent) processReconciliationOrder(ctx context.Context, transaction *transactions.Transaction,
-	order *actions.Order, outputIndex int) (*expanded_tx.ExpandedTx, error) {
+	order *actions.Order, actionIndex int) (*expanded_tx.ExpandedTx, error) {
 
 	return nil, platform.NewRejectError(actions.RejectionsDeprecated,
 		"Reconciliation order is deprecated")
 }
 
 func (a *Agent) processFreeze(ctx context.Context, transaction *transactions.Transaction,
-	freeze *actions.Freeze, outputIndex int) error {
+	freeze *actions.Freeze, actionIndex int) error {
 
 	// First input must be the agent's locking script
 	transaction.Lock()
@@ -1026,7 +1026,7 @@ func (a *Agent) processFreeze(ctx context.Context, transaction *transactions.Tra
 
 	transaction.Unlock()
 
-	if _, err := a.addResponseTxID(ctx, orderTxID, txid, freeze, outputIndex); err != nil {
+	if _, err := a.addResponseTxID(ctx, orderTxID, txid, freeze, actionIndex); err != nil {
 		return errors.Wrap(err, "add response txid")
 	}
 
@@ -1159,14 +1159,14 @@ func (a *Agent) processFreeze(ctx context.Context, transaction *transactions.Tra
 	}
 
 	transaction.Lock()
-	transaction.SetProcessed(a.ContractHash(), outputIndex)
+	transaction.SetProcessed(a.ContractHash(), actionIndex)
 	transaction.Unlock()
 
 	return nil
 }
 
 func (a *Agent) processThaw(ctx context.Context, transaction *transactions.Transaction,
-	thaw *actions.Thaw, outputIndex int) error {
+	thaw *actions.Thaw, actionIndex int) error {
 
 	// First input must be the agent's locking script
 	transaction.Lock()
@@ -1190,7 +1190,7 @@ func (a *Agent) processThaw(ctx context.Context, transaction *transactions.Trans
 
 	transaction.Unlock()
 
-	if _, err := a.addResponseTxID(ctx, orderTxID, txid, thaw, outputIndex); err != nil {
+	if _, err := a.addResponseTxID(ctx, orderTxID, txid, thaw, actionIndex); err != nil {
 		return errors.Wrap(err, "add response txid")
 	}
 
@@ -1329,14 +1329,14 @@ func (a *Agent) processThaw(ctx context.Context, transaction *transactions.Trans
 	}
 
 	transaction.Lock()
-	transaction.SetProcessed(a.ContractHash(), outputIndex)
+	transaction.SetProcessed(a.ContractHash(), actionIndex)
 	transaction.Unlock()
 
 	return nil
 }
 
 func (a *Agent) processConfiscation(ctx context.Context, transaction *transactions.Transaction,
-	confiscation *actions.Confiscation, outputIndex int) error {
+	confiscation *actions.Confiscation, actionIndex int) error {
 
 	// First input must be the agent's locking script
 	transaction.Lock()
@@ -1360,7 +1360,7 @@ func (a *Agent) processConfiscation(ctx context.Context, transaction *transactio
 
 	outputCount := transaction.OutputCount()
 
-	if _, err := a.addResponseTxID(ctx, orderTxID, txid, confiscation, outputIndex); err != nil {
+	if _, err := a.addResponseTxID(ctx, orderTxID, txid, confiscation, actionIndex); err != nil {
 		transaction.Unlock()
 		return errors.Wrap(err, "add response txid")
 	}
@@ -1541,14 +1541,14 @@ func (a *Agent) processConfiscation(ctx context.Context, transaction *transactio
 	}
 
 	transaction.Lock()
-	transaction.SetProcessed(a.ContractHash(), outputIndex)
+	transaction.SetProcessed(a.ContractHash(), actionIndex)
 	transaction.Unlock()
 
 	return nil
 }
 
 func (a *Agent) processReconciliation(ctx context.Context, transaction *transactions.Transaction,
-	reconciliation *actions.DeprecatedReconciliation, outputIndex int) error {
+	reconciliation *actions.DeprecatedReconciliation, actionIndex int) error {
 
 	// First input must be the agent's locking script
 	transaction.Lock()
@@ -1572,12 +1572,12 @@ func (a *Agent) processReconciliation(ctx context.Context, transaction *transact
 
 	transaction.Unlock()
 
-	if _, err := a.addResponseTxID(ctx, orderTxID, txid, reconciliation, outputIndex); err != nil {
+	if _, err := a.addResponseTxID(ctx, orderTxID, txid, reconciliation, actionIndex); err != nil {
 		return errors.Wrap(err, "add response txid")
 	}
 
 	transaction.Lock()
-	transaction.SetProcessed(a.ContractHash(), outputIndex)
+	transaction.SetProcessed(a.ContractHash(), actionIndex)
 	transaction.Unlock()
 
 	return errors.New("Not Implemented")

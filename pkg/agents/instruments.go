@@ -22,7 +22,7 @@ import (
 )
 
 func (a *Agent) processInstrumentDefinition(ctx context.Context, transaction *transactions.Transaction,
-	definition *actions.InstrumentDefinition, outputIndex int) (*expanded_tx.ExpandedTx, error) {
+	definition *actions.InstrumentDefinition, actionIndex int) (*expanded_tx.ExpandedTx, error) {
 
 	agentLockingScript := a.LockingScript()
 
@@ -216,7 +216,7 @@ func (a *Agent) processInstrumentDefinition(ctx context.Context, transaction *tr
 	creationTransaction.Unlock()
 
 	transaction.Lock()
-	transaction.AddResponseTxID(a.ContractHash(), outputIndex, creationTxID)
+	transaction.AddResponseTxID(a.ContractHash(), actionIndex, creationTxID)
 	tx := transaction.Tx.Copy()
 	transaction.Unlock()
 
@@ -234,7 +234,7 @@ func (a *Agent) processInstrumentDefinition(ctx context.Context, transaction *tr
 
 func (a *Agent) processInstrumentModification(ctx context.Context, transaction *transactions.Transaction,
 	modification *actions.InstrumentModification,
-	outputIndex int) (*expanded_tx.ExpandedTx, error) {
+	actionIndex int) (*expanded_tx.ExpandedTx, error) {
 
 	instrumentID, err := protocol.InstrumentIDForRaw(modification.InstrumentType,
 		modification.InstrumentCode)
@@ -477,7 +477,7 @@ func (a *Agent) processInstrumentModification(ctx context.Context, transaction *
 	creationTransaction.Unlock()
 
 	transaction.Lock()
-	transaction.AddResponseTxID(a.ContractHash(), outputIndex, creationTxID)
+	transaction.AddResponseTxID(a.ContractHash(), actionIndex, creationTxID)
 	tx := transaction.Tx.Copy()
 	transaction.Unlock()
 
@@ -495,7 +495,7 @@ func (a *Agent) processInstrumentModification(ctx context.Context, transaction *
 
 func (a *Agent) processInstrumentCreation(ctx context.Context,
 	transaction *transactions.Transaction, creation *actions.InstrumentCreation,
-	outputIndex int) error {
+	actionIndex int) error {
 
 	// First input must be the agent's locking script
 	transaction.Lock()
@@ -514,7 +514,7 @@ func (a *Agent) processInstrumentCreation(ctx context.Context,
 	}
 
 	if _, err := a.addResponseTxID(ctx, input.PreviousOutPoint.Hash, txid, creation,
-		outputIndex); err != nil {
+		actionIndex); err != nil {
 		return errors.Wrap(err, "add response txid")
 	}
 
@@ -624,7 +624,7 @@ func (a *Agent) processInstrumentCreation(ctx context.Context,
 	}
 
 	transaction.Lock()
-	transaction.SetProcessed(a.ContractHash(), outputIndex)
+	transaction.SetProcessed(a.ContractHash(), actionIndex)
 	transaction.Unlock()
 
 	return nil

@@ -21,7 +21,7 @@ import (
 )
 
 func (a *Agent) processProposal(ctx context.Context, transaction *transactions.Transaction,
-	proposal *actions.Proposal, outputIndex int) (*expanded_tx.ExpandedTx, error) {
+	proposal *actions.Proposal, actionIndex int) (*expanded_tx.ExpandedTx, error) {
 
 	agentLockingScript := a.LockingScript()
 
@@ -430,7 +430,7 @@ func (a *Agent) processProposal(ctx context.Context, transaction *transactions.T
 	voteTransaction.Unlock()
 
 	transaction.Lock()
-	transaction.AddResponseTxID(a.ContractHash(), outputIndex, voteTxID)
+	transaction.AddResponseTxID(a.ContractHash(), actionIndex, voteTxID)
 	tx := transaction.Tx.Copy()
 	transaction.Unlock()
 
@@ -458,7 +458,7 @@ func (a *Agent) processProposal(ctx context.Context, transaction *transactions.T
 }
 
 func (a *Agent) processVote(ctx context.Context, transaction *transactions.Transaction,
-	vote *actions.Vote, outputIndex int) error {
+	vote *actions.Vote, actionIndex int) error {
 
 	// First input must be the agent's locking script
 	transaction.Lock()
@@ -482,7 +482,7 @@ func (a *Agent) processVote(ctx context.Context, transaction *transactions.Trans
 
 	transaction.Unlock()
 
-	if _, err := a.addResponseTxID(ctx, proposalTxID, txid, vote, outputIndex); err != nil {
+	if _, err := a.addResponseTxID(ctx, proposalTxID, txid, vote, actionIndex); err != nil {
 		return errors.Wrap(err, "add response txid")
 	}
 
@@ -574,14 +574,14 @@ func (a *Agent) processVote(ctx context.Context, transaction *transactions.Trans
 	}
 
 	transaction.Lock()
-	transaction.SetProcessed(a.ContractHash(), outputIndex)
+	transaction.SetProcessed(a.ContractHash(), actionIndex)
 	transaction.Unlock()
 
 	return nil
 }
 
 func (a *Agent) processBallotCast(ctx context.Context, transaction *transactions.Transaction,
-	ballotCast *actions.BallotCast, outputIndex int) (*expanded_tx.ExpandedTx, error) {
+	ballotCast *actions.BallotCast, actionIndex int) (*expanded_tx.ExpandedTx, error) {
 
 	agentLockingScript := a.LockingScript()
 
@@ -761,7 +761,7 @@ func (a *Agent) processBallotCast(ctx context.Context, transaction *transactions
 	ballotCountedTransaction.Unlock()
 
 	transaction.Lock()
-	transaction.AddResponseTxID(a.ContractHash(), outputIndex, ballotCountedTxID)
+	transaction.AddResponseTxID(a.ContractHash(), actionIndex, ballotCountedTxID)
 	tx := transaction.Tx.Copy()
 	transaction.Unlock()
 
@@ -778,7 +778,7 @@ func (a *Agent) processBallotCast(ctx context.Context, transaction *transactions
 }
 
 func (a *Agent) processBallotCounted(ctx context.Context, transaction *transactions.Transaction,
-	ballotCounted *actions.BallotCounted, outputIndex int) error {
+	ballotCounted *actions.BallotCounted, actionIndex int) error {
 
 	// First input must be the agent's locking script
 	transaction.Lock()
@@ -800,7 +800,7 @@ func (a *Agent) processBallotCounted(ctx context.Context, transaction *transacti
 	}
 
 	if _, err := a.addResponseTxID(ctx, ballotCastTxID, txid, ballotCounted,
-		outputIndex); err != nil {
+		actionIndex); err != nil {
 		return errors.Wrap(err, "add response txid")
 	}
 
@@ -888,14 +888,14 @@ func (a *Agent) processBallotCounted(ctx context.Context, transaction *transacti
 	vote.Unlock()
 
 	transaction.Lock()
-	transaction.SetProcessed(a.ContractHash(), outputIndex)
+	transaction.SetProcessed(a.ContractHash(), actionIndex)
 	transaction.Unlock()
 
 	return nil
 }
 
 func (a *Agent) processVoteResult(ctx context.Context, transaction *transactions.Transaction,
-	result *actions.Result, outputIndex int) error {
+	result *actions.Result, actionIndex int) error {
 
 	// First input must be the agent's locking script
 	transaction.Lock()
@@ -916,7 +916,7 @@ func (a *Agent) processVoteResult(ctx context.Context, transaction *transactions
 		return nil // Not for this agent's contract
 	}
 
-	if _, err := a.addResponseTxID(ctx, voteTxID, txid, result, outputIndex); err != nil {
+	if _, err := a.addResponseTxID(ctx, voteTxID, txid, result, actionIndex); err != nil {
 		return errors.Wrap(err, "add response txid")
 	}
 

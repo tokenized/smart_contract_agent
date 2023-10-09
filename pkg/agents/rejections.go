@@ -23,7 +23,7 @@ import (
 )
 
 func (a *Agent) processRejection(ctx context.Context, transaction *transactions.Transaction,
-	rejection *actions.Rejection, outputIndex int) (*expanded_tx.ExpandedTx, error) {
+	rejection *actions.Rejection, actionIndex int) (*expanded_tx.ExpandedTx, error) {
 
 	transaction.Lock()
 	txid := transaction.TxID()
@@ -57,12 +57,12 @@ func (a *Agent) processRejection(ctx context.Context, transaction *transactions.
 			logger.Stringer("receiver_locking_script", output.LockingScript),
 		}, "Agent is the rejection sender")
 		if _, err := a.addResponseTxID(ctx, rejectedTxID, txid, rejection,
-			outputIndex); err != nil {
+			actionIndex); err != nil {
 			return nil, errors.Wrap(err, "add response txid")
 		}
 
 		transaction.Lock()
-		transaction.SetProcessed(a.ContractHash(), outputIndex)
+		transaction.SetProcessed(a.ContractHash(), actionIndex)
 		transaction.Unlock()
 
 		return nil, nil

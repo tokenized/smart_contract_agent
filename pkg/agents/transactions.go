@@ -449,19 +449,19 @@ func (a *Agent) ProcessUnsafe(ctx context.Context, transaction *transactions.Tra
 
 func (a *Agent) processAction(ctx context.Context, agentLockingScript bitcoin.Script,
 	transaction *transactions.Transaction, txid bitcoin.Hash32, action actions.Action,
-	outputIndex int, isRequest, inRecovery bool, feeRate, minFeeRate float64,
+	actionIndex int, isRequest, inRecovery bool, feeRate, minFeeRate float64,
 	trace uuid.UUID) error {
 
 	ctx = logger.ContextWithLogFields(ctx, logger.Stringer("action_trace", uuid.New()))
 	start := time.Now()
 
-	processed := transaction.GetContractProcessed(a.ContractHash(), outputIndex)
+	processed := transaction.GetContractProcessed(a.ContractHash(), actionIndex)
 	if len(processed) > 0 {
 		logger.InfoWithFields(ctx, []logger.Field{
 			logger.Stringer("tx_trace", trace), // link tx processing to action processing
 			logger.Stringer("contract_locking_script", agentLockingScript),
 			logger.Stringer("txid", txid),
-			logger.Int("output_index", outputIndex),
+			logger.Int("action_index", actionIndex),
 			logger.String("action_code", action.Code()),
 			logger.String("action_name", action.TypeName()),
 			logger.Stringer("response_txid", processed[0].ResponseTxID),
@@ -471,7 +471,7 @@ func (a *Agent) processAction(ctx context.Context, agentLockingScript bitcoin.Sc
 
 	if inRecovery && isRequest {
 		if added, err := a.addRecoveryRequest(ctx, agentLockingScript, txid,
-			outputIndex); err != nil {
+			actionIndex); err != nil {
 			return errors.Wrap(err, "recovery request")
 		} else if added {
 			logger.InfoWithFields(ctx, []logger.Field{
@@ -479,7 +479,7 @@ func (a *Agent) processAction(ctx context.Context, agentLockingScript bitcoin.Sc
 				logger.Stringer("contract_locking_script", agentLockingScript),
 				logger.Stringer("txid", txid),
 				logger.String("action", action.Code()),
-				logger.Int("output_index", outputIndex),
+				logger.Int("action_index", actionIndex),
 			}, "Saved transaction request for recovery")
 		} else {
 			logger.InfoWithFields(ctx, []logger.Field{
@@ -487,7 +487,7 @@ func (a *Agent) processAction(ctx context.Context, agentLockingScript bitcoin.Sc
 				logger.Stringer("contract_locking_script", agentLockingScript),
 				logger.Stringer("txid", txid),
 				logger.String("action", action.Code()),
-				logger.Int("output_index", outputIndex),
+				logger.Int("action_index", actionIndex),
 			}, "Transaction request already saved for recovery")
 		}
 
@@ -499,7 +499,7 @@ func (a *Agent) processAction(ctx context.Context, agentLockingScript bitcoin.Sc
 			// link tx processing to action processing
 			ctx = logger.ContextWithLogFields(ctx, logger.Stringer("tx_trace", trace))
 
-			etx, err := a.createRejection(ctx, transaction, outputIndex, -1,
+			etx, err := a.createRejection(ctx, transaction, actionIndex, -1,
 				platform.NewRejectError(actions.RejectionsInactive, ""))
 			if err != nil {
 				return errors.Wrap(err, "create rejection")
@@ -518,7 +518,7 @@ func (a *Agent) processAction(ctx context.Context, agentLockingScript bitcoin.Sc
 			// link tx processing to action processing
 			ctx = logger.ContextWithLogFields(ctx, logger.Stringer("tx_trace", trace))
 
-			etx, err := a.createRejection(ctx, transaction, outputIndex, -1,
+			etx, err := a.createRejection(ctx, transaction, actionIndex, -1,
 				platform.NewRejectError(actions.RejectionsInsufficientTxFeeFunding,
 					fmt.Sprintf("fee rate %.4f, minimum %.4f", feeRate, minFeeRate)))
 			if err != nil {
@@ -539,7 +539,7 @@ func (a *Agent) processAction(ctx context.Context, agentLockingScript bitcoin.Sc
 		logger.Stringer("tx_trace", trace), // link tx processing to action processing
 		logger.Stringer("contract_locking_script", agentLockingScript),
 		logger.Stringer("txid", txid),
-		logger.Int("output_index", outputIndex),
+		logger.Int("action_index", actionIndex),
 		logger.String("action_code", action.Code()),
 		logger.String("action_name", action.TypeName()),
 		logger.Bool("is_request", isRequest),
@@ -547,7 +547,7 @@ func (a *Agent) processAction(ctx context.Context, agentLockingScript bitcoin.Sc
 
 	if err := action.Validate(); err != nil {
 		if isRequest {
-			etx, err := a.createRejection(ctx, transaction, outputIndex, -1,
+			etx, err := a.createRejection(ctx, transaction, actionIndex, -1,
 				platform.NewRejectError(actions.RejectionsMsgMalformed, err.Error()))
 			if err != nil {
 				return errors.Wrap(err, "create rejection")
@@ -561,7 +561,7 @@ func (a *Agent) processAction(ctx context.Context, agentLockingScript bitcoin.Sc
 		} else {
 			logger.ErrorWithFields(ctx, []logger.Field{
 				logger.Stringer("txid", txid),
-				logger.Int("output_index", outputIndex),
+				logger.Int("action_index", actionIndex),
 				logger.String("action_code", action.Code()),
 				logger.String("action_name", action.TypeName()),
 			}, "Response action invalid : %s", err)
@@ -574,86 +574,86 @@ func (a *Agent) processAction(ctx context.Context, agentLockingScript bitcoin.Sc
 	var processError error
 	switch act := action.(type) {
 	case *actions.ContractOffer:
-		responseEtx, processError = a.processContractOffer(ctx, transaction, act, outputIndex)
+		responseEtx, processError = a.processContractOffer(ctx, transaction, act, actionIndex)
 
 	case *actions.ContractAmendment:
-		responseEtx, processError = a.processContractAmendment(ctx, transaction, act, outputIndex)
+		responseEtx, processError = a.processContractAmendment(ctx, transaction, act, actionIndex)
 
 	case *actions.ContractFormation:
-		processError = a.processContractFormation(ctx, transaction, act, outputIndex)
+		processError = a.processContractFormation(ctx, transaction, act, actionIndex)
 
 	case *actions.ContractAddressChange:
 		responseEtx, processError = a.processContractAddressChange(ctx, transaction, act,
-			outputIndex)
+			actionIndex)
 
 	case *actions.BodyOfAgreementOffer:
 		responseEtx, processError = a.processBodyOfAgreementOffer(ctx, transaction, act,
-			outputIndex)
+			actionIndex)
 
 	case *actions.BodyOfAgreementAmendment:
 		responseEtx, processError = a.processBodyOfAgreementAmendment(ctx, transaction, act,
-			outputIndex)
+			actionIndex)
 
 	case *actions.BodyOfAgreementFormation:
-		processError = a.processBodyOfAgreementFormation(ctx, transaction, act, outputIndex)
+		processError = a.processBodyOfAgreementFormation(ctx, transaction, act, actionIndex)
 
 	case *actions.InstrumentDefinition:
 		responseEtx, processError = a.processInstrumentDefinition(ctx, transaction, act,
-			outputIndex)
+			actionIndex)
 
 	case *actions.InstrumentModification:
 		responseEtx, processError = a.processInstrumentModification(ctx, transaction, act,
-			outputIndex)
+			actionIndex)
 
 	case *actions.InstrumentCreation:
-		processError = a.processInstrumentCreation(ctx, transaction, act, outputIndex)
+		processError = a.processInstrumentCreation(ctx, transaction, act, actionIndex)
 
 	case *actions.Transfer:
-		responseEtx, processError = a.processTransfer(ctx, transaction, act, outputIndex)
+		responseEtx, processError = a.processTransfer(ctx, transaction, act, actionIndex)
 
 	case *actions.Settlement:
-		processError = a.processSettlement(ctx, transaction, act, outputIndex)
+		processError = a.processSettlement(ctx, transaction, act, actionIndex)
 
 	case *actions.RectificationSettlement:
 		// TODO Create function that watches for "double spent" requests and sends Rectification
 		// Settlements. --ce
-		processError = a.processRectificationSettlement(ctx, transaction, act, outputIndex)
+		processError = a.processRectificationSettlement(ctx, transaction, act, actionIndex)
 
 	case *actions.Proposal:
-		responseEtx, processError = a.processProposal(ctx, transaction, act, outputIndex)
+		responseEtx, processError = a.processProposal(ctx, transaction, act, actionIndex)
 
 	case *actions.Vote:
-		processError = a.processVote(ctx, transaction, act, outputIndex)
+		processError = a.processVote(ctx, transaction, act, actionIndex)
 
 	case *actions.BallotCast:
-		responseEtx, processError = a.processBallotCast(ctx, transaction, act, outputIndex)
+		responseEtx, processError = a.processBallotCast(ctx, transaction, act, actionIndex)
 
 	case *actions.BallotCounted:
-		processError = a.processBallotCounted(ctx, transaction, act, outputIndex)
+		processError = a.processBallotCounted(ctx, transaction, act, actionIndex)
 
 	case *actions.Result:
-		processError = a.processVoteResult(ctx, transaction, act, outputIndex)
+		processError = a.processVoteResult(ctx, transaction, act, actionIndex)
 
 	case *actions.Order:
-		responseEtx, processError = a.processOrder(ctx, transaction, act, outputIndex)
+		responseEtx, processError = a.processOrder(ctx, transaction, act, actionIndex)
 
 	case *actions.Freeze:
-		processError = a.processFreeze(ctx, transaction, act, outputIndex)
+		processError = a.processFreeze(ctx, transaction, act, actionIndex)
 
 	case *actions.Thaw:
-		processError = a.processThaw(ctx, transaction, act, outputIndex)
+		processError = a.processThaw(ctx, transaction, act, actionIndex)
 
 	case *actions.Confiscation:
-		processError = a.processConfiscation(ctx, transaction, act, outputIndex)
+		processError = a.processConfiscation(ctx, transaction, act, actionIndex)
 
 	case *actions.DeprecatedReconciliation:
-		processError = a.processReconciliation(ctx, transaction, act, outputIndex)
+		processError = a.processReconciliation(ctx, transaction, act, actionIndex)
 
 	case *actions.Message:
-		responseEtx, processError = a.processMessage(ctx, transaction, act, outputIndex)
+		responseEtx, processError = a.processMessage(ctx, transaction, act, actionIndex)
 
 	case *actions.Rejection:
-		responseEtx, processError = a.processRejection(ctx, transaction, act, outputIndex)
+		responseEtx, processError = a.processRejection(ctx, transaction, act, actionIndex)
 
 	default:
 		return fmt.Errorf("Action not supported: %s", action.Code())
@@ -677,7 +677,7 @@ func (a *Agent) processAction(ctx context.Context, agentLockingScript bitcoin.Sc
 			if isRequest {
 				switch act := action.(type) {
 				case *actions.Message:
-					etx, err := a.createMessageRejection(ctx, transaction, act, outputIndex,
+					etx, err := a.createMessageRejection(ctx, transaction, act, actionIndex,
 						rejectError)
 					if err != nil {
 						return errors.Wrap(err, "create rejection")
@@ -693,7 +693,7 @@ func (a *Agent) processAction(ctx context.Context, agentLockingScript bitcoin.Sc
 					}
 
 				default:
-					etx, err := a.createRejection(ctx, transaction, outputIndex, -1, rejectError)
+					etx, err := a.createRejection(ctx, transaction, actionIndex, -1, rejectError)
 					if err != nil {
 						return errors.Wrap(err, "create rejection")
 					}

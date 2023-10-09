@@ -14,7 +14,7 @@ import (
 )
 
 func (a *Agent) processMessage(ctx context.Context, transaction *transactions.Transaction,
-	message *actions.Message, outputIndex int) (*expanded_tx.ExpandedTx, error) {
+	message *actions.Message, actionIndex int) (*expanded_tx.ExpandedTx, error) {
 
 	// Verify appropriate output belongs to this contract.
 	if len(message.ReceiverIndexes) > 1 {
@@ -84,12 +84,12 @@ func (a *Agent) processMessage(ctx context.Context, transaction *transactions.Tr
 		logger.InfoWithFields(ctx, []logger.Field{
 			logger.Stringer("receiver_locking_script", output.LockingScript),
 		}, "Agent is the message sender")
-		if _, err := a.addResponseTxID(ctx, requestTxID, txid, message, outputIndex); err != nil {
+		if _, err := a.addResponseTxID(ctx, requestTxID, txid, message, actionIndex); err != nil {
 			return nil, errors.Wrap(err, "add response txid")
 		}
 
 		transaction.Lock()
-		transaction.SetProcessed(a.ContractHash(), outputIndex)
+		transaction.SetProcessed(a.ContractHash(), actionIndex)
 		transaction.Unlock()
 
 		return nil, nil
@@ -130,14 +130,14 @@ func (a *Agent) processMessage(ctx context.Context, transaction *transactions.Tr
 	var processErr error
 	switch p := payload.(type) {
 	case *messages.SettlementRequest:
-		responseEtx, processErr = a.processSettlementRequest(ctx, transaction, outputIndex, p,
+		responseEtx, processErr = a.processSettlementRequest(ctx, transaction, actionIndex, p,
 			senderLockingScript, senderUnlockingScipt)
 		if processErr != nil {
 			processErr = errors.Wrap(processErr, "settlement request")
 		}
 
 	case *messages.SignatureRequest:
-		responseEtx, processErr = a.processSignatureRequest(ctx, transaction, outputIndex, p,
+		responseEtx, processErr = a.processSignatureRequest(ctx, transaction, actionIndex, p,
 			senderLockingScript, senderUnlockingScipt)
 		if processErr != nil {
 			processErr = errors.Wrap(processErr, "signature request")
@@ -177,7 +177,7 @@ func (a *Agent) processNonRelevantMessage(ctx context.Context, transaction *tran
 // transfer then we respond to the initial request. Otherwise we respond to the current request,
 // which is just contract to contract.
 func (a *Agent) createMessageRejection(ctx context.Context, transaction *transactions.Transaction,
-	message *actions.Message, outputIndex int,
+	message *actions.Message, actionIndex int,
 	rejectError platform.RejectError) (*expanded_tx.ExpandedTx, error) {
 
 	payload, err := messages.Deserialize(message.MessageCode, message.MessagePayload)
@@ -194,13 +194,13 @@ func (a *Agent) createMessageRejection(ctx context.Context, transaction *transac
 	var etx *expanded_tx.ExpandedTx
 	switch p := payload.(type) {
 	case *messages.SettlementRequest:
-		etx, err = a.createSettlementRequestRejection(ctx, transaction, outputIndex, p, rejectError)
+		etx, err = a.createSettlementRequestRejection(ctx, transaction, actionIndex, p, rejectError)
 		if err != nil {
 			err = errors.Wrap(err, "settlement request")
 		}
 
 	case *messages.SignatureRequest:
-		etx, err = a.createSignatureRequestRejection(ctx, transaction, outputIndex, p, rejectError)
+		etx, err = a.createSignatureRequestRejection(ctx, transaction, actionIndex, p, rejectError)
 		if err != nil {
 			err = errors.Wrap(err, "signature request")
 		}

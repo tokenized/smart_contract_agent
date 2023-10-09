@@ -20,7 +20,7 @@ import (
 )
 
 func (a *Agent) processBodyOfAgreementOffer(ctx context.Context, transaction *transactions.Transaction,
-	offer *actions.BodyOfAgreementOffer, outputIndex int) (*expanded_tx.ExpandedTx, error) {
+	offer *actions.BodyOfAgreementOffer, actionIndex int) (*expanded_tx.ExpandedTx, error) {
 
 	// First output must be the agent's locking script
 	transaction.Lock()
@@ -154,7 +154,7 @@ func (a *Agent) processBodyOfAgreementOffer(ctx context.Context, transaction *tr
 	formationTransaction.Unlock()
 
 	transaction.Lock()
-	transaction.AddResponseTxID(a.ContractHash(), outputIndex, formationTxID)
+	transaction.AddResponseTxID(a.ContractHash(), actionIndex, formationTxID)
 	tx := transaction.Tx.Copy()
 	transaction.Unlock()
 
@@ -171,7 +171,7 @@ func (a *Agent) processBodyOfAgreementOffer(ctx context.Context, transaction *tr
 }
 
 func (a *Agent) processBodyOfAgreementAmendment(ctx context.Context, transaction *transactions.Transaction,
-	amendment *actions.BodyOfAgreementAmendment, outputIndex int) (*expanded_tx.ExpandedTx, error) {
+	amendment *actions.BodyOfAgreementAmendment, actionIndex int) (*expanded_tx.ExpandedTx, error) {
 
 	agentLockingScript := a.LockingScript()
 
@@ -386,7 +386,7 @@ func (a *Agent) processBodyOfAgreementAmendment(ctx context.Context, transaction
 	formationTransaction.Unlock()
 
 	transaction.Lock()
-	transaction.AddResponseTxID(a.ContractHash(), outputIndex, formationTxID)
+	transaction.AddResponseTxID(a.ContractHash(), actionIndex, formationTxID)
 	tx := transaction.Tx.Copy()
 	transaction.Unlock()
 
@@ -404,7 +404,7 @@ func (a *Agent) processBodyOfAgreementAmendment(ctx context.Context, transaction
 
 func (a *Agent) processBodyOfAgreementFormation(ctx context.Context,
 	transaction *transactions.Transaction, formation *actions.BodyOfAgreementFormation,
-	outputIndex int) error {
+	actionIndex int) error {
 
 	// First input must be the agent's locking script
 	transaction.Lock()
@@ -422,7 +422,7 @@ func (a *Agent) processBodyOfAgreementFormation(ctx context.Context,
 	}
 
 	if _, err := a.addResponseTxID(ctx, input.PreviousOutPoint.Hash, txid, formation,
-		outputIndex); err != nil {
+		actionIndex); err != nil {
 		return errors.Wrap(err, "add response txid")
 	}
 
@@ -459,7 +459,7 @@ func (a *Agent) processBodyOfAgreementFormation(ctx context.Context,
 	contract.MarkModified()
 
 	transaction.Lock()
-	transaction.SetProcessed(a.ContractHash(), outputIndex)
+	transaction.SetProcessed(a.ContractHash(), actionIndex)
 	transaction.Unlock()
 
 	return nil

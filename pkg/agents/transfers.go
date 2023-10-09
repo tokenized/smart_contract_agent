@@ -26,7 +26,7 @@ import (
 )
 
 func (a *Agent) processTransfer(ctx context.Context, transaction *transactions.Transaction,
-	transfer *actions.Transfer, outputIndex int) (*expanded_tx.ExpandedTx, error) {
+	transfer *actions.Transfer, actionIndex int) (*expanded_tx.ExpandedTx, error) {
 
 	// Verify appropriate output belongs to this contract.
 	agentLockingScript := a.LockingScript()
@@ -266,7 +266,7 @@ func (a *Agent) processTransfer(ctx context.Context, transaction *transactions.T
 
 	if transferContracts.IsMultiContract() {
 		// Send a settlement request to the next contract.
-		etx, err := a.createSettlementRequest(ctx, transaction, transaction, outputIndex, transfer,
+		etx, err := a.createSettlementRequest(ctx, transaction, transaction, actionIndex, transfer,
 			transferContracts, allBalances, settlement, now)
 		if err != nil {
 			return etx, errors.Wrap(err, "send settlement request")
@@ -285,7 +285,7 @@ func (a *Agent) processTransfer(ctx context.Context, transaction *transactions.T
 		return nil, errors.Wrap(err, "sign")
 	}
 
-	etx, err := a.completeSettlement(ctx, transaction, outputIndex, txid, settlementTx,
+	etx, err := a.completeSettlement(ctx, transaction, actionIndex, txid, settlementTx,
 		settlementScriptOutputIndex, allBalances, now)
 	if err != nil {
 		allBalances.Revert(txid)
@@ -531,7 +531,7 @@ func (a *Agent) completeSettlement(ctx context.Context, transferTransaction *tra
 }
 
 func (a *Agent) processSettlement(ctx context.Context, transaction *transactions.Transaction,
-	settlement *actions.Settlement, outputIndex int) error {
+	settlement *actions.Settlement, actionIndex int) error {
 
 	transferTxID, lockingScripts, err := a.applySettlements(ctx, transaction,
 		settlement.Instruments, settlement.Timestamp)
@@ -548,7 +548,7 @@ func (a *Agent) processSettlement(ctx context.Context, transaction *transactions
 		}
 
 		if _, err := a.addResponseTxID(ctx, *transferTxID, etx.TxID(), settlement,
-			outputIndex); err != nil {
+			actionIndex); err != nil {
 			return errors.Wrap(err, "add response txid")
 		}
 
@@ -558,7 +558,7 @@ func (a *Agent) processSettlement(ctx context.Context, transaction *transactions
 	}
 
 	transaction.Lock()
-	transaction.SetProcessed(a.ContractHash(), outputIndex)
+	transaction.SetProcessed(a.ContractHash(), actionIndex)
 	transaction.Unlock()
 
 	return nil
@@ -566,7 +566,7 @@ func (a *Agent) processSettlement(ctx context.Context, transaction *transactions
 
 func (a *Agent) processRectificationSettlement(ctx context.Context,
 	transaction *transactions.Transaction, settlement *actions.RectificationSettlement,
-	outputIndex int) error {
+	actionIndex int) error {
 
 	transferTxID, lockingScripts, err := a.applySettlements(ctx, transaction,
 		settlement.Instruments, settlement.Timestamp)
@@ -576,7 +576,7 @@ func (a *Agent) processRectificationSettlement(ctx context.Context,
 
 	if transferTxID != nil {
 		if _, err := a.addResponseTxID(ctx, *transferTxID, transaction.GetTxID(), settlement,
-			outputIndex); err != nil {
+			actionIndex); err != nil {
 			return errors.Wrap(err, "add response txid")
 		}
 	}
@@ -596,7 +596,7 @@ func (a *Agent) processRectificationSettlement(ctx context.Context,
 	}
 
 	transaction.Lock()
-	transaction.SetProcessed(a.ContractHash(), outputIndex)
+	transaction.SetProcessed(a.ContractHash(), actionIndex)
 	transaction.Unlock()
 
 	return nil
@@ -871,9 +871,9 @@ func (c TransferContracts) IsMultiContract() bool {
 	return len(c.LockingScripts) > 1
 }
 
-func (c TransferContracts) IsFinalResponseOutput(outputIndex int) bool {
+func (c TransferContracts) IsFinalResponseOutput(actionIndex int) bool {
 	for _, index := range c.OutputIndexes {
-		if index == outputIndex {
+		if index == actionIndex {
 			return true
 		}
 	}

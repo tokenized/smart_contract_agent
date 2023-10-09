@@ -23,7 +23,7 @@ import (
 )
 
 func (a *Agent) processContractOffer(ctx context.Context, transaction *transactions.Transaction,
-	offer *actions.ContractOffer, outputIndex int) (*expanded_tx.ExpandedTx, error) {
+	offer *actions.ContractOffer, actionIndex int) (*expanded_tx.ExpandedTx, error) {
 
 	agentLockingScript := a.LockingScript()
 	adminLockingScript := a.AdminLockingScript()
@@ -262,7 +262,7 @@ func (a *Agent) processContractOffer(ctx context.Context, transaction *transacti
 	formationTransaction.Unlock()
 
 	transaction.Lock()
-	transaction.AddResponseTxID(a.ContractHash(), outputIndex, formationTxID)
+	transaction.AddResponseTxID(a.ContractHash(), actionIndex, formationTxID)
 	tx := transaction.Tx.Copy()
 	transaction.Unlock()
 
@@ -279,7 +279,7 @@ func (a *Agent) processContractOffer(ctx context.Context, transaction *transacti
 }
 
 func (a *Agent) processContractAmendment(ctx context.Context, transaction *transactions.Transaction,
-	amendment *actions.ContractAmendment, outputIndex int) (*expanded_tx.ExpandedTx, error) {
+	amendment *actions.ContractAmendment, actionIndex int) (*expanded_tx.ExpandedTx, error) {
 
 	if !amendment.ChangeAdministrationAddress && !amendment.ChangeOperatorAddress &&
 		len(amendment.Amendments) == 0 {
@@ -710,7 +710,7 @@ func (a *Agent) processContractAmendment(ctx context.Context, transaction *trans
 	formationTransaction.Unlock()
 
 	transaction.Lock()
-	transaction.AddResponseTxID(a.ContractHash(), outputIndex, formationTxID)
+	transaction.AddResponseTxID(a.ContractHash(), actionIndex, formationTxID)
 	tx := transaction.Tx.Copy()
 	transaction.Unlock()
 
@@ -727,7 +727,7 @@ func (a *Agent) processContractAmendment(ctx context.Context, transaction *trans
 }
 
 func (a *Agent) processContractFormation(ctx context.Context, transaction *transactions.Transaction,
-	formation *actions.ContractFormation, outputIndex int) error {
+	formation *actions.ContractFormation, actionIndex int) error {
 
 	// First input must be the agent's locking script
 	transaction.Lock()
@@ -748,7 +748,7 @@ func (a *Agent) processContractFormation(ctx context.Context, transaction *trans
 	}
 
 	if _, err := a.addResponseTxID(ctx, input.PreviousOutPoint.Hash, txid, formation,
-		outputIndex); err != nil {
+		actionIndex); err != nil {
 		return errors.Wrap(err, "add response txid")
 	}
 
@@ -813,7 +813,7 @@ func (a *Agent) processContractFormation(ctx context.Context, transaction *trans
 	}
 
 	transaction.Lock()
-	transaction.SetProcessed(a.ContractHash(), outputIndex)
+	transaction.SetProcessed(a.ContractHash(), actionIndex)
 	transaction.Unlock()
 
 	return nil
@@ -821,7 +821,7 @@ func (a *Agent) processContractFormation(ctx context.Context, transaction *trans
 
 func (a *Agent) processContractAddressChange(ctx context.Context, transaction *transactions.Transaction,
 	addressChange *actions.ContractAddressChange,
-	outputIndex int) (*expanded_tx.ExpandedTx, error) {
+	actionIndex int) (*expanded_tx.ExpandedTx, error) {
 
 	logger.Info(ctx, "Processing contract address change")
 
@@ -989,7 +989,7 @@ func (a *Agent) processContractAddressChange(ctx context.Context, transaction *t
 	}
 
 	transaction.Lock()
-	transaction.SetProcessed(a.ContractHash(), outputIndex)
+	transaction.SetProcessed(a.ContractHash(), actionIndex)
 	transaction.Unlock()
 
 	return nil, nil
