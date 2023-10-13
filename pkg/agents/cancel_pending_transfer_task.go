@@ -9,7 +9,6 @@ import (
 	"github.com/tokenized/pkg/bitcoin"
 	"github.com/tokenized/pkg/expanded_tx"
 	"github.com/tokenized/smart_contract_agent/internal/platform"
-	"github.com/tokenized/smart_contract_agent/internal/state"
 	"github.com/tokenized/specification/dist/golang/actions"
 	"github.com/tokenized/specification/dist/golang/protocol"
 
@@ -82,8 +81,8 @@ func (t *CancelPendingTransferTask) Run(ctx context.Context,
 	return CancelPendingTransfer(ctx, store, contractLockingScript, transferTxID)
 }
 
-func CancelPendingTransfer(ctx context.Context, store Store,
-	contractLockingScript bitcoin.Script, transferTxID bitcoin.Hash32) (*expanded_tx.ExpandedTx, error) {
+func CancelPendingTransfer(ctx context.Context, store Store, contractLockingScript bitcoin.Script,
+	transferTxID bitcoin.Hash32) (*expanded_tx.ExpandedTx, error) {
 
 	ctx = logger.ContextWithLogFields(ctx, logger.Stringer("trace", uuid.New()))
 
@@ -152,140 +151,70 @@ func (a *Agent) CancelPendingTransfer(ctx context.Context,
 		return nil, errors.Wrap(err, "parse contracts")
 	}
 
-	if transferContracts.IsFirstContract() {
-		processeds := transferTransaction.GetContractProcessed(a.ContractHash(), transferOutputIndex)
-		for _, processed := range processeds {
-			if processed.ResponseTxID == nil {
-				continue
-			}
-
-			// Check if response tx spends main transfer output and is the final response to the
-			// transfer or if it just spends the boomerang output and is just an inter-contract
-			// response.
-			responseTransaction, err := a.transactions.Get(ctx, *processed.ResponseTxID)
-			if err != nil {
-				return nil, errors.Wrap(err, "get tx")
-			}
-
-			if responseTransaction == nil {
-				return nil, errors.New("Transaction not found")
-			}
-			defer a.transactions.Release(ctx, *processed.ResponseTxID)
-
-			isFinalResponse := false
-			responseTransaction.Lock()
-			inputCount := responseTransaction.InputCount()
-			for i := 0; i < inputCount; i++ {
-				txin := responseTransaction.Input(i)
-				if txin.PreviousOutPoint.Hash.Equal(&transferTxID) &&
-					transferContracts.IsFinalResponseOutput(int(txin.PreviousOutPoint.Index)) {
-					isFinalResponse = true
-					break
-				}
-			}
-			responseTransaction.Unlock()
-
-			if !isFinalResponse {
-				continue
-			}
-
-			logger.WarnWithFields(ctx, []logger.Field{
-				logger.Stringer("contract_locking_script", agentLockingScript),
-				logger.Stringer("txid", transferTxID),
-				logger.Int("output_index", transferOutputIndex),
-				logger.String("action_code", transfer.Code()),
-				logger.String("action_name", transfer.TypeName()),
-				logger.Stringer("response_txid", processed.ResponseTxID),
-			}, "Action already processed. Not canceling")
-			return nil, nil
-		}
-	}
-
-	// Collect balances effected by transfer.
-	allBalances := make(state.BalanceSet, len(transfer.Instruments))
-	for index, instrumentTransfer := range transfer.Instruments {
-		if instrumentTransfer.InstrumentType == protocol.BSVInstrumentID {
+	processeds := transferTransaction.GetContractProcessed(a.ContractHash(), transferOutputIndex)
+	for _, processed := range processeds {
+		if processed.ResponseTxID == nil {
 			continue
 		}
 
-		if !agentLockingScript.Equal(transferContracts.Outputs[index].LockingScript) {
+		// Check if response tx spends main transfer output and is the final response to the
+		// transfer or if it just spends the boomerang output and is just an inter-contract
+		// response.
+		responseTransaction, err := a.transactions.Get(ctx, *processed.ResponseTxID)
+		if err != nil {
+			return nil, errors.Wrap(err, "get tx")
+		}
+
+		if responseTransaction == nil {
+			return nil, errors.New("Response transaction not found")
+		}
+		defer a.transactions.Release(ctx, *processed.ResponseTxID)
+
+		isFinalResponse := false
+		responseTransaction.Lock()
+		inputCount := responseTransaction.InputCount()
+		for i := 0; i < inputCount; i++ {
+			txin := responseTransaction.Input(i)
+			if txin.PreviousOutPoint.Hash.Equal(&transferTxID) &&
+				transferContracts.IsFinalResponseOutput(int(txin.PreviousOutPoint.Index)) {
+				isFinalResponse = true
+				break
+			}
+		}
+		responseTransaction.Unlock()
+
+		if !isFinalResponse {
 			continue
 		}
 
-		instrumentID, _ := protocol.InstrumentIDForTransfer(instrumentTransfer)
-		instrumentCtx := logger.ContextWithLogFields(ctx,
-			logger.String("instrument_id", instrumentID))
-		var instrumentCode state.InstrumentCode
-		copy(instrumentCode[:], instrumentTransfer.InstrumentCode)
-
-		var lockingScripts []bitcoin.Script
-		for _, sender := range instrumentTransfer.InstrumentSenders {
-			transferTransaction.Lock()
-			inputOutput, err := transferTransaction.InputOutput(int(sender.Index))
-			transferTransaction.Unlock()
-			if err != nil {
-				logger.Warn(instrumentCtx, "Invalid sender index : %s", err)
-				continue
-			}
-
-			lockingScripts = appendLockingScript(lockingScripts, inputOutput.LockingScript)
-		}
-
-		for _, receiver := range instrumentTransfer.InstrumentReceivers {
-			receiverAddress, err := bitcoin.DecodeRawAddress(receiver.Address)
-			if err != nil {
-				logger.Warn(instrumentCtx, "Invalid receiver address : %s", err)
-				continue
-			}
-
-			lockingScript, err := receiverAddress.LockingScript()
-			if err != nil {
-				logger.Warn(instrumentCtx, "Invalid receiver address script : %s", err)
-				continue
-			}
-
-			lockingScripts = appendLockingScript(lockingScripts, lockingScript)
-		}
-
-		balances, err := a.caches.Balances.GetMulti(instrumentCtx, agentLockingScript,
-			instrumentCode, lockingScripts)
-		if err != nil {
-			return nil, errors.Wrap(err, "get balances")
-		}
-		defer a.caches.Balances.ReleaseMulti(instrumentCtx, agentLockingScript, instrumentCode,
-			balances)
-
-		allBalances[index] = balances
-	}
-
-	lockerResponseChannel := a.locker.AddRequest(allBalances)
-	lockerResponse := <-lockerResponseChannel
-	switch v := lockerResponse.(type) {
-	case uint64:
-	case error:
-		return nil, errors.Wrap(v, "locker")
-	}
-
-	// Cancel pending transfers associated with this transfer txid.
-	allBalances.CancelPending(transferTxID)
-	allBalances.Unlock()
-
-	if transferContracts.IsFirstContract() {
-		// Send rejection
-		rejectError := platform.NewRejectError(actions.RejectionsTransferExpired, "")
-		contractOutputIndex := transferContracts.CurrentOutputIndex()
-		etx, err := a.createRejection(ctx, transferTransaction, transferOutputIndex,
-			contractOutputIndex, rejectError)
-		if err != nil {
-			return nil, errors.Wrap(err, "reject")
-		}
 		logger.WarnWithFields(ctx, []logger.Field{
-			logger.Stringer("request_txid", transferTxID),
-			logger.Stringer("response_txid", etx.TxID()),
-		}, "Sending transfer expired rejection")
+			logger.Stringer("contract_locking_script", agentLockingScript),
+			logger.Stringer("txid", transferTxID),
+			logger.Int("output_index", transferOutputIndex),
+			logger.String("action_code", transfer.Code()),
+			logger.String("action_name", transfer.TypeName()),
+			logger.Stringer("response_txid", processed.ResponseTxID),
+		}, "Action already processed. Not canceling")
 
-		return etx, nil
+		return nil, nil
 	}
 
-	return nil, nil
+	if err := a.cancelTransfer(ctx, transferTransaction, transfer); err != nil {
+		return nil, errors.Wrap(err, "cancel transfer")
+	}
+
+	// Send rejection
+	rejectError := platform.NewRejectError(actions.RejectionsTransferExpired, "")
+	contractOutputIndex := transferContracts.CurrentOutputIndex()
+	etx, err := a.createRejection(ctx, transferTransaction, transferOutputIndex,
+		contractOutputIndex, rejectError)
+	if err != nil {
+		return nil, errors.Wrap(err, "reject")
+	}
+	logger.WarnWithFields(ctx, []logger.Field{
+		logger.Stringer("request_txid", transferTxID),
+		logger.Stringer("response_txid", etx.TxID()),
+	}, "Sending transfer expired rejection")
+
+	return etx, nil
 }

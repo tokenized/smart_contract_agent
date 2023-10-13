@@ -7,11 +7,12 @@ import (
 	"io"
 	"reflect"
 	"sync"
+	"sync/atomic"
 
 	"github.com/tokenized/logger"
 	"github.com/tokenized/pkg/bitcoin"
 	"github.com/tokenized/pkg/bsor"
-	ci "github.com/tokenized/pkg/cacher"
+	"github.com/tokenized/pkg/cacher"
 	"github.com/tokenized/smart_contract_agent/internal/state"
 	"github.com/tokenized/specification/dist/golang/actions"
 
@@ -28,7 +29,7 @@ var (
 )
 
 type ContractServicesCache struct {
-	cacher ci.Cacher
+	cacher cacher.Cacher
 	typ    reflect.Type
 }
 
@@ -38,7 +39,7 @@ type ContractServices struct {
 
 	Services []*Service `bsor:"3" json:"service"`
 
-	isModified bool
+	isModified atomic.Value
 	sync.Mutex `bsor:"-"`
 }
 
@@ -48,7 +49,7 @@ type Service struct {
 	PublicKey bitcoin.PublicKey `bsor:"3" json:"public_key"`
 }
 
-func NewContractServicesCache(cache ci.Cacher) (*ContractServicesCache, error) {
+func NewContractServicesCache(cache cacher.Cacher) (*ContractServicesCache, error) {
 	typ := reflect.TypeOf(&ContractServices{})
 
 	// Verify item value type is valid for a cache item.
@@ -62,7 +63,7 @@ func NewContractServicesCache(cache ci.Cacher) (*ContractServicesCache, error) {
 	}
 
 	itemInterface := itemValue.Interface()
-	if _, ok := itemInterface.(ci.Value); !ok {
+	if _, ok := itemInterface.(cacher.Value); !ok {
 		return nil, errors.New("Type must implement CacheValue")
 	}
 
@@ -93,7 +94,7 @@ func (c *ContractServicesCache) Update(ctx context.Context, contractLockingScrip
 		contractServices.Lock()
 		if len(contractServices.Services) > 0 {
 			contractServices.Services = nil
-			contractServices.isModified = true
+			contractServices.MarkModified()
 		}
 		contractServices.Unlock()
 
@@ -174,22 +175,35 @@ func ContractServicesPath(contractHash state.ContractHash) string {
 	return fmt.Sprintf("%s/%s", contractServicesPath, contractHash)
 }
 
-func (c *ContractServices) MarkModified() {
-	c.isModified = true
+func (s *ContractServices) Initialize() {
+	s.isModified.Store(false)
 }
 
-func (c *ContractServices) ClearModified() {
-	c.isModified = false
+func (s *ContractServices) MarkModified() {
+	s.isModified.Store(true)
 }
 
-func (c *ContractServices) IsModified() bool {
-	return c.isModified
+func (s *ContractServices) GetModified() bool {
+	if v := s.isModified.Swap(false); v != nil {
+		return v.(bool)
+	}
+
+	return false
 }
 
-func (s *ContractServices) CacheCopy() ci.Value {
+func (s *ContractServices) IsModified() bool {
+	if v := s.isModified.Load(); v != nil {
+		return v.(bool)
+	}
+
+	return false
+}
+
+func (s *ContractServices) CacheCopy() cacher.Value {
 	result := &ContractServices{
 		Services: make([]*Service, len(s.Services)),
 	}
+	result.isModified.Store(true)
 
 	if s.Formation != nil {
 		result.Formation = s.Formation.Copy()

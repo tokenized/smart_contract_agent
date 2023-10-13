@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/tokenized/pkg/bitcoin"
+	"github.com/tokenized/pkg/cacher"
 	"github.com/tokenized/pkg/expanded_tx"
 	"github.com/tokenized/pkg/peer_channels"
 	"github.com/tokenized/pkg/storage"
@@ -93,31 +94,24 @@ func (t *TestAgentData) ProcessTx(ctx context.Context,
 	defer t.Caches.Transactions.Release(ctx, etx.TxID())
 
 	transaction.Lock()
-	var action actions.Action
-	var actionIndex int
-	for outputIndex, txout := range transaction.Tx.TxOut {
-		act, err := protocol.Deserialize(txout.LockingScript, true)
-		if err != nil {
+	agentActions, err := CompileActions(ctx, transaction, true)
+	transaction.State |= transactions.TxStateSafe
+	transaction.Unlock()
+
+	isRelevant := false
+	for _, agentAction := range agentActions {
+		if !agentAction.IsRelevant(t.Agent.LockingScript()) {
 			continue
 		}
 
-		action = act
-		actionIndex = outputIndex
-		break
+		isRelevant = true
 	}
-	transaction.Unlock()
 
-	// Process transfer transaction on both agents
-	if err := t.Agent.Process(ctx, transaction, []Action{{
-		OutputIndex: actionIndex,
-		Action:      action,
-		Agents: []ActionAgent{
-			{
-				LockingScript: t.ContractLockingScript,
-				IsRequest:     true,
-			},
-		},
-	}}); err != nil {
+	if !isRelevant {
+		return nil
+	}
+
+	if err := t.Agent.UpdateTransaction(ctx, transaction, agentActions); err != nil {
 		panic(fmt.Sprintf("Failed to process transaction : %s : %s", err, etx))
 	}
 
@@ -148,8 +142,30 @@ func TestProcessTx(ctx context.Context, agents []*TestAgentData,
 	}
 }
 
+func TestProcessTxSingle(ctx context.Context, agents []*TestAgentData,
+	etx *expanded_tx.ExpandedTx) []*expanded_tx.ExpandedTx {
+
+	var responses []*expanded_tx.ExpandedTx
+	for _, agent := range agents {
+		responseTx := agent.ProcessTx(ctx, etx)
+		if responseTx != nil {
+			responses = append(responses, responseTx)
+		}
+	}
+
+	return responses
+}
+
 func StartTestData(ctx context.Context, t testing.TB) *TestData {
 	test := prepareTestData(ctx, t)
+
+	return test
+}
+
+func StartTestDataWithCacher(ctx context.Context, t testing.TB, store *storage.MockStorage,
+	cache cacher.Cacher) *TestData {
+
+	test := prepareTestDataWithCacher(ctx, t, store, cache)
 
 	return test
 }
@@ -190,6 +206,20 @@ func StartTestAgentWithContract(ctx context.Context, t testing.TB) (*Agent, *Tes
 
 func StartTestAgentWithInstrument(ctx context.Context, t testing.TB) (*Agent, *TestData) {
 	test := prepareTestData(ctx, t)
+
+	test.ContractKey, test.ContractLockingScript, test.AdminKey, test.AdminLockingScript, test.Contract, test.Instrument = state.MockInstrument(ctx,
+		&test.Caches.TestCaches)
+	_, test.FeeLockingScript, _ = state.MockKey()
+
+	finalizeTestAgent(ctx, t, test)
+
+	return test.agent, test
+}
+
+func StartTestAgentWithCacherWithInstrument(ctx context.Context, t testing.TB,
+	store *storage.MockStorage, cache cacher.Cacher) (*Agent, *TestData) {
+
+	test := prepareTestDataWithCacher(ctx, t, store, cache)
 
 	test.ContractKey, test.ContractLockingScript, test.AdminKey, test.AdminLockingScript, test.Contract, test.Instrument = state.MockInstrument(ctx,
 		&test.Caches.TestCaches)
@@ -287,6 +317,58 @@ func prepareTestData(ctx context.Context, t testing.TB) *TestData {
 	return test
 }
 
+func prepareTestDataWithCacher(ctx context.Context, t testing.TB, store *storage.MockStorage,
+	cache cacher.Cacher) *TestData {
+
+	test := &TestData{
+		Store:                        store,
+		Broadcaster:                  state.NewMockTxBroadcaster(),
+		Locker:                       locker.NewInlineLocker(),
+		PeerChannelsFactory:          peer_channels.NewFactory(),
+		peerChannelResponsesComplete: make(chan interface{}),
+		PeerChannelResponses:         make(chan PeerChannelResponse),
+		schedulerInterrupt:           make(chan interface{}),
+		schedulerComplete:            make(chan interface{}),
+		headers:                      state.NewMockHeaders(),
+	}
+
+	test.scheduler = scheduler.NewScheduler(test.Broadcaster, time.Second)
+
+	test.Caches = StartTestCachesWithCacher(ctx, t, cache, time.Second)
+
+	if test.Caches.Transactions == nil {
+		t.Fatalf("Transactions is nil")
+	}
+
+	test.mockStore = NewMockStore(DefaultConfig(), test.FeeLockingScript, test.Caches.Caches,
+		test.Caches.Transactions, test.Caches.Services, test.Locker, test.Store, test.Broadcaster,
+		nil, nil, test.scheduler, test.PeerChannelsFactory, test.PeerChannelResponses)
+
+	test.peerChannelResponder = NewPeerChannelResponder(test.Caches.Caches,
+		test.PeerChannelsFactory)
+
+	go func() {
+		defer func() {
+			if err := recover(); err != nil {
+				t.Errorf("Scheduler panic : %s", err)
+			}
+		}()
+
+		if err := test.scheduler.Run(ctx, test.schedulerInterrupt); err != nil &&
+			errors.Cause(err) != threads.Interrupted {
+			t.Errorf("Scheduler returned an error : %s", err)
+		}
+		close(test.schedulerComplete)
+	}()
+
+	go func() {
+		ProcessResponses(ctx, test.peerChannelResponder, test.PeerChannelResponses)
+		close(test.peerChannelResponsesComplete)
+	}()
+
+	return test
+}
+
 func finalizeTestAgent(ctx context.Context, t testing.TB, test *TestData) {
 	test.agentData = AgentData{
 		Key:                test.ContractKey,
@@ -337,7 +419,29 @@ func StopTestAgent(ctx context.Context, t *testing.T, test *TestData) {
 func StartTestCaches(ctx context.Context, t testing.TB, store storage.StreamStorage,
 	timeout time.Duration) *TestCaches {
 
-	tc := state.StartTestCaches(ctx, t, store, timeout)
+	tc := state.StartTestCaches(ctx, t, cacher.NewSimpleCache(store), timeout)
+
+	transactions, err := transactions.NewTransactionCache(tc.Cache)
+	if err != nil {
+		panic(fmt.Sprintf("Failed to create transactions cache : %s", err))
+	}
+
+	services, err := contract_services.NewContractServicesCache(tc.Cache)
+	if err != nil {
+		panic(fmt.Sprintf("Failed to create services cache : %s", err))
+	}
+
+	return &TestCaches{
+		TestCaches:   *tc,
+		Transactions: transactions,
+		Services:     services,
+	}
+}
+
+func StartTestCachesWithCacher(ctx context.Context, t testing.TB, cache cacher.Cacher,
+	timeout time.Duration) *TestCaches {
+
+	tc := state.StartTestCaches(ctx, t, cache, timeout)
 
 	transactions, err := transactions.NewTransactionCache(tc.Cache)
 	if err != nil {
@@ -879,6 +983,7 @@ func MockInstrumentWithOracle(ctx context.Context,
 	nextInstrumentCode := protocol.InstrumentCodeFromContract(contractAddress,
 		contract.InstrumentCount)
 	contract.InstrumentCount++
+	contract.MarkModified()
 	contract.Unlock()
 
 	instrument := &state.Instrument{
@@ -925,13 +1030,16 @@ func MockInstrumentWithOracle(ctx context.Context,
 		panic("Created contract is not new")
 	}
 
+	balance := &state.Balance{
+		LockingScript: adminLockingScript,
+		Quantity:      authorizedQuantity,
+		Timestamp:     instrument.Creation.Timestamp,
+		TxID:          instrument.CreationTxID,
+	}
+	balance.Initialize()
+
 	adminBalance, err := caches.Caches.Balances.Add(ctx, contractLockingScript,
-		instrument.InstrumentCode, &state.Balance{
-			LockingScript: adminLockingScript,
-			Quantity:      authorizedQuantity,
-			Timestamp:     instrument.Creation.Timestamp,
-			TxID:          instrument.CreationTxID,
-		})
+		instrument.InstrumentCode, balance)
 	if err != nil {
 		panic(fmt.Sprintf("Failed to add admin balance : %s", err))
 	}

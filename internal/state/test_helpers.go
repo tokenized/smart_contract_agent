@@ -10,9 +10,8 @@ import (
 	"time"
 
 	"github.com/tokenized/pkg/bitcoin"
-	ci "github.com/tokenized/pkg/cacher"
+	"github.com/tokenized/pkg/cacher"
 	"github.com/tokenized/pkg/expanded_tx"
-	"github.com/tokenized/pkg/storage"
 	"github.com/tokenized/pkg/wire"
 	"github.com/tokenized/smart_contract_agent/pkg/locker"
 	"github.com/tokenized/specification/dist/golang/actions"
@@ -23,7 +22,7 @@ import (
 
 type TestCaches struct {
 	Timeout         time.Duration
-	Cache           ci.Cacher
+	Cache           cacher.Cacher
 	Caches          *Caches
 	Locker          locker.Locker
 	LockerInterrupt chan interface{}
@@ -36,12 +35,12 @@ type TestCaches struct {
 }
 
 // StartTestCaches starts all the caches and wraps them into one interrupt and complete.
-func StartTestCaches(ctx context.Context, t testing.TB, store storage.StreamStorage,
+func StartTestCaches(ctx context.Context, t testing.TB, cache cacher.Cacher,
 	timeout time.Duration) *TestCaches {
 
 	result := &TestCaches{
 		Timeout:         timeout,
-		Cache:           ci.NewSimpleCache(store),
+		Cache:           cache,
 		LockerInterrupt: make(chan interface{}),
 		LockerComplete:  make(chan error, 1),
 		StartShutdown:   make(chan interface{}),
@@ -210,13 +209,16 @@ func MockInstrumentOnly(ctx context.Context, caches *TestCaches, contract *Contr
 		panic("Created instrument is not new")
 	}
 
+	balance := &Balance{
+		LockingScript: adminLockingScript,
+		Quantity:      authorizedQuantity,
+		Timestamp:     instrument.Creation.Timestamp,
+		TxID:          instrument.CreationTxID,
+	}
+	balance.Initialize()
+
 	adminBalance, err := caches.Caches.Balances.Add(ctx, contractLockingScript,
-		instrument.InstrumentCode, &Balance{
-			LockingScript: adminLockingScript,
-			Quantity:      authorizedQuantity,
-			Timestamp:     instrument.Creation.Timestamp,
-			TxID:          instrument.CreationTxID,
-		})
+		instrument.InstrumentCode, balance)
 	if err != nil {
 		panic(fmt.Sprintf("Failed to add admin balance : %s", err))
 	}
@@ -292,13 +294,16 @@ func MockInstrument(ctx context.Context,
 		panic("Created instrument is not new")
 	}
 
+	balance := &Balance{
+		LockingScript: adminLockingScript,
+		Quantity:      authorizedQuantity,
+		Timestamp:     instrument.Creation.Timestamp,
+		TxID:          instrument.CreationTxID,
+	}
+	balance.Initialize()
+
 	adminBalance, err := caches.Caches.Balances.Add(ctx, contractLockingScript,
-		instrument.InstrumentCode, &Balance{
-			LockingScript: adminLockingScript,
-			Quantity:      authorizedQuantity,
-			Timestamp:     instrument.Creation.Timestamp,
-			TxID:          instrument.CreationTxID,
-		})
+		instrument.InstrumentCode, balance)
 	if err != nil {
 		panic(fmt.Sprintf("Failed to add admin balance : %s", err))
 	}
@@ -376,13 +381,16 @@ func MockInstrumentCreditNote(ctx context.Context,
 		panic("Created instrument is not new")
 	}
 
+	balance := &Balance{
+		LockingScript: adminLockingScript,
+		Quantity:      authorizedQuantity,
+		Timestamp:     instrument.Creation.Timestamp,
+		TxID:          instrument.CreationTxID,
+	}
+	balance.Initialize()
+
 	adminBalance, err := caches.Caches.Balances.Add(ctx, contractLockingScript,
-		instrument.InstrumentCode, &Balance{
-			LockingScript: adminLockingScript,
-			Quantity:      authorizedQuantity,
-			Timestamp:     instrument.Creation.Timestamp,
-			TxID:          instrument.CreationTxID,
-		})
+		instrument.InstrumentCode, balance)
 	if err != nil {
 		panic(fmt.Sprintf("Failed to add admin balance : %s", err))
 	}
@@ -445,6 +453,7 @@ func MockBalances(ctx context.Context, caches *TestCaches, contract *Contract,
 			Timestamp:     uint64(time.Now().UnixNano()),
 			TxID:          &bitcoin.Hash32{},
 		}
+		balance.Initialize()
 		rand.Read(balance.TxID[:])
 
 		balances[i] = &MockBalance{
@@ -510,6 +519,7 @@ func MockBalancesMultiSig(ctx context.Context, caches *TestCaches, contract *Con
 			Timestamp:     uint64(time.Now().UnixNano()),
 			TxID:          &bitcoin.Hash32{},
 		}
+		balance.Initialize()
 		rand.Read(balance.TxID[:])
 
 		balances[i] = &MockBalance{

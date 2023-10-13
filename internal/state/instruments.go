@@ -7,10 +7,11 @@ import (
 	"io"
 	"reflect"
 	"sync"
+	"sync/atomic"
 
 	"github.com/tokenized/pkg/bitcoin"
 	"github.com/tokenized/pkg/bsor"
-	ci "github.com/tokenized/pkg/cacher"
+	"github.com/tokenized/pkg/cacher"
 	"github.com/tokenized/specification/dist/golang/actions"
 	"github.com/tokenized/specification/dist/golang/instruments"
 
@@ -23,7 +24,7 @@ const (
 )
 
 type InstrumentCache struct {
-	cacher ci.Cacher
+	cacher cacher.Cacher
 	typ    reflect.Type
 }
 
@@ -41,11 +42,11 @@ type Instrument struct {
 	// payload is used to cache the deserialized value of the payload in Creation.
 	payload instruments.Instrument `json:"instrument"`
 
-	isModified bool
+	isModified atomic.Value
 	sync.Mutex `bsor:"-"`
 }
 
-func NewInstrumentCache(cache ci.Cacher) (*InstrumentCache, error) {
+func NewInstrumentCache(cache cacher.Cacher) (*InstrumentCache, error) {
 	typ := reflect.TypeOf(&Instrument{})
 
 	// Verify item value type is valid for a cache item.
@@ -59,7 +60,7 @@ func NewInstrumentCache(cache ci.Cacher) (*InstrumentCache, error) {
 	}
 
 	itemInterface := itemValue.Interface()
-	if _, ok := itemInterface.(ci.Value); !ok {
+	if _, ok := itemInterface.(cacher.Value); !ok {
 		return nil, errors.New("Type must implement CacheValue")
 	}
 
@@ -211,20 +212,33 @@ func InstrumentPath(contractHash ContractHash, instrumentCode InstrumentCode) st
 	return fmt.Sprintf("%s/%s/%s", contractHash, instrumentCode, instrumentPath)
 }
 
-func (i *Instrument) MarkModified() {
-	i.isModified = true
+func (i *Instrument) Initialize() {
+	i.isModified.Store(false)
 }
 
-func (i *Instrument) ClearModified() {
-	i.isModified = false
+func (i *Instrument) MarkModified() {
+	i.isModified.Store(true)
+}
+
+func (i *Instrument) GetModified() bool {
+	if v := i.isModified.Swap(false); v != nil {
+		return v.(bool)
+	}
+
+	return false
 }
 
 func (i *Instrument) IsModified() bool {
-	return i.isModified
+	if v := i.isModified.Load(); v != nil {
+		return v.(bool)
+	}
+
+	return false
 }
 
-func (i *Instrument) CacheCopy() ci.Value {
+func (i *Instrument) CacheCopy() cacher.Value {
 	result := &Instrument{}
+	result.isModified.Store(true)
 
 	copy(result.InstrumentType[:], i.InstrumentType[:])
 	copy(result.InstrumentCode[:], i.InstrumentCode[:])

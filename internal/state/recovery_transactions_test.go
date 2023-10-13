@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	"github.com/tokenized/pkg/bitcoin"
-	ci "github.com/tokenized/pkg/cacher"
+	"github.com/tokenized/pkg/cacher"
 	"github.com/tokenized/pkg/storage"
 )
 
@@ -24,7 +24,7 @@ func Test_RecoveryTransactions(t *testing.T) {
 		t.Fatalf("Failed to create locking script : %s", err)
 	}
 
-	cacher := ci.NewSimpleCache(store)
+	cacher := cacher.NewSimpleCache(store)
 
 	cache, err := NewRecoveryTransactionsCache(cacher)
 	if err != nil {
@@ -145,7 +145,7 @@ func Test_RecoveryTransactions(t *testing.T) {
 	got.Unlock()
 	cache.Release(ctx, contractLockingScript)
 
-	if !cacher.IsEmpty() {
+	if !cacher.IsEmpty(ctx) {
 		t.Fatalf("Cacher is not empty")
 	}
 }

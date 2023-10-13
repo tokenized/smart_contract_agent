@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/tokenized/pkg/bitcoin"
-	ci "github.com/tokenized/pkg/cacher"
+	"github.com/tokenized/pkg/cacher"
 	"github.com/tokenized/pkg/storage"
 	"github.com/tokenized/specification/dist/golang/actions"
 	"github.com/tokenized/specification/dist/golang/instruments"
@@ -65,7 +65,7 @@ func Test_Contracts(t *testing.T) {
 
 	_, contractLockingScript, contractAddress := MockKey()
 
-	cacher := ci.NewSimpleCache(store)
+	cacher := cacher.NewSimpleCache(store)
 
 	cache, err := NewContractCache(cacher)
 	if err != nil {
@@ -212,7 +212,7 @@ func Test_Contracts(t *testing.T) {
 
 	cache.Release(ctx, contractLockingScript)
 
-	if !cacher.IsEmpty() {
+	if !cacher.IsEmpty(ctx) {
 		t.Fatalf("Cacher is not empty")
 	}
 }

@@ -24,7 +24,9 @@ func Test_Instruments_Definition_Valid(t *testing.T) {
 	ctx := logger.ContextWithLogger(context.Background(), true, true, "")
 	agent, test := StartTestAgentWithContract(ctx, t)
 
-	for i := 0; i < 10; i++ {
+	instrumentCount := 10
+
+	for i := 0; i < instrumentCount; i++ {
 		couponPayload := &instruments.DiscountCoupon{
 			RedeemingEntity:     "test.com",
 			ValidFromTimestamp:  uint64(time.Now().UnixNano()),
@@ -184,6 +186,12 @@ func Test_Instruments_Definition_Valid(t *testing.T) {
 		if !couponPayloadResult.Equal(couponPayload) {
 			t.Errorf("Coupon payload doesn't match")
 		}
+	}
+
+	// Verify instrument count and contract is modified
+	if test.Contract.InstrumentCount != uint64(instrumentCount) {
+		t.Fatalf("Wrong contract instrument count : got %d, want %d", test.Contract.InstrumentCount,
+			instrumentCount)
 	}
 
 	StopTestAgent(ctx, t, test)

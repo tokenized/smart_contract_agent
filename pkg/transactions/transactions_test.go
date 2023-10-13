@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	"github.com/tokenized/pkg/bitcoin"
-	ci "github.com/tokenized/pkg/cacher"
+	"github.com/tokenized/pkg/cacher"
 	"github.com/tokenized/pkg/storage"
 	"github.com/tokenized/pkg/wire"
 	"github.com/tokenized/txbuilder"
@@ -16,7 +16,7 @@ func Test_FetchTxs(t *testing.T) {
 	ctx := context.Background()
 	store := storage.NewMockStorage()
 
-	cacher := ci.NewSimpleCache(store)
+	cacher := cacher.NewSimpleCache(store)
 
 	cache, err := NewTransactionCache(cacher)
 	if err != nil {
@@ -81,7 +81,7 @@ func Test_FetchTxs(t *testing.T) {
 
 	t.Logf("Finished retrieving")
 
-	if !cacher.IsEmpty() {
+	if !cacher.IsEmpty(ctx) {
 		t.Fatalf("Cacher is not empty")
 	}
 }

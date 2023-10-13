@@ -7,10 +7,11 @@ import (
 	"io"
 	"reflect"
 	"sync"
+	"sync/atomic"
 
 	"github.com/tokenized/pkg/bitcoin"
 	"github.com/tokenized/pkg/bsor"
-	ci "github.com/tokenized/pkg/cacher"
+	"github.com/tokenized/pkg/cacher"
 
 	"github.com/pkg/errors"
 )
@@ -21,7 +22,7 @@ const (
 )
 
 type RecoveryTransactionsCache struct {
-	cacher ci.Cacher
+	cacher cacher.Cacher
 	typ    reflect.Type
 }
 
@@ -32,7 +33,7 @@ type RecoveryTransactionsCache struct {
 type RecoveryTransactions struct {
 	Transactions []*RecoveryTransaction `bsor:"1" json:"transactions"`
 
-	isModified bool
+	isModified atomic.Value
 	sync.Mutex `bsor:"-"`
 }
 
@@ -41,7 +42,7 @@ type RecoveryTransaction struct {
 	OutputIndexes []int          `bsor:"2" json:"output_indexes"`
 }
 
-func NewRecoveryTransactionsCache(cache ci.Cacher) (*RecoveryTransactionsCache, error) {
+func NewRecoveryTransactionsCache(cache cacher.Cacher) (*RecoveryTransactionsCache, error) {
 	typ := reflect.TypeOf(&RecoveryTransactions{})
 
 	// Verify item value type is valid for a cache item.
@@ -55,7 +56,7 @@ func NewRecoveryTransactionsCache(cache ci.Cacher) (*RecoveryTransactionsCache, 
 	}
 
 	itemInterface := itemValue.Interface()
-	if _, ok := itemInterface.(ci.Value); !ok {
+	if _, ok := itemInterface.(cacher.Value); !ok {
 		return nil, errors.New("Type must implement CacheValue")
 	}
 
@@ -115,7 +116,7 @@ func (txs *RecoveryTransactions) Append(tx *RecoveryTransaction) bool {
 
 				if !found {
 					t.OutputIndexes = append(t.OutputIndexes, newIndex)
-					txs.isModified = true
+					txs.MarkModified()
 					appended = true
 				}
 			}
@@ -125,7 +126,7 @@ func (txs *RecoveryTransactions) Append(tx *RecoveryTransaction) bool {
 	}
 
 	txs.Transactions = append(txs.Transactions, tx)
-	txs.isModified = true
+	txs.MarkModified()
 	return true
 }
 
@@ -137,7 +138,7 @@ func (txs *RecoveryTransactions) Remove(txid bitcoin.Hash32) bool {
 		}
 
 		txs.Transactions = append(txs.Transactions[:i], txs.Transactions[i+1:]...)
-		txs.isModified = true
+		txs.MarkModified()
 		return true
 	}
 
@@ -156,7 +157,7 @@ func (txs *RecoveryTransactions) RemoveOutput(txid bitcoin.Hash32, outputIndex i
 				txs.Transactions = append(txs.Transactions[:i], txs.Transactions[i+1:]...)
 			}
 
-			txs.isModified = true
+			txs.MarkModified()
 			return true
 		} else {
 			return false
@@ -177,26 +178,41 @@ func (tx *RecoveryTransaction) RemoveOutput(outputIndex int) bool {
 	return false
 }
 
-func (txs *RecoveryTransactions) MarkModified() {
-	txs.isModified = true
+func (txs *RecoveryTransactions) Initialize() {
+	txs.isModified.Store(false)
 }
 
-func (txs *RecoveryTransactions) ClearModified() {
-	txs.isModified = false
+func (txs *RecoveryTransactions) MarkModified() {
+	txs.isModified.Store(true)
+}
+
+func (txs *RecoveryTransactions) GetModified() bool {
+	if v := txs.isModified.Swap(false); v != nil {
+		return v.(bool)
+	}
+
+	return false
 }
 
 func (txs *RecoveryTransactions) IsModified() bool {
-	return txs.isModified
+	if v := txs.isModified.Load(); v != nil {
+		return v.(bool)
+	}
+
+	return false
 }
 
-func (txs *RecoveryTransactions) CacheCopy() ci.Value {
-	return txs.Copy()
+func (txs *RecoveryTransactions) CacheCopy() cacher.Value {
+	result := txs.Copy()
+	result.isModified.Store(true)
+	return result
 }
 
 func (txs *RecoveryTransactions) Copy() *RecoveryTransactions {
 	result := &RecoveryTransactions{
 		Transactions: make([]*RecoveryTransaction, len(txs.Transactions)),
 	}
+	result.isModified.Store(false)
 
 	for i, transaction := range txs.Transactions {
 		cpy := transaction.Copy()

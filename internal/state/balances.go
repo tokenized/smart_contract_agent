@@ -7,11 +7,12 @@ import (
 	"io"
 	"reflect"
 	"sync"
+	"sync/atomic"
 
 	"github.com/tokenized/logger"
 	"github.com/tokenized/pkg/bitcoin"
 	"github.com/tokenized/pkg/bsor"
-	ci "github.com/tokenized/pkg/cacher"
+	"github.com/tokenized/pkg/cacher"
 	"github.com/tokenized/smart_contract_agent/internal/platform"
 	"github.com/tokenized/specification/dist/golang/actions"
 
@@ -31,7 +32,7 @@ const (
 )
 
 type BalanceCache struct {
-	cacher ci.Cacher
+	cacher cacher.Cacher
 	typ    reflect.Type
 }
 
@@ -46,8 +47,9 @@ type Balance struct {
 	pendingQuantity  uint64
 	pendingDirection bool // true=credit, false=debit
 
-	isModified bool
-	sync.Mutex `bsor:"-"`
+	markModified atomic.Value
+	isModified   atomic.Value
+	sync.Mutex   `bsor:"-"`
 }
 
 type Balances []*Balance
@@ -65,7 +67,7 @@ type BalanceAdjustment struct {
 	SettledQuantity uint64          `bsor:"5" json:"settled_quantity,omitempty"`
 }
 
-func NewBalanceCache(cache ci.Cacher) (*BalanceCache, error) {
+func NewBalanceCache(cache cacher.Cacher) (*BalanceCache, error) {
 	typ := reflect.TypeOf(&Balance{})
 
 	// Verify item value type is valid for a cache item.
@@ -79,7 +81,7 @@ func NewBalanceCache(cache ci.Cacher) (*BalanceCache, error) {
 	}
 
 	itemInterface := itemValue.Interface()
-	if _, ok := itemInterface.(ci.SetValue); !ok {
+	if _, ok := itemInterface.(cacher.SetValue); !ok {
 		return nil, errors.New("Type must implement CacheSetValue")
 	}
 
@@ -107,7 +109,7 @@ func (c *BalanceCache) AddMulti(ctx context.Context, contractLockingScript bitco
 
 	pathPrefix := balancePathPrefix(contractLockingScript, instrumentCode)
 
-	values := make([]ci.SetValue, len(balances))
+	values := make([]cacher.SetValue, len(balances))
 	for i, balance := range balances {
 		values[i] = balance
 	}
@@ -196,10 +198,9 @@ func (c *BalanceCache) Release(ctx context.Context, contractLockingScript bitcoi
 	pathPrefix := balancePathPrefix(contractLockingScript, instrumentCode)
 	balance.Lock()
 	hash := LockingScriptHash(balance.LockingScript)
-	isModified := balance.isModified
 	balance.Unlock()
 
-	if err := c.cacher.ReleaseSetValue(ctx, c.typ, pathPrefix, hash, isModified); err != nil {
+	if err := c.cacher.ReleaseSetValue(ctx, c.typ, pathPrefix, hash); err != nil {
 		return errors.Wrap(err, "release set")
 	}
 
@@ -215,7 +216,6 @@ func (c *BalanceCache) ReleaseMulti(ctx context.Context, contractLockingScript b
 
 	pathPrefix := balancePathPrefix(contractLockingScript, instrumentCode)
 	hashes := make([]bitcoin.Hash32, len(balances))
-	isModified := make([]bool, len(balances))
 	for i, balance := range balances {
 		if balance == nil {
 			continue
@@ -223,12 +223,10 @@ func (c *BalanceCache) ReleaseMulti(ctx context.Context, contractLockingScript b
 
 		balance.Lock()
 		hashes[i] = LockingScriptHash(balance.LockingScript)
-		isModified[i] = balance.isModified
 		balance.Unlock()
 	}
 
-	if err := c.cacher.ReleaseMultiSetValue(ctx, c.typ, pathPrefix, hashes,
-		isModified); err != nil {
+	if err := c.cacher.ReleaseMultiSetValue(ctx, c.typ, pathPrefix, hashes); err != nil {
 		return errors.Wrap(err, "release set multi")
 	}
 
@@ -398,7 +396,7 @@ func (b *Balance) RevertPendingAdjustment(txid bitcoin.Hash32) {
 		return
 	}
 
-	b.isModified = true
+	b.MarkModified()
 	b.Adjustments = newAdjustments
 }
 
@@ -427,7 +425,7 @@ func (b *Balance) AddFreeze(txid bitcoin.Hash32, quantity, frozenUntil uint64) u
 		SettledQuantity: settledQuantity,
 	})
 
-	b.isModified = true
+	b.MarkModified()
 	return settledQuantity
 }
 
@@ -456,7 +454,7 @@ func (b *Balance) RemoveFreeze(txid bitcoin.Hash32) {
 
 	if found {
 		b.Adjustments = newAdjustments
-		b.isModified = true
+		b.MarkModified()
 	}
 }
 
@@ -485,7 +483,7 @@ func (b *Balance) AddConfiscation(txid bitcoin.Hash32, quantity uint64) (uint64,
 		SettledQuantity: settledQuantity,
 	})
 
-	b.isModified = true
+	b.MarkModified()
 	return settledQuantity, nil
 }
 
@@ -499,7 +497,7 @@ func (b *Balance) FinalizeConfiscation(orderTxID, confiscationTxID bitcoin.Hash3
 			b.Quantity -= adj.Quantity
 			b.TxID = &confiscationTxID
 			b.Timestamp = now
-			b.isModified = true
+			b.MarkModified()
 			found = true
 
 			continue
@@ -547,10 +545,10 @@ func (b *Balance) SettlePending(txid bitcoin.Hash32, isMultiContract bool) {
 
 	b.pendingDirection = false
 	b.pendingQuantity = 0
-	b.isModified = true
+	b.MarkModified()
 }
 
-// CancelPending removes any balance adjustements for the specified transfer transaction.
+// CancelPending removes any balance adjustements for the specified txid.
 func (b *Balance) CancelPending(txid bitcoin.Hash32) {
 	var newAdjustments []*BalanceAdjustment
 	for _, adj := range b.Adjustments {
@@ -561,7 +559,7 @@ func (b *Balance) CancelPending(txid bitcoin.Hash32) {
 		newAdjustments = append(newAdjustments, adj)
 	}
 	b.Adjustments = newAdjustments
-	b.isModified = true
+	b.MarkModified()
 }
 
 func (b *Balance) VerifySettlement(transferTxID bitcoin.Hash32, quantity, now uint64) int {
@@ -602,7 +600,7 @@ func (b *Balance) Settle(ctx context.Context, transferTxID, settlementTxID bitco
 			}
 			b.TxID = &settlementTxID
 			b.Timestamp = now
-			b.isModified = true
+			b.MarkModified()
 			found = true
 
 			continue
@@ -622,23 +620,43 @@ func (b *Balance) Settle(ctx context.Context, transferTxID, settlementTxID bitco
 	return found
 }
 
+func (b *Balance) Initialize() {
+	b.isModified.Store(false)
+}
+
+func (b *Balance) ProvideMarkModified(markModified cacher.MarkModified) {
+	b.markModified.Store(markModified)
+}
+
 func (b *Balance) MarkModified() {
-	b.isModified = true
+	if v := b.markModified.Load(); v != nil {
+		v.(cacher.MarkModified)()
+	}
+
+	b.isModified.Store(true)
+}
+
+func (b *Balance) GetModified() bool {
+	if v := b.isModified.Swap(false); v != nil {
+		return v.(bool)
+	}
+
+	return false
 }
 
 func (b *Balance) IsModified() bool {
-	return b.isModified
-}
+	if v := b.isModified.Load(); v != nil {
+		return v.(bool)
+	}
 
-func (b *Balance) ClearModified() {
-	b.isModified = false
+	return false
 }
 
 func (b *Balance) Hash() bitcoin.Hash32 {
 	return LockingScriptHash(b.LockingScript)
 }
 
-func (b *Balance) CacheSetCopy() ci.SetValue {
+func (b *Balance) CacheSetCopy() cacher.SetValue {
 	result := &Balance{
 		Quantity:    b.Quantity,
 		Timestamp:   b.Timestamp,

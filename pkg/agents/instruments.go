@@ -102,9 +102,38 @@ func (a *Agent) processInstrumentDefinition(ctx context.Context, transaction *tr
 		return nil, errors.Wrap(err, "agent address")
 	}
 
+	// Check if this value wasn't updated properly.
+	if contract.InstrumentCount == 0 {
+		found := false
+		for i := uint64(0); i < uint64(10); i++ {
+			nextInstrumentCode := protocol.InstrumentCodeFromContract(contractAddress, i)
+			var instrumentCode state.InstrumentCode
+			copy(instrumentCode[:], nextInstrumentCode[:])
+
+			instrument, err := a.caches.Instruments.Get(ctx, agentLockingScript, instrumentCode)
+			if err != nil {
+				return nil, errors.Wrap(err, "get instrument")
+			}
+
+			if instrument != nil {
+				contract.InstrumentCount = i + 1
+				contract.MarkModified()
+				found = true
+				a.caches.Instruments.Release(ctx, agentLockingScript, instrumentCode)
+			}
+		}
+
+		if found {
+			logger.InfoWithFields(ctx, []logger.Field{
+				logger.Uint64("instrument_count", contract.InstrumentCount),
+			}, "Updated instrument count")
+		}
+	}
+
 	nextInstrumentCode := protocol.InstrumentCodeFromContract(contractAddress,
 		contract.InstrumentCount)
 	contract.InstrumentCount++
+	contract.MarkModified()
 
 	instrumentID, _ := protocol.InstrumentIDForRaw(definition.InstrumentType, nextInstrumentCode[:])
 	ctx = logger.ContextWithLogFields(ctx, logger.String("instrument_id", instrumentID))
@@ -657,6 +686,7 @@ func (a *Agent) updateAdminBalance(ctx context.Context, contractLockingScript bi
 		Timestamp:     creation.Timestamp,
 		TxID:          &txid,
 	}
+	newBalance.Initialize()
 
 	balance, err := a.caches.Balances.Add(ctx, contractLockingScript, instrumentCode, newBalance)
 	if err != nil {

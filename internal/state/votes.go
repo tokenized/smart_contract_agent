@@ -7,11 +7,12 @@ import (
 	"io"
 	"reflect"
 	"sync"
+	"sync/atomic"
 
 	"github.com/tokenized/logger"
 	"github.com/tokenized/pkg/bitcoin"
 	"github.com/tokenized/pkg/bsor"
-	ci "github.com/tokenized/pkg/cacher"
+	"github.com/tokenized/pkg/cacher"
 	"github.com/tokenized/pkg/storage"
 	"github.com/tokenized/smart_contract_agent/pkg/locker"
 	"github.com/tokenized/specification/dist/golang/actions"
@@ -26,7 +27,7 @@ const (
 )
 
 type VoteCache struct {
-	cacher ci.Cacher
+	cacher cacher.Cacher
 	typ    reflect.Type
 }
 
@@ -49,11 +50,11 @@ type Vote struct {
 	OptionTally      []float64 `bsor:"12" json:"option_tally"`
 	VotedQuantity    uint64    `bsor:"13" json:"voted_quantity"`
 
-	isModified bool
+	isModified atomic.Value
 	sync.Mutex `bsor:"-"`
 }
 
-func NewVoteCache(cache ci.Cacher) (*VoteCache, error) {
+func NewVoteCache(cache cacher.Cacher) (*VoteCache, error) {
 	typ := reflect.TypeOf(&Vote{})
 
 	// Verify item value type is valid for a cache item.
@@ -67,7 +68,7 @@ func NewVoteCache(cache ci.Cacher) (*VoteCache, error) {
 	}
 
 	itemInterface := itemValue.Interface()
-	if _, ok := itemInterface.(ci.Value); !ok {
+	if _, ok := itemInterface.(cacher.Value); !ok {
 		return nil, errors.New("Type must implement CacheValue")
 	}
 
@@ -604,19 +605,31 @@ func VotePath(contractHash ContractHash, voteTxID bitcoin.Hash32) string {
 	return fmt.Sprintf("%s/%s/%s", votePath, contractHash, voteTxID)
 }
 
+func (v *Vote) Initialize() {
+	v.isModified.Store(false)
+}
+
 func (v *Vote) MarkModified() {
-	v.isModified = true
+	v.isModified.Store(true)
 }
 
-func (v *Vote) ClearModified() {
-	v.isModified = false
+func (vt *Vote) GetModified() bool {
+	if v := vt.isModified.Swap(false); v != nil {
+		return v.(bool)
+	}
+
+	return false
 }
 
-func (v *Vote) IsModified() bool {
-	return v.isModified
+func (vt *Vote) IsModified() bool {
+	if v := vt.isModified.Load(); v != nil {
+		return v.(bool)
+	}
+
+	return false
 }
 
-func (v *Vote) CacheCopy() ci.Value {
+func (v *Vote) CacheCopy() cacher.Value {
 	result := &Vote{
 		ContractWideVote: v.ContractWideVote,
 		TokenQuantity:    v.TokenQuantity,

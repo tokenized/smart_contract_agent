@@ -1395,6 +1395,7 @@ func (a *Agent) processConfiscation(ctx context.Context, transaction *transactio
 			Timestamp:     confiscation.Timestamp,
 			TxID:          &txid,
 		}
+		balances[i].Initialize()
 	}
 
 	transaction.Unlock()
@@ -1423,6 +1424,7 @@ func (a *Agent) processConfiscation(ctx context.Context, transaction *transactio
 		Timestamp:     confiscation.Timestamp,
 		TxID:          &txid,
 	}
+	depositBalance.Initialize()
 
 	addedDepositBalance, err := a.caches.Balances.Add(ctx, agentLockingScript, instrumentCode,
 		depositBalance)

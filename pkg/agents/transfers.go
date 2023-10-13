@@ -45,9 +45,22 @@ func (a *Agent) processTransfer(ctx context.Context, transaction *transactions.T
 	if transferContracts.IsMultiContract() {
 		if !transferContracts.IsFirstContract() {
 			logger.Info(ctx, "Waiting for settlement request message to process transfer")
-			// TODO Add scheduled task to cancel after multi-contract expiration time by spending the
-			// contract's output and taking the action fee. The reject should be sent to the requesting
-			// parties. --ce
+
+			// Schedule cancel of transfer if other contract(s) don't respond.
+			if a.scheduler != nil {
+				expireTimeStamp := a.Now() +
+					uint64(a.Config().MultiContractExpiration.Nanoseconds())
+				expireTime := time.Unix(0, int64(expireTimeStamp))
+
+				logger.InfoWithFields(ctx, []logger.Field{
+					logger.Timestamp("task_start", int64(expireTimeStamp)),
+				}, "Scheduling cancel pending transfer")
+
+				task := NewCancelPendingTransferTask(expireTime, a.agentStore, agentLockingScript,
+					txid)
+				a.scheduler.Schedule(ctx, task)
+			}
+
 			return nil, nil // Wait for settlement request message
 		}
 
@@ -685,6 +698,7 @@ func (a *Agent) applySettlements(ctx context.Context, transaction *transactions.
 				Timestamp:     timestamp,
 				TxID:          &txid,
 			}
+			balances[i].Initialize()
 		}
 		allBalances[index] = balances
 
@@ -774,6 +788,113 @@ func (a *Agent) applySettlements(ctx context.Context, transaction *transactions.
 	}
 
 	return transferTxID, lockingScripts, nil
+}
+
+func (a *Agent) cancelTransfer(ctx context.Context, transaction *transactions.Transaction,
+	transfer *actions.Transfer) error {
+
+	agentLockingScript := a.LockingScript()
+
+	transaction.Lock()
+	defer transaction.Unlock()
+
+	transferTxID := transaction.TxID()
+	inputCount := transaction.InputCount()
+	outputCount := transaction.OutputCount()
+	var lockingScripts []bitcoin.Script
+
+	// Update one instrument at a time.
+	allBalances := make(state.BalanceSet, len(transfer.Instruments))
+	for index, instrumentTransfer := range transfer.Instruments {
+		instrumentID, _ := protocol.InstrumentIDForTransfer(instrumentTransfer)
+		instrumentCtx := logger.ContextWithLogFields(ctx,
+			logger.String("instrument_id", instrumentID))
+
+		if int(instrumentTransfer.ContractIndex) >= outputCount {
+			logger.Error(instrumentCtx, "Invalid transfer contract index: %d >= %d",
+				instrumentTransfer.ContractIndex, outputCount)
+			return platform.NewRejectError(actions.RejectionsMsgMalformed,
+				"contract index"+instrumentID)
+		}
+
+		contractOutput := transaction.Output(int(instrumentTransfer.ContractIndex))
+		if !contractOutput.LockingScript.Equal(agentLockingScript) {
+			continue
+		}
+
+		var instrumentCode state.InstrumentCode
+		copy(instrumentCode[:], instrumentTransfer.InstrumentCode)
+
+		instrument, err := a.caches.Instruments.Get(instrumentCtx, agentLockingScript,
+			instrumentCode)
+		if err != nil {
+			return errors.Wrap(err, "get instrument")
+		}
+
+		if instrument == nil {
+			logger.Warn(instrumentCtx, "Instrument not found")
+			return platform.NewRejectError(actions.RejectionsInstrumentNotFound, instrumentID)
+		}
+		a.caches.Instruments.Release(instrumentCtx, agentLockingScript, instrumentCode)
+
+		logger.Info(instrumentCtx, "Processing settlement")
+
+		// Build balances based on the instrument's settlement quantities.
+		for i, sender := range instrumentTransfer.InstrumentSenders {
+			if int(sender.Index) >= inputCount {
+				logger.ErrorWithFields(instrumentCtx, []logger.Field{
+					logger.Int("sender_index", i),
+					logger.Uint32("input_index", sender.Index),
+					logger.Int("input_count", inputCount),
+				}, "Invalid transfer input index")
+				return nil
+			}
+
+			inputOutput, err := transaction.InputOutput(int(sender.Index))
+			if err != nil {
+				return errors.Wrapf(err, "input: %d", sender.Index)
+			}
+			lockingScripts = appendLockingScript(lockingScripts, inputOutput.LockingScript)
+		}
+
+		for i, receiver := range instrumentTransfer.InstrumentReceivers {
+			ra, err := bitcoin.DecodeRawAddress(receiver.Address)
+			if err != nil {
+				return errors.Wrapf(err, "receiver address: %d", i)
+			}
+
+			ls, err := ra.LockingScript()
+			if err != nil {
+				return errors.Wrapf(err, "receiver locking script: %d", i)
+			}
+
+			lockingScripts = appendLockingScript(lockingScripts, ls)
+		}
+
+		balances, err := a.caches.Balances.GetMulti(instrumentCtx, agentLockingScript,
+			instrumentCode, lockingScripts)
+		if err != nil {
+			return errors.Wrap(err, "get balances")
+		}
+		defer a.caches.Balances.ReleaseMulti(instrumentCtx, agentLockingScript, instrumentCode,
+			balances)
+
+		allBalances[index] = balances
+	}
+
+	lockerResponseChannel := a.locker.AddRequest(allBalances)
+	lockerResponse := <-lockerResponseChannel
+	switch v := lockerResponse.(type) {
+	case uint64:
+		// now = v // timestamp
+	case error:
+		return errors.Wrap(v, "locker")
+	}
+	defer allBalances.Unlock()
+
+	allBalances.CancelPending(transferTxID)
+
+	return nil
 }
 
 // populateTransferSettlement adds all the new balances to the transfer settlement.
@@ -894,8 +1015,8 @@ func (c TransferContracts) CurrentOutputIndex() int {
 
 // parseContracts returns the previous, next, and full list of contracts in the order that they
 // should process the transfer.
-func parseTransferContracts(transferTransaction *transactions.Transaction, transfer *actions.Transfer,
-	currentLockingScript bitcoin.Script) (*TransferContracts, error) {
+func parseTransferContracts(transferTransaction *transactions.Transaction,
+	transfer *actions.Transfer, currentLockingScript bitcoin.Script) (*TransferContracts, error) {
 
 	count := len(transfer.Instruments)
 	if count == 0 {

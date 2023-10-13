@@ -8,10 +8,11 @@ import (
 	"reflect"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"github.com/tokenized/pkg/bitcoin"
 	"github.com/tokenized/pkg/bsor"
-	ci "github.com/tokenized/pkg/cacher"
+	"github.com/tokenized/pkg/cacher"
 	"github.com/tokenized/pkg/expanded_tx"
 	"github.com/tokenized/pkg/merkle_proof"
 	"github.com/tokenized/pkg/wire"
@@ -41,18 +42,18 @@ var (
 type TxState uint8
 
 type TransactionCache struct {
-	cacher ci.Cacher
+	cacher cacher.Cacher
 	typ    reflect.Type
 }
 
 type Processed struct {
-	// Contract is the hash of the contract that responded.
+	// Contract is the hash of the contract that processed this tx.
 	Contract state.ContractHash `bsor:"1" json:"contract"`
 
-	// ActionIndex is the index of the output containing the action that was responded to.
+	// ActionIndex is the index of the output containing the action that was processed.
 	ActionIndex int `bsor:"2" json:"action_index"`
 
-	// ResponseTxID is the txid of the response.
+	// ResponseTxID is the txid of the response. This will be nil when the tx is not a request.
 	ResponseTxID *bitcoin.Hash32 `bsor:"3" json:"response_txid"`
 }
 
@@ -71,11 +72,12 @@ type Transaction struct {
 	Ancestors expanded_tx.AncestorTxs `bsor:"-" json:"ancestors,omitempty"`
 
 	isProcessing []state.ContractHash
-	isModified   bool
-	sync.Mutex   `bsor:"-"`
+
+	isModified atomic.Value
+	sync.Mutex `bsor:"-"`
 }
 
-func NewTransactionCache(cache ci.Cacher) (*TransactionCache, error) {
+func NewTransactionCache(cache cacher.Cacher) (*TransactionCache, error) {
 	typ := reflect.TypeOf(&Transaction{})
 
 	// Verify item value type is valid for a cache item.
@@ -89,7 +91,7 @@ func NewTransactionCache(cache ci.Cacher) (*TransactionCache, error) {
 	}
 
 	itemInterface := itemValue.Interface()
-	if _, ok := itemInterface.(ci.Value); !ok {
+	if _, ok := itemInterface.(cacher.Value); !ok {
 		return nil, errors.New("Type must implement CacheValue")
 	}
 
@@ -170,7 +172,7 @@ func (c *TransactionCache) AddRawWithOutputs(ctx context.Context, tx *wire.MsgTx
 		addedTx.Lock()
 		if len(addedTx.SpentOutputs) == 0 {
 			addedTx.SpentOutputs = spentOutputs
-			addedTx.isModified = true
+			addedTx.MarkModified()
 		}
 		addedTx.Unlock()
 	}
@@ -421,7 +423,7 @@ func (tx *Transaction) SetProcessed(contract state.ContractHash, actionIndex int
 		Contract:    contract,
 		ActionIndex: actionIndex,
 	})
-	tx.isModified = true
+	tx.MarkModified()
 	return true
 }
 
@@ -440,7 +442,7 @@ func (tx *Transaction) AddResponseTxID(contract state.ContractHash, actionIndex 
 		ActionIndex:  actionIndex,
 		ResponseTxID: &txid,
 	})
-	tx.isModified = true
+	tx.MarkModified()
 	return true
 }
 
@@ -472,19 +474,31 @@ func (tx *Transaction) TxID() bitcoin.Hash32 {
 	return *tx.Tx.TxHash()
 }
 
-func (tx *Transaction) MarkModified() {
-	tx.isModified = true
+func (tx *Transaction) Initialize() {
+	tx.isModified.Store(false)
 }
 
-func (tx *Transaction) ClearModified() {
-	tx.isModified = false
+func (tx *Transaction) MarkModified() {
+	tx.isModified.Store(true)
+}
+
+func (tx *Transaction) GetModified() bool {
+	if v := tx.isModified.Swap(false); v != nil {
+		return v.(bool)
+	}
+
+	return false
 }
 
 func (tx *Transaction) IsModified() bool {
-	return tx.isModified
+	if v := tx.isModified.Load(); v != nil {
+		return v.(bool)
+	}
+
+	return false
 }
 
-func (t *Transaction) CacheCopy() ci.Value {
+func (t *Transaction) CacheCopy() cacher.Value {
 	result := &Transaction{
 		State:        t.State,
 		MerkleProofs: t.MerkleProofs.Copy(),
@@ -492,6 +506,7 @@ func (t *Transaction) CacheCopy() ci.Value {
 		Processed:    make([]*Processed, len(t.Processed)),
 		Ancestors:    t.Ancestors.Copy(),
 	}
+	result.isModified.Store(true)
 
 	if t.Tx != nil {
 		txCopy := t.Tx.Copy()

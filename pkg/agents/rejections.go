@@ -138,6 +138,10 @@ func (a *Agent) processRejection(ctx context.Context, transaction *transactions.
 		logger.Stringer("transfer_txid", transferTxID),
 	}, "Found related transfer transaction")
 
+	if err := a.cancelTransfer(ctx, transferTransaction, transfer); err != nil {
+		return nil, errors.Wrap(err, "cancel transfer")
+	}
+
 	transferContracts, err := parseTransferContracts(transferTransaction, transfer,
 		agentLockingScript)
 	if err != nil {

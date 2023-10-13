@@ -8,12 +8,13 @@ import (
 	"io"
 	"reflect"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/tokenized/logger"
 	"github.com/tokenized/pkg/bitcoin"
 	"github.com/tokenized/pkg/bsor"
-	ci "github.com/tokenized/pkg/cacher"
+	"github.com/tokenized/pkg/cacher"
 	"github.com/tokenized/smart_contract_agent/internal/platform"
 	"github.com/tokenized/specification/dist/golang/actions"
 	"github.com/tokenized/specification/dist/golang/protocol"
@@ -27,7 +28,7 @@ const (
 )
 
 type ContractCache struct {
-	cacher ci.Cacher
+	cacher cacher.Cacher
 	typ    reflect.Type
 }
 
@@ -49,11 +50,11 @@ type Contract struct {
 	// TODO Populate AdminMemberInstrumentCode value. --ce
 	AdminMemberInstrumentCode InstrumentCode `bsor:"12" json:"admin_member_instrument_code"`
 
-	isModified bool
+	isModified atomic.Value
 	sync.Mutex `bsor:"-"`
 }
 
-func NewContractCache(cache ci.Cacher) (*ContractCache, error) {
+func NewContractCache(cache cacher.Cacher) (*ContractCache, error) {
 	typ := reflect.TypeOf(&Contract{})
 
 	// Verify item value type is valid for a cache item.
@@ -67,7 +68,7 @@ func NewContractCache(cache ci.Cacher) (*ContractCache, error) {
 	}
 
 	itemInterface := itemValue.Interface()
-	if _, ok := itemInterface.(ci.Value); !ok {
+	if _, ok := itemInterface.(cacher.Value); !ok {
 		return nil, errors.New("Type must implement CacheValue")
 	}
 
@@ -132,12 +133,29 @@ func (c *ContractCache) Get(ctx context.Context, lockingScript bitcoin.Script) (
 	return item.(*Contract), nil
 }
 
+func (c *ContractCache) GetByHash(ctx context.Context, hash bitcoin.Hash32) (*Contract, error) {
+	item, err := c.cacher.Get(ctx, c.typ, ContractPathByHash(hash))
+	if err != nil {
+		return nil, errors.Wrap(err, "get")
+	}
+
+	if item == nil {
+		return nil, nil
+	}
+
+	return item.(*Contract), nil
+}
+
 func (c *ContractCache) Release(ctx context.Context, lockingScript bitcoin.Script) {
 	c.cacher.Release(ctx, ContractPath(lockingScript))
 }
 
 func ContractPath(lockingScript bitcoin.Script) string {
 	return fmt.Sprintf("%s/%s", CalculateContractHash(lockingScript), contractPath)
+}
+
+func ContractPathByHash(hash bitcoin.Hash32) string {
+	return fmt.Sprintf("%s/%s", hash, contractPath)
 }
 
 func (c *Contract) CheckIsAvailable(now uint64) error {
@@ -233,19 +251,31 @@ func (c *Contract) Thaw(timestamp uint64) {
 	}
 }
 
-func (c *Contract) MarkModified() {
-	c.isModified = true
+func (c *Contract) Initialize() {
+	c.isModified.Store(false)
 }
 
-func (c *Contract) ClearModified() {
-	c.isModified = false
+func (c *Contract) MarkModified() {
+	c.isModified.Store(true)
+}
+
+func (c *Contract) GetModified() bool {
+	if v := c.isModified.Swap(false); v != nil {
+		return v.(bool)
+	}
+
+	return false
 }
 
 func (c *Contract) IsModified() bool {
-	return c.isModified
+	if v := c.isModified.Load(); v != nil {
+		return v.(bool)
+	}
+
+	return false
 }
 
-func (c *Contract) CacheCopy() ci.Value {
+func (c *Contract) CacheCopy() cacher.Value {
 	result := &Contract{
 		InstrumentCount: c.InstrumentCount,
 	}

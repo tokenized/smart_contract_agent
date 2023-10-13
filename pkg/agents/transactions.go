@@ -135,11 +135,12 @@ func GetActionAgents(transaction expanded_tx.TransactionWithOutputs,
 		}, nil
 
 	case *actions.Transfer:
+		outputCount := transaction.OutputCount()
 		var result []ActionAgent
 		for _, instrument := range act.Instruments {
-			if int(instrument.ContractIndex) >= transaction.OutputCount() {
+			if int(instrument.ContractIndex) >= outputCount {
 				return nil, errors.Wrapf(ErrInvalidAction, "index out of range : %d >= %d",
-					instrument.ContractIndex, transaction.OutputCount())
+					instrument.ContractIndex, outputCount)
 			}
 
 			lockingScript := transaction.Output(int(instrument.ContractIndex)).LockingScript
@@ -152,11 +153,12 @@ func GetActionAgents(transaction expanded_tx.TransactionWithOutputs,
 		return result, nil
 
 	case *actions.Settlement:
+		inputCount := transaction.InputCount()
 		var result []ActionAgent
 		for _, instrument := range act.Instruments {
-			if int(instrument.ContractIndex) >= transaction.InputCount() {
+			if int(instrument.ContractIndex) >= inputCount {
 				return nil, errors.Wrapf(ErrInvalidAction, "index out of range : %d >= %d",
-					instrument.ContractIndex, transaction.InputCount())
+					instrument.ContractIndex, inputCount)
 			}
 
 			inputOutput, err := transaction.InputOutput(int(instrument.ContractIndex))
@@ -172,11 +174,12 @@ func GetActionAgents(transaction expanded_tx.TransactionWithOutputs,
 		return result, nil
 
 	case *actions.RectificationSettlement:
+		inputCount := transaction.InputCount()
 		var result []ActionAgent
 		for _, instrument := range act.Instruments {
-			if int(instrument.ContractIndex) >= transaction.InputCount() {
+			if int(instrument.ContractIndex) >= inputCount {
 				return nil, errors.Wrapf(ErrInvalidAction, "index out of range : %d >= %d",
-					instrument.ContractIndex, transaction.InputCount())
+					instrument.ContractIndex, inputCount)
 			}
 
 			inputOutput, err := transaction.InputOutput(int(instrument.ContractIndex))
@@ -192,11 +195,12 @@ func GetActionAgents(transaction expanded_tx.TransactionWithOutputs,
 		return result, nil
 
 	case *actions.Message:
+		inputCount := transaction.InputCount()
 		var result []ActionAgent
 		for _, senderIndex := range act.SenderIndexes {
-			if int(senderIndex) >= transaction.InputCount() {
+			if int(senderIndex) >= inputCount {
 				return nil, errors.Wrapf(ErrInvalidAction, "sender index out of range : %d >= %d",
-					senderIndex, transaction.InputCount())
+					senderIndex, inputCount)
 			}
 
 			inputOutput, err := transaction.InputOutput(int(senderIndex))
@@ -209,10 +213,11 @@ func GetActionAgents(transaction expanded_tx.TransactionWithOutputs,
 			})
 		}
 
+		outputCount := transaction.OutputCount()
 		for _, receiverIndex := range act.ReceiverIndexes {
-			if int(receiverIndex) >= transaction.OutputCount() {
+			if int(receiverIndex) >= outputCount {
 				return nil, errors.Wrapf(ErrInvalidAction, "receiver index out of range : %d >= %d",
-					receiverIndex, transaction.OutputCount())
+					receiverIndex, outputCount)
 			}
 
 			lockingScript := transaction.Output(int(receiverIndex)).LockingScript
@@ -240,7 +245,7 @@ func GetActionAgents(transaction expanded_tx.TransactionWithOutputs,
 		outputCount := transaction.OutputCount()
 		if int(act.RejectAddressIndex) >= outputCount {
 			return nil, errors.Wrapf(ErrInvalidAction, "reject index out of range : %d >= %d",
-				int(act.RejectAddressIndex), transaction.OutputCount())
+				int(act.RejectAddressIndex), outputCount)
 		}
 
 		lockingScript := transaction.Output(int(act.RejectAddressIndex)).LockingScript
@@ -260,7 +265,7 @@ func GetActionAgents(transaction expanded_tx.TransactionWithOutputs,
 			for _, addressIndex := range act.AddressIndexes {
 				if int(addressIndex) >= outputCount {
 					return nil, errors.Wrapf(ErrInvalidAction, "address index out of range : %d >= %d",
-						addressIndex, transaction.OutputCount())
+						addressIndex, outputCount)
 				}
 
 				lockingScript := transaction.Output(int(addressIndex)).LockingScript
@@ -466,6 +471,7 @@ func (a *Agent) processAction(ctx context.Context, agentLockingScript bitcoin.Sc
 			logger.String("action_name", action.TypeName()),
 			logger.Stringer("response_txid", processed[0].ResponseTxID),
 		}, "Action already processed")
+
 		return nil
 	}
 
@@ -675,6 +681,8 @@ func (a *Agent) processAction(ctx context.Context, agentLockingScript bitcoin.Sc
 	if processError != nil {
 		if rejectError, ok := errors.Cause(processError).(platform.RejectError); ok {
 			if isRequest {
+				logger.Warn(ctx, "Received reject from response processing : %s", processError)
+
 				switch act := action.(type) {
 				case *actions.Message:
 					etx, err := a.createMessageRejection(ctx, transaction, act, actionIndex,

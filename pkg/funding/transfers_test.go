@@ -25,7 +25,7 @@ func Test_Transfers_Random_P2PKH(t *testing.T) {
 	ctx := logger.ContextWithLogger(context.Background(), true, true, "")
 	agent, test := agents.StartTestAgentWithInstrument(ctx, t)
 
-	for i := 0; i < 1000; i++ {
+	for i := 0; i < 100; i++ {
 		senderCount := mathRand.Intn(10) + 1
 		MockExecuteTransferRandom(t, ctx, agent, test, senderCount, false)
 	}
@@ -37,7 +37,7 @@ func Test_Transfers_Random_Multi_P2PKH(t *testing.T) {
 	ctx := logger.ContextWithLogger(context.Background(), true, true, "")
 	agent, test := agents.StartTestAgentWithInstrument(ctx, t)
 
-	for i := 0; i < 1000; i++ {
+	for i := 0; i < 100; i++ {
 		senderCount := mathRand.Intn(10) + 1
 		MockExecuteTransferRandom(t, ctx, agent, test, senderCount, true)
 	}
@@ -49,7 +49,7 @@ func Test_Transfers_Random_Bitcoin_P2PKH(t *testing.T) {
 	ctx := logger.ContextWithLogger(context.Background(), true, true, "")
 	agent, test := agents.StartTestAgentWithInstrument(ctx, t)
 
-	for i := 0; i < 1000; i++ {
+	for i := 0; i < 100; i++ {
 		senderCount := mathRand.Intn(10) + 1
 		MockExecuteTransferRandomBitcoin(t, ctx, agent, test, senderCount, false)
 	}

@@ -113,6 +113,23 @@ func (a *Agent) processSignatureRequest(ctx context.Context, transaction *transa
 		return nil, platform.NewRejectError(actions.RejectionsMsgMalformed,
 			"missing transfer action")
 	}
+
+	// If there is already a reject to the transfer transaction from the first contract then ignore
+	// this request.
+	processed := transaction.ContractProcessed(a.ContractHash(), transferOutputIndex)
+	if len(processed) > 0 {
+		transferTransaction.Unlock()
+
+		logger.InfoWithFields(ctx, []logger.Field{
+			logger.Stringer("contract_locking_script", agentLockingScript),
+			logger.Stringer("transfer_txid", transferTxID),
+			logger.Int("action_index", transferOutputIndex),
+			logger.Stringer("response_txid", processed[0].ResponseTxID),
+		}, "Transfer action already rejected by first contract")
+
+		return nil, nil
+	}
+
 	transferTransaction.Unlock()
 
 	transferContracts, err := parseTransferContracts(transferTransaction, transfer,
@@ -212,9 +229,19 @@ func (a *Agent) processSignatureRequest(ctx context.Context, transaction *transa
 			continue
 		}
 
-		if !agentLockingScript.Equal(transferContracts.Outputs[index].LockingScript) {
+		inputOutput, err := settlementTx.InputOutput(int(instrumentSettlement.ContractIndex))
+		if err != nil {
+			return nil, platform.NewRejectErrorFull(actions.RejectionsMsgMalformed,
+				"settlement contract index out of range", 0, rejectOutputIndex, rejectLockingScript)
+		}
+
+		if !agentLockingScript.Equal(inputOutput.LockingScript) {
 			continue
 		}
+
+		logger.InfoWithFields(ctx, []logger.Field{
+			logger.String("instrument_id", instrumentID),
+		}, "Verifying settlements for instrument")
 
 		var instrumentCode state.InstrumentCode
 		copy(instrumentCode[:], instrumentSettlement.InstrumentCode)
@@ -252,6 +279,8 @@ func (a *Agent) processSignatureRequest(ctx context.Context, transaction *transa
 				settlementTx, instrumentSettlement); err != nil {
 				return nil, errors.Wrapf(err, "verify settlement: %s", protocol.BSVInstrumentID)
 			}
+
+			continue
 		}
 
 		if !agentLockingScript.Equal(transferContracts.Outputs[index].LockingScript) {
@@ -342,6 +371,7 @@ func (a *Agent) processSignatureRequest(ctx context.Context, transaction *transa
 	etx, err := a.createSignatureRequest(ctx, transaction, outputIndex, transferContracts,
 		settlementTx, now)
 	if err != nil {
+		allBalances.Revert(transferTxID)
 		return nil, errors.Wrap(err, "send signature request")
 	}
 
@@ -477,6 +507,11 @@ func (a *Agent) verifyInstrumentSettlement(ctx context.Context, agentLockingScri
 			settlement.Quantity, now); rejectCode != 0 {
 			return platform.NewRejectError(rejectCode, fmt.Sprintf("settlement %d", i))
 		}
+
+		logger.InfoWithFields(ctx, []logger.Field{
+			logger.Stringer("locking_script", txout.LockingScript),
+			logger.Uint64("quantity", settlement.Quantity),
+		}, "Verified settlement")
 	}
 
 	return nil

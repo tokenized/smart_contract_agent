@@ -88,15 +88,30 @@ func (a *Agent) processSettlementRequest(ctx context.Context, transaction *trans
 			break
 		}
 	}
-	transferTransaction.Unlock()
 
 	if transfer == nil {
-		logger.WarnWithFields(ctx, []logger.Field{
-			logger.Stringer("transfer_txid", transferTxID),
-		}, "Transfer action not found in transfer transaction")
+		transferTransaction.Unlock()
 		return nil, platform.NewRejectError(actions.RejectionsMsgMalformed,
-			"transfer tx missing transfer")
+			"missing transfer action")
 	}
+
+	// If there is already a reject to the transfer transaction from the first contract then ignore
+	// this request.
+	processed := transaction.ContractProcessed(a.ContractHash(), transferOutputIndex)
+	if len(processed) > 0 {
+		transferTransaction.Unlock()
+
+		logger.InfoWithFields(ctx, []logger.Field{
+			logger.Stringer("contract_locking_script", agentLockingScript),
+			logger.Stringer("transfer_txid", transferTxID),
+			logger.Int("action_index", transferOutputIndex),
+			logger.Stringer("response_txid", processed[0].ResponseTxID),
+		}, "Transfer action already rejected by first contract")
+
+		return nil, nil
+	}
+
+	transferTransaction.Unlock()
 
 	transferContracts, err := parseTransferContracts(transferTransaction, transfer,
 		agentLockingScript)

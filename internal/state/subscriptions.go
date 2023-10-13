@@ -7,10 +7,11 @@ import (
 	"io"
 	"reflect"
 	"sync"
+	"sync/atomic"
 
 	"github.com/tokenized/pkg/bitcoin"
 	"github.com/tokenized/pkg/bsor"
-	ci "github.com/tokenized/pkg/cacher"
+	"github.com/tokenized/pkg/cacher"
 
 	"github.com/pkg/errors"
 )
@@ -24,7 +25,7 @@ const (
 )
 
 type SubscriptionCache struct {
-	cacher ci.Cacher
+	cacher cacher.Cacher
 	typ    reflect.Type
 }
 
@@ -40,16 +41,18 @@ type SubscriptionValue interface {
 	GetChannelHash() bitcoin.Hash32
 
 	// Object has been modified since last write to storage.
+	Initialize()
+	ProvideMarkModified(markModified cacher.MarkModified)
 	IsModified() bool
 	MarkModified()
-	ClearModified()
+	GetModified() bool
 
 	// Storage path and serialization.
 	Hash() bitcoin.Hash32
 	Serialize(w io.Writer) error
 	Deserialize(r io.Reader) error
 
-	CacheSetCopy() ci.SetValue
+	CacheSetCopy() cacher.SetValue
 
 	// All functions will be called by cache while the object is locked.
 	Lock()
@@ -60,11 +63,12 @@ type LockingScriptSubscription struct {
 	LockingScript bitcoin.Script `bsor:"1" json:"locking_script"`
 	ChannelHash   bitcoin.Hash32 `bsor:"2" json:"channel_hash"`
 
-	isModified bool
-	sync.Mutex `bsor:"-"`
+	markModified cacher.MarkModified
+	isModified   atomic.Value
+	sync.Mutex   `bsor:"-"`
 }
 
-func NewSubscriptionCache(cache ci.Cacher) (*SubscriptionCache, error) {
+func NewSubscriptionCache(cache cacher.Cacher) (*SubscriptionCache, error) {
 	typ := reflect.TypeOf(&Subscription{})
 
 	// Verify item value type is valid for a cache item.
@@ -78,7 +82,7 @@ func NewSubscriptionCache(cache ci.Cacher) (*SubscriptionCache, error) {
 	}
 
 	itemInterface := itemValue.Interface()
-	if _, ok := itemInterface.(ci.SetValue); !ok {
+	if _, ok := itemInterface.(cacher.SetValue); !ok {
 		return nil, errors.New("Type must implement CacheSetValue")
 	}
 
@@ -106,7 +110,7 @@ func (c *SubscriptionCache) AddMulti(ctx context.Context, contractLockingScript 
 
 	pathPrefix := subscriptionPathPrefix(contractLockingScript)
 
-	values := make([]ci.SetValue, len(subscriptions))
+	values := make([]cacher.SetValue, len(subscriptions))
 	for i, subscription := range subscriptions {
 		values[i] = subscription
 	}
@@ -175,10 +179,9 @@ func (c *SubscriptionCache) Release(ctx context.Context, contractLockingScript b
 	pathPrefix := subscriptionPathPrefix(contractLockingScript)
 	subscription.Lock()
 	hash := subscription.Hash()
-	isModified := subscription.IsModified()
 	subscription.Unlock()
 
-	if err := c.cacher.ReleaseSetValue(ctx, c.typ, pathPrefix, hash, isModified); err != nil {
+	if err := c.cacher.ReleaseSetValue(ctx, c.typ, pathPrefix, hash); err != nil {
 		return errors.Wrap(err, "release set")
 	}
 
@@ -194,7 +197,6 @@ func (c *SubscriptionCache) ReleaseMulti(ctx context.Context, contractLockingScr
 
 	pathPrefix := subscriptionPathPrefix(contractLockingScript)
 	var hashes []bitcoin.Hash32
-	var isModified []bool
 	for _, subscription := range subscriptions {
 		if subscription == nil {
 			continue
@@ -202,12 +204,10 @@ func (c *SubscriptionCache) ReleaseMulti(ctx context.Context, contractLockingScr
 
 		subscription.Lock()
 		hashes = append(hashes, subscription.Hash())
-		isModified = append(isModified, subscription.IsModified())
 		subscription.Unlock()
 	}
 
-	if err := c.cacher.ReleaseMultiSetValue(ctx, c.typ, pathPrefix, hashes,
-		isModified); err != nil {
+	if err := c.cacher.ReleaseMultiSetValue(ctx, c.typ, pathPrefix, hashes); err != nil {
 		return errors.Wrap(err, "release set multi")
 	}
 
@@ -240,19 +240,27 @@ func (s *Subscription) GetChannelHash() bitcoin.Hash32 {
 	return s.value.GetChannelHash()
 }
 
+func (s *Subscription) Initialize() {
+	s.value.Initialize()
+}
+
+func (s *Subscription) ProvideMarkModified(markModified cacher.MarkModified) {
+	s.value.ProvideMarkModified(markModified)
+}
+
 func (s *Subscription) IsModified() bool {
 	return s.value.IsModified()
 }
 
-func (s *Subscription) ClearModified() {
-	s.value.ClearModified()
+func (s *Subscription) GetModified() {
+	s.value.GetModified()
 }
 
 func (s *Subscription) Hash() bitcoin.Hash32 {
 	return s.value.Hash()
 }
 
-func (s *Subscription) CacheSetCopy() ci.SetValue {
+func (s *Subscription) CacheSetCopy() cacher.SetValue {
 	return s.value.CacheSetCopy()
 }
 
@@ -303,22 +311,43 @@ func (s *LockingScriptSubscription) GetChannelHash() bitcoin.Hash32 {
 	return s.ChannelHash
 }
 
+func (s *LockingScriptSubscription) Initialize() {
+	s.isModified.Store(false)
+}
+
+func (s *LockingScriptSubscription) ProvideMarkModified(markModified cacher.MarkModified) {
+	s.markModified = markModified
+}
+
 func (s *LockingScriptSubscription) MarkModified() {
-	s.isModified = true
+	if s.markModified != nil {
+		s.markModified()
+	}
+
+	s.isModified.Store(true)
+}
+
+func (s *LockingScriptSubscription) GetModified() bool {
+	if v := s.isModified.Swap(false); v != nil {
+		return v.(bool)
+	}
+
+	return false
 }
 
 func (s *LockingScriptSubscription) IsModified() bool {
-	return s.isModified
+	if v := s.isModified.Load(); v != nil {
+		return v.(bool)
+	}
+
+	return false
 }
 
-func (s *LockingScriptSubscription) ClearModified() {
-	s.isModified = false
-}
-
-func (s *LockingScriptSubscription) CacheSetCopy() ci.SetValue {
+func (s *LockingScriptSubscription) CacheSetCopy() cacher.SetValue {
 	result := &LockingScriptSubscription{
 		LockingScript: make(bitcoin.Script, len(s.LockingScript)),
 	}
+	result.isModified.Store(true)
 
 	copy(result.LockingScript, s.LockingScript)
 	copy(result.ChannelHash[:], s.ChannelHash[:])

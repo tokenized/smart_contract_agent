@@ -7,10 +7,11 @@ import (
 	"io"
 	"reflect"
 	"sync"
+	"sync/atomic"
 
 	"github.com/tokenized/pkg/bitcoin"
 	"github.com/tokenized/pkg/bsor"
-	ci "github.com/tokenized/pkg/cacher"
+	"github.com/tokenized/pkg/cacher"
 	"github.com/tokenized/pkg/peer_channels"
 
 	"github.com/pkg/errors"
@@ -22,18 +23,18 @@ const (
 )
 
 type ResponderCache struct {
-	cacher ci.Cacher
+	cacher cacher.Cacher
 	typ    reflect.Type
 }
 
 type Responder struct {
 	PeerChannels peer_channels.Channels `bsor:"1" json:"peer_channels"`
 
-	isModified bool
+	isModified atomic.Value
 	sync.Mutex `bsor:"-"`
 }
 
-func NewResponderCache(cache ci.Cacher) (*ResponderCache, error) {
+func NewResponderCache(cache cacher.Cacher) (*ResponderCache, error) {
 	typ := reflect.TypeOf(&Responder{})
 
 	// Verify item value type is valid for a cache item.
@@ -47,7 +48,7 @@ func NewResponderCache(cache ci.Cacher) (*ResponderCache, error) {
 	}
 
 	itemInterface := itemValue.Interface()
-	if _, ok := itemInterface.(ci.Value); !ok {
+	if _, ok := itemInterface.(cacher.Value); !ok {
 		return nil, errors.New("Type must implement CacheValue")
 	}
 
@@ -101,7 +102,7 @@ func (r *Responder) AddPeerChannel(peerChannel *peer_channels.Channel) {
 	}
 
 	r.PeerChannels = append(r.PeerChannels, peerChannel)
-	r.isModified = true
+	r.MarkModified()
 }
 
 func (r *Responder) RemovePeerChannels(peerChannels peer_channels.Channels) {
@@ -110,33 +111,48 @@ func (r *Responder) RemovePeerChannels(peerChannels peer_channels.Channels) {
 		for i, pc := range r.PeerChannels {
 			if pc.String() == s {
 				r.PeerChannels = append(r.PeerChannels[:i], r.PeerChannels[i+1:]...)
-				r.isModified = true
+				r.MarkModified()
 				break
 			}
 		}
 	}
 }
 
-func (r *Responder) MarkModified() {
-	r.isModified = true
+func (r *Responder) Initialize() {
+	r.isModified.Store(false)
 }
 
-func (r *Responder) ClearModified() {
-	r.isModified = false
+func (r *Responder) MarkModified() {
+	r.isModified.Store(true)
+}
+
+func (r *Responder) GetModified() bool {
+	if v := r.isModified.Swap(false); v != nil {
+		return v.(bool)
+	}
+
+	return false
 }
 
 func (r *Responder) IsModified() bool {
-	return r.isModified
+	if v := r.isModified.Load(); v != nil {
+		return v.(bool)
+	}
+
+	return false
 }
 
-func (r *Responder) CacheCopy() ci.Value {
-	return r.Copy()
+func (r *Responder) CacheCopy() cacher.Value {
+	result := r.Copy()
+	result.isModified.Store(true)
+	return result
 }
 
 func (r *Responder) Copy() *Responder {
 	result := &Responder{
 		PeerChannels: make(peer_channels.Channels, len(r.PeerChannels)),
 	}
+	result.isModified.Store(false)
 
 	for i, peerChannel := range r.PeerChannels {
 		result.PeerChannels[i] = peerChannel

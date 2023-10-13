@@ -7,10 +7,11 @@ import (
 	"io"
 	"reflect"
 	"sync"
+	"sync/atomic"
 
 	"github.com/tokenized/pkg/bitcoin"
 	"github.com/tokenized/pkg/bsor"
-	ci "github.com/tokenized/pkg/cacher"
+	"github.com/tokenized/pkg/cacher"
 
 	"github.com/pkg/errors"
 )
@@ -21,7 +22,7 @@ const (
 )
 
 type BallotCache struct {
-	cacher ci.Cacher
+	cacher cacher.Cacher
 	typ    reflect.Type
 }
 
@@ -31,13 +32,14 @@ type Ballot struct {
 	TxID          *bitcoin.Hash32 `bsor:"3" json:"txid,omitempty"`
 	Vote          string          `bsor:"4" json:"vote"`
 
-	isModified bool
-	sync.Mutex `bsor:"-"`
+	markModified atomic.Value
+	isModified   atomic.Value
+	sync.Mutex   `bsor:"-"`
 }
 
 type Ballots map[bitcoin.Hash32]*Ballot
 
-func NewBallotCache(cache ci.Cacher) (*BallotCache, error) {
+func NewBallotCache(cache cacher.Cacher) (*BallotCache, error) {
 	typ := reflect.TypeOf(&Ballot{})
 
 	// Verify item value type is valid for a cache item.
@@ -51,7 +53,7 @@ func NewBallotCache(cache ci.Cacher) (*BallotCache, error) {
 	}
 
 	itemInterface := itemValue.Interface()
-	if _, ok := itemInterface.(ci.SetValue); !ok {
+	if _, ok := itemInterface.(cacher.SetValue); !ok {
 		return nil, errors.New("Type must implement CacheSetValue")
 	}
 
@@ -79,7 +81,7 @@ func (c *BallotCache) AddMulti(ctx context.Context, contractLockingScript bitcoi
 
 	pathPrefix := ballotPathPrefix(contractLockingScript, voteTxID)
 
-	values := make([]ci.SetValue, len(ballots))
+	values := make([]cacher.SetValue, len(ballots))
 	i := 0
 	for _, ballot := range ballots {
 		values[i] = ballot
@@ -176,10 +178,9 @@ func (c *BallotCache) Release(ctx context.Context, contractLockingScript bitcoin
 	pathPrefix := ballotPathPrefix(contractLockingScript, voteTxID)
 	ballot.Lock()
 	hash := LockingScriptHash(ballot.LockingScript)
-	isModified := ballot.isModified
 	ballot.Unlock()
 
-	if err := c.cacher.ReleaseSetValue(ctx, c.typ, pathPrefix, hash, isModified); err != nil {
+	if err := c.cacher.ReleaseSetValue(ctx, c.typ, pathPrefix, hash); err != nil {
 		return errors.Wrap(err, "release set")
 	}
 
@@ -195,7 +196,6 @@ func (c *BallotCache) ReleaseMulti(ctx context.Context, contractLockingScript bi
 
 	pathPrefix := ballotPathPrefix(contractLockingScript, voteTxID)
 	var hashes []bitcoin.Hash32
-	var isModifieds []bool
 	for hash, ballot := range ballots {
 		if ballot == nil {
 			continue
@@ -203,12 +203,10 @@ func (c *BallotCache) ReleaseMulti(ctx context.Context, contractLockingScript bi
 
 		ballot.Lock()
 		hashes = append(hashes, hash)
-		isModifieds = append(isModifieds, ballot.isModified)
 		ballot.Unlock()
 	}
 
-	if err := c.cacher.ReleaseMultiSetValue(ctx, c.typ, pathPrefix, hashes,
-		isModifieds); err != nil {
+	if err := c.cacher.ReleaseMultiSetValue(ctx, c.typ, pathPrefix, hashes); err != nil {
 		return errors.Wrap(err, "release set multi")
 	}
 
@@ -220,27 +218,48 @@ func ballotPathPrefix(contractLockingScript bitcoin.Script, voteTxID bitcoin.Has
 		ballotPath)
 }
 
+func (b *Ballot) Initialize() {
+	b.isModified.Store(false)
+}
+
+func (b *Ballot) ProvideMarkModified(markModified cacher.MarkModified) {
+	b.markModified.Store(markModified)
+}
+
 func (b *Ballot) MarkModified() {
-	b.isModified = true
+	if v := b.markModified.Load(); v != nil {
+		v.(cacher.MarkModified)()
+	}
+
+	b.isModified.Store(true)
+}
+
+func (b *Ballot) GetModified() bool {
+	if v := b.isModified.Swap(false); v != nil {
+		return v.(bool)
+	}
+
+	return false
 }
 
 func (b *Ballot) IsModified() bool {
-	return b.isModified
-}
+	if v := b.isModified.Load(); v != nil {
+		return v.(bool)
+	}
 
-func (b *Ballot) ClearModified() {
-	b.isModified = false
+	return false
 }
 
 func (b *Ballot) Hash() bitcoin.Hash32 {
 	return LockingScriptHash(b.LockingScript)
 }
 
-func (b *Ballot) CacheSetCopy() ci.SetValue {
+func (b *Ballot) CacheSetCopy() cacher.SetValue {
 	result := &Ballot{
 		Quantity: b.Quantity,
 		Vote:     b.Vote,
 	}
+	result.isModified.Store(true)
 
 	result.LockingScript = make(bitcoin.Script, len(b.LockingScript))
 	copy(result.LockingScript, b.LockingScript)

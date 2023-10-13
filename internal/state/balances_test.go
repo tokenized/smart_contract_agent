@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/tokenized/pkg/bitcoin"
-	ci "github.com/tokenized/pkg/cacher"
+	"github.com/tokenized/pkg/cacher"
 	"github.com/tokenized/pkg/storage"
 )
 
@@ -28,7 +28,7 @@ func Test_Balances(t *testing.T) {
 	var instrumentCode InstrumentCode
 	rand.Read(instrumentCode[:])
 
-	cacher := ci.NewSimpleCache(store)
+	cacher := cacher.NewSimpleCache(store)
 
 	cache, err := NewBalanceCache(cacher)
 	if err != nil {
@@ -173,7 +173,7 @@ func Test_Balances(t *testing.T) {
 		cache.Release(ctx, contractLockingScript, instrumentCode, gotBalance2)
 	}
 
-	if !cacher.IsEmpty() {
+	if !cacher.IsEmpty(ctx) {
 		t.Fatalf("Cacher is not empty")
 	}
 }
