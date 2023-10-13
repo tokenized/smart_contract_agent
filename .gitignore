@@ -8,3 +8,5 @@ tmp*
 !*example*.env
 dist
 setup.txt
+*.json
+*.txt
