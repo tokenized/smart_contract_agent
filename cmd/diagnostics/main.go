@@ -14,5 +14,6 @@ var scCmd = &cobra.Command{
 func main() {
 	scCmd.AddCommand(commands.Tx)
 	scCmd.AddCommand(commands.BalanceAudit)
+	scCmd.AddCommand(commands.RepairPending)
 	scCmd.Execute()
 }
