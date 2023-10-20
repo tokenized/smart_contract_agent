@@ -104,6 +104,7 @@ func settlePendingContractBalances(ctx context.Context, caches *state.Caches,
 	}
 
 	fmt.Printf("Contract (%d instruments): %s\n", instrumentCount, lockingScript)
+	fmt.Printf("Contract hash: %s\n", contractHash)
 
 	if instrumentCount == 0 {
 		found := false
@@ -265,6 +266,7 @@ func settlePendingBalanceAdjustment(ctx context.Context, caches *state.Caches,
 			continue
 		}
 
+		fmt.Printf("Response txid : %s\n", *processed.ResponseTxID)
 		responseTx, err := transactions.Get(ctx, *processed.ResponseTxID)
 		if err != nil {
 			return errors.Wrap(err, "get response tx")
@@ -281,6 +283,7 @@ func settlePendingBalanceAdjustment(ctx context.Context, caches *state.Caches,
 			if err != nil {
 				continue
 			}
+			fmt.Printf("Response action : (%s) %s\n", action.Code(), action.TypeName())
 
 			if s, ok := action.(*actions.Settlement); ok {
 				settlementTxID = processed.ResponseTxID
@@ -318,7 +321,7 @@ func settlePendingBalanceAdjustment(ctx context.Context, caches *state.Caches,
 	} else if rejectionTxID != nil {
 		balance.CancelPending(transferTxID)
 		fmt.Printf("Transfer TxID : %s\n", transferTxID)
-			fmt.Printf("Rejection TxID : %s\n", *rejectionTxID)
+		fmt.Printf("Rejection TxID : %s\n", *rejectionTxID)
 		js, _ := json.MarshalIndent(adjustment, "", "  ")
 		fmt.Printf("Cancelled balance adjustment %x : %s\n", []byte(balance.LockingScript), js)
 	} else {

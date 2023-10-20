@@ -8,7 +8,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pkg/errors"
 	"github.com/tokenized/pkg/bitcoin"
 	"github.com/tokenized/pkg/cacher"
 	"github.com/tokenized/pkg/expanded_tx"
@@ -22,6 +21,8 @@ import (
 	"github.com/tokenized/specification/dist/golang/protocol"
 	"github.com/tokenized/threads"
 	"github.com/tokenized/txbuilder"
+
+	"github.com/pkg/errors"
 )
 
 func RunTest_Transfers_Basic(ctx context.Context, t *testing.T, store *storage.MockStorage,
