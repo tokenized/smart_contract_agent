@@ -400,6 +400,11 @@ func (b *Balance) RevertPendingAdjustment(txid bitcoin.Hash32) {
 	b.Adjustments = newAdjustments
 }
 
+func (b *Balance) Revert(txid bitcoin.Hash32) {
+	b.RevertPending()
+	b.RevertPendingAdjustment(txid)
+}
+
 func (b *Balance) AddFreeze(txid bitcoin.Hash32, quantity, frozenUntil uint64) uint64 {
 	for _, adj := range b.Adjustments {
 		if !txid.Equal(adj.TxID) {
@@ -510,8 +515,7 @@ func (b *Balance) FinalizeConfiscation(orderTxID, confiscationTxID bitcoin.Hash3
 	return found
 }
 
-// SettlePending clears the current pending modification and converts it into a balance
-// adjustment.
+// SettlePending clears the current pending modification and converts it into a balance adjustment.
 func (b *Balance) SettlePending(txid bitcoin.Hash32, isMultiContract bool) {
 	for _, adj := range b.Adjustments {
 		if adj.TxID.Equal(&txid) {
@@ -583,22 +587,22 @@ func (b *Balance) VerifySettlement(transferTxID bitcoin.Hash32, quantity, now ui
 	return actions.RejectionsTransferExpired
 }
 
-// Settle applies any balance adjustments for the specified transfer transaction to the current
+// Settle applies any balance adjustments for the specified request transaction to the current
 // quantity.
-func (b *Balance) Settle(ctx context.Context, transferTxID, settlementTxID bitcoin.Hash32,
+func (b *Balance) Settle(ctx context.Context, requestTxID, responseTxID bitcoin.Hash32,
 	now uint64) bool {
 
 	var newAdjustments []*BalanceAdjustment
 	found := false
 	for _, adj := range b.Adjustments {
-		if transferTxID.Equal(adj.TxID) {
+		if requestTxID.Equal(adj.TxID) {
 			switch adj.Code {
 			case DebitCode, MultiContractDebitCode:
 				b.Quantity -= adj.Quantity
 			case CreditCode, MultiContractCreditCode:
 				b.Quantity += adj.Quantity
 			}
-			b.TxID = &settlementTxID
+			b.TxID = &responseTxID
 			b.Timestamp = now
 			b.MarkModified()
 			found = true
@@ -610,14 +614,61 @@ func (b *Balance) Settle(ctx context.Context, transferTxID, settlementTxID bitco
 	}
 	b.Adjustments = newAdjustments
 
-	if !found {
-		logger.InfoWithFields(ctx, []logger.Field{
-			logger.Stringer("locking_script", b.LockingScript),
-			logger.Stringer("transfer_txid", transferTxID),
-		}, "Balance adjustment not found to settle")
+	if found {
+		b.MarkModified()
+		return true
 	}
 
-	return found
+	logger.InfoWithFields(ctx, []logger.Field{
+		logger.Stringer("locking_script", b.LockingScript),
+		logger.Stringer("request_txid", requestTxID),
+	}, "Balance adjustment not found to settle")
+
+	return false
+}
+
+// Settle applies any balance adjustments for the specified request transaction to the current
+// quantity, or if the balance adjustment isn't found then it updates the balance.
+func (b *Balance) HardSettle(ctx context.Context, requestTxID, responseTxID bitcoin.Hash32,
+	quantity uint64, now uint64) bool {
+
+	var newAdjustments []*BalanceAdjustment
+	found := false
+	for _, adj := range b.Adjustments {
+		if requestTxID.Equal(adj.TxID) {
+			switch adj.Code {
+			case DebitCode, MultiContractDebitCode:
+				b.Quantity -= adj.Quantity
+			case CreditCode, MultiContractCreditCode:
+				b.Quantity += adj.Quantity
+			}
+			b.TxID = &responseTxID
+			b.Timestamp = now
+			b.MarkModified()
+			found = true
+
+			continue
+		}
+
+		newAdjustments = append(newAdjustments, adj)
+	}
+	b.Adjustments = newAdjustments
+
+	if found {
+		b.MarkModified()
+		return true
+	}
+
+	logger.InfoWithFields(ctx, []logger.Field{
+		logger.Stringer("locking_script", b.LockingScript),
+		logger.Stringer("request_txid", requestTxID),
+	}, "Balance adjustment not found to settle. Settling manually")
+
+	b.Quantity = quantity
+	b.Timestamp = now
+	b.TxID = &responseTxID
+	b.MarkModified()
+	return false
 }
 
 func (b *Balance) Initialize() {
@@ -826,9 +877,11 @@ func AppendZeroBalance(balances Balances, lockingScript bitcoin.Script) Balances
 }
 
 func ZeroBalance(lockingScript bitcoin.Script) *Balance {
-	return &Balance{
+	result := &Balance{
 		LockingScript: lockingScript,
 	}
+	result.Initialize()
+	return result
 }
 
 // Find returns the balance with the specified locking script, or nil if there isn't a match.
@@ -863,6 +916,16 @@ func (bs *Balances) RevertPendingAdjustment(txid bitcoin.Hash32) {
 		}
 
 		b.RevertPendingAdjustment(txid)
+	}
+}
+
+func (bs *Balances) Revert(txid bitcoin.Hash32) {
+	for _, b := range *bs {
+		if b == nil {
+			continue
+		}
+
+		b.Revert(txid)
 	}
 }
 
@@ -1020,8 +1083,7 @@ func (bs *BalanceSet) Revert(txid bitcoin.Hash32) {
 			continue
 		}
 
-		b.RevertPending()
-		b.RevertPendingAdjustment(txid)
+		b.Revert(txid)
 	}
 }
 
