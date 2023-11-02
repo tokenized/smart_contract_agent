@@ -266,7 +266,9 @@ func (a *Agent) processTransfer(ctx context.Context, transaction *transactions.T
 	}
 
 	// Add the contract fee
+	contractFeeOutputIndex := -1
 	if contractFee > 0 {
+		contractFeeOutputIndex = len(settlementTx.MsgTx.TxOut)
 		if err := settlementTx.AddOutput(a.FeeLockingScript(), contractFee, true,
 			false); err != nil {
 			allBalances.Revert(txid)
@@ -299,7 +301,7 @@ func (a *Agent) processTransfer(ctx context.Context, transaction *transactions.T
 	}
 
 	etx, err := a.completeSettlement(ctx, transaction, actionIndex, txid, settlementTx,
-		settlementScriptOutputIndex, allBalances, now)
+		settlementScriptOutputIndex, allBalances, contractFeeOutputIndex, now)
 	if err != nil {
 		allBalances.Revert(txid)
 		return etx, errors.Wrap(err, "complete settlement")
@@ -503,7 +505,7 @@ func (a *Agent) buildBitcoinTransfer(ctx context.Context, transferTransaction *t
 
 func (a *Agent) completeSettlement(ctx context.Context, transferTransaction *transactions.Transaction,
 	transferOutputIndex int, transferTxID bitcoin.Hash32, settlementTx *txbuilder.TxBuilder,
-	settlementScriptOutputIndex int, balances state.BalanceSet,
+	settlementScriptOutputIndex int, balances state.BalanceSet, contractFeeOutputIndex int,
 	now uint64) (*expanded_tx.ExpandedTx, error) {
 
 	settlementTxID := *settlementTx.MsgTx.TxHash()
@@ -538,6 +540,11 @@ func (a *Agent) completeSettlement(ctx context.Context, transferTransaction *tra
 
 	if err := a.AddResponse(ctx, transferTxID, balances.LockingScripts(), false, etx); err != nil {
 		return etx, errors.Wrap(err, "respond")
+	}
+
+	if err := a.updateRequestStats(ctx, &transferTx, settlementTx.MsgTx, transferOutputIndex,
+		contractFeeOutputIndex, false, now); err != nil {
+		logger.Error(ctx, "Failed to update statistics : %s", err)
 	}
 
 	return etx, nil

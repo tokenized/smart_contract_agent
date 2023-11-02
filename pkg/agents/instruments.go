@@ -231,8 +231,10 @@ func (a *Agent) processInstrumentDefinition(ctx context.Context, transaction *tr
 	}
 
 	// Add the contract fee.
+	contractFeeOutputIndex := -1
 	contractFee := contract.Formation.ContractFee
 	if contractFee > 0 {
+		contractFeeOutputIndex = len(creationTx.MsgTx.TxOut)
 		if err := creationTx.AddOutput(a.FeeLockingScript(), contractFee, true,
 			false); err != nil {
 			if adminBalance != nil {
@@ -291,6 +293,11 @@ func (a *Agent) processInstrumentDefinition(ctx context.Context, transaction *tr
 
 	if err := a.AddResponse(ctx, txid, nil, true, etx); err != nil {
 		return etx, errors.Wrap(err, "respond")
+	}
+
+	if err := a.updateRequestStats(ctx, &tx, creationTx.MsgTx, actionIndex,
+		contractFeeOutputIndex, false, now); err != nil {
+		logger.Error(ctx, "Failed to update statistics : %s", err)
 	}
 
 	return etx, nil
@@ -521,8 +528,10 @@ func (a *Agent) processInstrumentModification(ctx context.Context, transaction *
 	}
 
 	// Add the contract fee.
+	contractFeeOutputIndex := -1
 	contractFee := a.ContractFee()
 	if contractFee > 0 {
+		contractFeeOutputIndex = len(creationTx.MsgTx.TxOut)
 		if err := creationTx.AddOutput(a.FeeLockingScript(), contractFee, true,
 			false); err != nil {
 			if adminBalance != nil {
@@ -587,6 +596,11 @@ func (a *Agent) processInstrumentModification(ctx context.Context, transaction *
 
 	if err := a.AddResponse(ctx, txid, nil, true, etx); err != nil {
 		return etx, errors.Wrap(err, "respond")
+	}
+
+	if err := a.updateRequestStats(ctx, &tx, creationTx.MsgTx, actionIndex,
+		contractFeeOutputIndex, false, now); err != nil {
+		logger.Error(ctx, "Failed to update statistics : %s", err)
 	}
 
 	return etx, nil

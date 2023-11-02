@@ -116,8 +116,10 @@ func (a *Agent) processBodyOfAgreementOffer(ctx context.Context, transaction *tr
 	}
 
 	// Add the contract fee.
+	contractFeeOutputIndex := -1
 	contractFee := contract.Formation.ContractFee
 	if contractFee > 0 {
+		contractFeeOutputIndex = len(formationTx.MsgTx.TxOut)
 		if err := formationTx.AddOutput(a.FeeLockingScript(), contractFee, true,
 			false); err != nil {
 			return nil, errors.Wrap(err, "add contract fee")
@@ -165,6 +167,11 @@ func (a *Agent) processBodyOfAgreementOffer(ctx context.Context, transaction *tr
 
 	if err := a.AddResponse(ctx, txid, nil, true, etx); err != nil {
 		return etx, errors.Wrap(err, "respond")
+	}
+
+	if err := a.updateRequestStats(ctx, &tx, formationTx.MsgTx, actionIndex,
+		contractFeeOutputIndex, false, now); err != nil {
+		logger.Error(ctx, "Failed to update statistics : %s", err)
 	}
 
 	return etx, nil
@@ -348,8 +355,10 @@ func (a *Agent) processBodyOfAgreementAmendment(ctx context.Context, transaction
 	}
 
 	// Add the contract fee.
+	contractFeeOutputIndex := -1
 	contractFee := contract.Formation.ContractFee
 	if contractFee > 0 {
+		contractFeeOutputIndex = len(formationTx.MsgTx.TxOut)
 		if err := formationTx.AddOutput(a.FeeLockingScript(), contractFee, true,
 			false); err != nil {
 			return nil, errors.Wrap(err, "add contract fee")
@@ -397,6 +406,11 @@ func (a *Agent) processBodyOfAgreementAmendment(ctx context.Context, transaction
 
 	if err := a.AddResponse(ctx, txid, nil, true, etx); err != nil {
 		return etx, errors.Wrap(err, "respond")
+	}
+
+	if err := a.updateRequestStats(ctx, &tx, formationTx.MsgTx, actionIndex,
+		contractFeeOutputIndex, false, now); err != nil {
+		logger.Error(ctx, "Failed to update statistics : %s", err)
 	}
 
 	return etx, nil

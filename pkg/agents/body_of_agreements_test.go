@@ -5,11 +5,13 @@ import (
 	"crypto/rand"
 	"encoding/json"
 	"testing"
+	"time"
 
 	"github.com/tokenized/logger"
 	"github.com/tokenized/pkg/bitcoin"
 	"github.com/tokenized/pkg/expanded_tx"
 	"github.com/tokenized/smart_contract_agent/internal/state"
+	"github.com/tokenized/smart_contract_agent/pkg/statistics"
 	"github.com/tokenized/smart_contract_agent/pkg/transactions"
 	"github.com/tokenized/specification/dist/golang/actions"
 	"github.com/tokenized/specification/dist/golang/protocol"
@@ -154,6 +156,35 @@ func Test_BodyOfAgreement_Offer_Valid(t *testing.T) {
 
 	js, _ := json.MarshalIndent(formation, "", "  ")
 	t.Logf("BodyOfAgreementFormation : %s", js)
+
+	time.Sleep(time.Millisecond) // wait for statistics to process
+
+	stats, err := statistics.FetchContractValue(ctx, test.Caches.Cache,
+		state.CalculateContractHash(test.ContractLockingScript), uint64(time.Now().UnixNano()))
+	if err != nil {
+		t.Fatalf("Failed to fetch contract statistics : %s", err)
+	}
+
+	js, _ = json.MarshalIndent(stats, "", "  ")
+	t.Logf("Stats : %s", js)
+
+	stats.Lock()
+
+	statAction := stats.GetAction(actions.CodeBodyOfAgreementOffer)
+	if statAction == nil {
+		t.Fatalf("Missing statistics action for code")
+	}
+
+	if statAction.Count != 1 {
+		t.Fatalf("Wrong statistics action count : got %d, want %d", statAction.Count, 1)
+	}
+
+	if statAction.RejectedCount != 0 {
+		t.Fatalf("Wrong statistics action rejection count : got %d, want %d",
+			statAction.RejectedCount, 0)
+	}
+
+	stats.Unlock()
 
 	StopTestAgent(ctx, t, test)
 }

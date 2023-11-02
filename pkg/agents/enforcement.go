@@ -354,6 +354,7 @@ func (a *Agent) processFreezeOrder(ctx context.Context, transaction *transaction
 	}
 
 	// Add the contract fee.
+	contractFeeOutputIndex := -1
 	var contractFee uint64
 	if contract == nil {
 		contractFee = a.ContractFee()
@@ -361,6 +362,7 @@ func (a *Agent) processFreezeOrder(ctx context.Context, transaction *transaction
 		contractFee = contract.Formation.ContractFee
 	}
 	if contractFee > 0 {
+		contractFeeOutputIndex = len(freezeTx.MsgTx.TxOut)
 		if err := freezeTx.AddOutput(a.FeeLockingScript(), contractFee, true,
 			false); err != nil {
 			balances.RevertPending()
@@ -425,6 +427,11 @@ func (a *Agent) processFreezeOrder(ctx context.Context, transaction *transaction
 
 	if err := a.AddResponse(ctx, txid, lockingScripts, isFull, etx); err != nil {
 		return etx, errors.Wrap(err, "respond")
+	}
+
+	if err := a.updateRequestStats(ctx, &tx, freezeTx.MsgTx, actionIndex, contractFeeOutputIndex,
+		false, now); err != nil {
+		logger.Error(ctx, "Failed to update statistics : %s", err)
 	}
 
 	return etx, nil
@@ -628,6 +635,7 @@ func (a *Agent) processThawOrder(ctx context.Context, transaction *transactions.
 	}
 
 	// Add the contract fee.
+	contractFeeOutputIndex := -1
 	var contractFee uint64
 	if contract == nil {
 		contractFee = a.ContractFee()
@@ -635,6 +643,7 @@ func (a *Agent) processThawOrder(ctx context.Context, transaction *transactions.
 		contractFee = contract.Formation.ContractFee
 	}
 	if contractFee > 0 {
+		contractFeeOutputIndex = len(thawTx.MsgTx.TxOut)
 		if err := thawTx.AddOutput(a.FeeLockingScript(), contractFee, true,
 			false); err != nil {
 			return nil, errors.Wrap(err, "add contract fee")
@@ -692,6 +701,11 @@ func (a *Agent) processThawOrder(ctx context.Context, transaction *transactions.
 
 	if err := a.AddResponse(ctx, txid, lockingScripts, isFull, etx); err != nil {
 		return etx, errors.Wrap(err, "respond")
+	}
+
+	if err := a.updateRequestStats(ctx, &tx, thawTx.MsgTx, actionIndex, contractFeeOutputIndex,
+		false, now); err != nil {
+		logger.Error(ctx, "Failed to update statistics : %s", err)
 	}
 
 	return etx, nil
@@ -930,8 +944,10 @@ func (a *Agent) processConfiscateOrder(ctx context.Context, transaction *transac
 	}
 
 	// Add the contract fee.
+	contractFeeOutputIndex := -1
 	contractFee := a.ContractFee()
 	if contractFee > 0 {
+		contractFeeOutputIndex = len(confiscationTx.MsgTx.TxOut)
 		if err := confiscationTx.AddOutput(a.FeeLockingScript(), contractFee, true,
 			false); err != nil {
 			balances.RevertPending()
@@ -987,6 +1003,11 @@ func (a *Agent) processConfiscateOrder(ctx context.Context, transaction *transac
 	if err := a.AddResponse(ctx, txid, append(lockingScripts, depositLockingScript), false,
 		etx); err != nil {
 		return etx, errors.Wrap(err, "respond")
+	}
+
+	if err := a.updateRequestStats(ctx, &tx, confiscationTx.MsgTx, actionIndex,
+		contractFeeOutputIndex, false, now); err != nil {
+		logger.Error(ctx, "Failed to update statistics : %s", err)
 	}
 
 	return etx, nil

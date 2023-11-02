@@ -314,7 +314,7 @@ func (a *Agent) processSignatureRequest(ctx context.Context, transaction *transa
 				rejectOutputIndex, rejectLockingScript)
 		}
 
-		if !findBitcoinOutput(settlementTx.MsgTx, lockingScript, transfer.ExchangeFee) {
+		if findBitcoinOutput(settlementTx.MsgTx, lockingScript, transfer.ExchangeFee) == -1 {
 			allBalances.Revert(transferTxID)
 
 			return nil, platform.NewRejectErrorFull(actions.RejectionsMsgMalformed,
@@ -324,8 +324,11 @@ func (a *Agent) processSignatureRequest(ctx context.Context, transaction *transa
 
 	// Verify contract fee
 	feeLockingScript := a.FeeLockingScript()
+	contractFeeOutputIndex := -1
 	if contractFee > 0 {
-		if !findBitcoinOutput(settlementTx.MsgTx, feeLockingScript, contractFee) {
+		contractFeeOutputIndex = findBitcoinOutput(settlementTx.MsgTx, feeLockingScript,
+			contractFee)
+		if contractFeeOutputIndex == -1 {
 			allBalances.Revert(transferTxID)
 
 			return nil, platform.NewRejectErrorFull(actions.RejectionsMsgMalformed,
@@ -353,7 +356,8 @@ func (a *Agent) processSignatureRequest(ctx context.Context, transaction *transa
 	// If this is the first contract then ensure settlement tx is complete and broadcast.
 	if transferContracts.IsFirstContract() {
 		etx, err := a.completeSettlement(ctx, transferTransaction, transferOutputIndex,
-			transferTxID, settlementTx, settlementScriptOutputIndex, allBalances, now)
+			transferTxID, settlementTx, settlementScriptOutputIndex, allBalances,
+			contractFeeOutputIndex, now)
 		if err != nil {
 			allBalances.Revert(transferTxID)
 			return etx, errors.Wrap(err, "complete settlement")
@@ -437,7 +441,7 @@ func (a *Agent) verifyBitcoinSettlement(ctx context.Context, transferTransaction
 			return errors.Wrapf(err, "locking script %d", i)
 		}
 
-		if !findBitcoinOutputExact(settlementTx.MsgTx, lockingScript, receiver.Quantity) {
+		if findBitcoinOutputExact(settlementTx.MsgTx, lockingScript, receiver.Quantity) == -1 {
 			return platform.NewRejectError(actions.RejectionsMsgMalformed,
 				fmt.Sprintf("missing bitcoin output %d", i))
 		}

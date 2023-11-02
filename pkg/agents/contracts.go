@@ -218,7 +218,9 @@ func (a *Agent) processContractOffer(ctx context.Context, transaction *transacti
 	}
 
 	// Add the contract fee.
+	contractFeeOutputIndex := -1
 	if offer.ContractFee > 0 {
+		contractFeeOutputIndex = len(formationTx.MsgTx.TxOut)
 		if err := formationTx.AddOutput(a.FeeLockingScript(), offer.ContractFee, true,
 			false); err != nil {
 			return nil, errors.Wrap(err, "add contract fee")
@@ -273,6 +275,11 @@ func (a *Agent) processContractOffer(ctx context.Context, transaction *transacti
 
 	if err := a.AddResponse(ctx, txid, nil, true, etx); err != nil {
 		return etx, errors.Wrap(err, "respond")
+	}
+
+	if err := a.updateRequestStats(ctx, &tx, formationTx.MsgTx, actionIndex,
+		contractFeeOutputIndex, false, now); err != nil {
+		logger.Error(ctx, "Failed to update statistics : %s", err)
 	}
 
 	return etx, nil
@@ -422,7 +429,7 @@ func (a *Agent) processContractAmendment(ctx context.Context, transaction *trans
 				return nil, errors.Wrap(err, "first input output")
 			}
 
-			secondUnlockingScript := transaction.Input(0).UnlockingScript
+			secondUnlockingScript := transaction.Input(1).UnlockingScript
 			secondInputOutput, err := transaction.InputOutput(1)
 			if err != nil {
 				transaction.Unlock()
@@ -465,7 +472,8 @@ func (a *Agent) processContractAmendment(ctx context.Context, transaction *trans
 			}
 
 			if isSigHashAll, err := firstUnlockingScript.IsSigHashAll(); err != nil {
-				return nil, platform.NewRejectError(actions.RejectionsSignatureNotSigHashAll, err.Error())
+				return nil, platform.NewRejectError(actions.RejectionsSignatureNotSigHashAll,
+					err.Error())
 			} else if !isSigHashAll {
 				return nil, platform.NewRejectError(actions.RejectionsSignatureNotSigHashAll, "")
 			}
@@ -509,8 +517,7 @@ func (a *Agent) processContractAmendment(ctx context.Context, transaction *trans
 
 	if amendment.ChangeAdministrationAddress {
 		transaction.Lock()
-		inputCount := transaction.InputCount()
-		if inputIndex >= inputCount {
+		if inputIndex >= transaction.InputCount() {
 			transaction.Unlock()
 			return nil, platform.NewRejectError(actions.RejectionsMsgMalformed, "missing new admin")
 		}
@@ -665,7 +672,9 @@ func (a *Agent) processContractAmendment(ctx context.Context, transaction *trans
 	}
 
 	// Add the contract fee.
+	contractFeeOutputIndex := -1
 	if formation.ContractFee > 0 {
+		contractFeeOutputIndex = len(formationTx.MsgTx.TxOut)
 		if err := formationTx.AddOutput(a.FeeLockingScript(), formation.ContractFee, true,
 			false); err != nil {
 			return nil, errors.Wrap(err, "add contract fee")
@@ -721,6 +730,11 @@ func (a *Agent) processContractAmendment(ctx context.Context, transaction *trans
 
 	if err := a.AddResponse(ctx, txid, nil, true, etx); err != nil {
 		return etx, errors.Wrap(err, "respond")
+	}
+
+	if err := a.updateRequestStats(ctx, &tx, formationTx.MsgTx, actionIndex,
+		contractFeeOutputIndex, false, now); err != nil {
+		logger.Error(ctx, "Failed to update statistics : %s", err)
 	}
 
 	return etx, nil

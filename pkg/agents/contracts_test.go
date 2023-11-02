@@ -6,11 +6,13 @@ import (
 	"crypto/rand"
 	"encoding/json"
 	"testing"
+	"time"
 
 	"github.com/tokenized/logger"
 	"github.com/tokenized/pkg/bitcoin"
 	"github.com/tokenized/pkg/expanded_tx"
 	"github.com/tokenized/smart_contract_agent/internal/state"
+	"github.com/tokenized/smart_contract_agent/pkg/statistics"
 	"github.com/tokenized/smart_contract_agent/pkg/transactions"
 	"github.com/tokenized/specification/dist/golang/actions"
 	"github.com/tokenized/specification/dist/golang/permissions"
@@ -141,6 +143,35 @@ func Test_Contracts_Offer_Invalid(t *testing.T) {
 	t.Logf("Rejection : %s", js)
 
 	test.Caches.Transactions.Release(ctx, transaction.GetTxID())
+
+	time.Sleep(time.Millisecond) // wait for statistics to process
+
+	stats, err := statistics.FetchContractValue(ctx, test.Caches.Cache,
+		state.CalculateContractHash(test.ContractLockingScript), uint64(time.Now().UnixNano()))
+	if err != nil {
+		t.Fatalf("Failed to fetch contract statistics : %s", err)
+	}
+
+	js, _ = json.MarshalIndent(stats, "", "  ")
+	t.Logf("Stats : %s", js)
+
+	stats.Lock()
+
+	statAction := stats.GetAction(actions.CodeContractOffer)
+	if statAction == nil {
+		t.Fatalf("Missing statistics action for code")
+	}
+
+	if statAction.Count != 1 {
+		t.Fatalf("Wrong statistics action count : got %d, want %d", statAction.Count, 1)
+	}
+
+	if statAction.RejectedCount != 1 {
+		t.Fatalf("Wrong statistics action rejection count : got %d, want %d",
+			statAction.RejectedCount, 1)
+	}
+
+	stats.Unlock()
 
 	StopTestAgent(ctx, t, test)
 }
@@ -320,6 +351,35 @@ func Test_Contracts_Offer_Valid(t *testing.T) {
 	}
 	test.Contract.Unlock()
 
+	time.Sleep(time.Millisecond) // wait for statistics to process
+
+	stats, err := statistics.FetchContractValue(ctx, test.Caches.Cache,
+		state.CalculateContractHash(test.ContractLockingScript), uint64(time.Now().UnixNano()))
+	if err != nil {
+		t.Fatalf("Failed to fetch contract statistics : %s", err)
+	}
+
+	js, _ = json.MarshalIndent(stats, "", "  ")
+	t.Logf("Stats : %s", js)
+
+	stats.Lock()
+
+	statAction := stats.GetAction(actions.CodeContractOffer)
+	if statAction == nil {
+		t.Fatalf("Missing statistics action for code")
+	}
+
+	if statAction.Count != 1 {
+		t.Fatalf("Wrong statistics action count : got %d, want %d", statAction.Count, 1)
+	}
+
+	if statAction.RejectedCount != 0 {
+		t.Fatalf("Wrong statistics action rejection count : got %d, want %d",
+			statAction.RejectedCount, 0)
+	}
+
+	stats.Unlock()
+
 	StopTestAgent(ctx, t, test)
 }
 
@@ -453,6 +513,35 @@ func Test_Contracts_Offer_AlreadyExists(t *testing.T) {
 	t.Logf("Rejection : %s", js)
 
 	test.Caches.Transactions.Release(ctx, transaction.GetTxID())
+
+	time.Sleep(time.Millisecond) // wait for statistics to process
+
+	stats, err := statistics.FetchContractValue(ctx, test.Caches.Cache,
+		state.CalculateContractHash(test.ContractLockingScript), uint64(time.Now().UnixNano()))
+	if err != nil {
+		t.Fatalf("Failed to fetch contract statistics : %s", err)
+	}
+
+	js, _ = json.MarshalIndent(stats, "", "  ")
+	t.Logf("Stats : %s", js)
+
+	stats.Lock()
+
+	statAction := stats.GetAction(actions.CodeContractOffer)
+	if statAction == nil {
+		t.Fatalf("Missing statistics action for code")
+	}
+
+	if statAction.Count != 1 {
+		t.Fatalf("Wrong statistics action count : got %d, want %d", statAction.Count, 1)
+	}
+
+	if statAction.RejectedCount != 1 {
+		t.Fatalf("Wrong statistics action rejection count : got %d, want %d",
+			statAction.RejectedCount, 1)
+	}
+
+	stats.Unlock()
 
 	StopTestAgent(ctx, t, test)
 }
@@ -633,6 +722,35 @@ func Test_Contracts_Amendment_Valid(t *testing.T) {
 	}
 	test.Contract.Unlock()
 
+	time.Sleep(time.Millisecond) // wait for statistics to process
+
+	stats, err := statistics.FetchContractValue(ctx, test.Caches.Cache,
+		state.CalculateContractHash(test.ContractLockingScript), uint64(time.Now().UnixNano()))
+	if err != nil {
+		t.Fatalf("Failed to fetch contract statistics : %s", err)
+	}
+
+	js, _ = json.MarshalIndent(stats, "", "  ")
+	t.Logf("Stats : %s", js)
+
+	stats.Lock()
+
+	statAction := stats.GetAction(actions.CodeContractAmendment)
+	if statAction == nil {
+		t.Fatalf("Missing statistics action for code")
+	}
+
+	if statAction.Count != 1 {
+		t.Fatalf("Wrong statistics action count : got %d, want %d", statAction.Count, 1)
+	}
+
+	if statAction.RejectedCount != 0 {
+		t.Fatalf("Wrong statistics action rejection count : got %d, want %d",
+			statAction.RejectedCount, 0)
+	}
+
+	stats.Unlock()
+
 	StopTestAgent(ctx, t, test)
 }
 
@@ -794,6 +912,35 @@ func Test_Contracts_Amendment_AdminChange(t *testing.T) {
 			responseTxID)
 	}
 	test.Contract.Unlock()
+
+	time.Sleep(time.Millisecond) // wait for statistics to process
+
+	stats, err := statistics.FetchContractValue(ctx, test.Caches.Cache,
+		state.CalculateContractHash(test.ContractLockingScript), uint64(time.Now().UnixNano()))
+	if err != nil {
+		t.Fatalf("Failed to fetch contract statistics : %s", err)
+	}
+
+	js, _ = json.MarshalIndent(stats, "", "  ")
+	t.Logf("Stats : %s", js)
+
+	stats.Lock()
+
+	statAction := stats.GetAction(actions.CodeContractAmendment)
+	if statAction == nil {
+		t.Fatalf("Missing statistics action for code")
+	}
+
+	if statAction.Count != 1 {
+		t.Fatalf("Wrong statistics action count : got %d, want %d", statAction.Count, 1)
+	}
+
+	if statAction.RejectedCount != 0 {
+		t.Fatalf("Wrong statistics action rejection count : got %d, want %d",
+			statAction.RejectedCount, 0)
+	}
+
+	stats.Unlock()
 
 	StopTestAgent(ctx, t, test)
 }
@@ -989,6 +1136,35 @@ func Test_Contracts_Amendment_Proposal(t *testing.T) {
 	test.Contract.Unlock()
 
 	test.Caches.Caches.Votes.Release(ctx, test.ContractLockingScript, voteTxID)
+
+	time.Sleep(time.Millisecond) // wait for statistics to process
+
+	stats, err := statistics.FetchContractValue(ctx, test.Caches.Cache,
+		state.CalculateContractHash(test.ContractLockingScript), uint64(time.Now().UnixNano()))
+	if err != nil {
+		t.Fatalf("Failed to fetch contract statistics : %s", err)
+	}
+
+	js, _ = json.MarshalIndent(stats, "", "  ")
+	t.Logf("Stats : %s", js)
+
+	stats.Lock()
+
+	statAction := stats.GetAction(actions.CodeContractAmendment)
+	if statAction == nil {
+		t.Fatalf("Missing statistics action for code")
+	}
+
+	if statAction.Count != 1 {
+		t.Fatalf("Wrong statistics action count : got %d, want %d", statAction.Count, 1)
+	}
+
+	if statAction.RejectedCount != 0 {
+		t.Fatalf("Wrong statistics action rejection count : got %d, want %d",
+			statAction.RejectedCount, 0)
+	}
+
+	stats.Unlock()
 
 	StopTestAgent(ctx, t, test)
 }

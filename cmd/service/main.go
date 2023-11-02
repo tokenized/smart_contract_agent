@@ -22,6 +22,7 @@ import (
 	"github.com/tokenized/smart_contract_agent/pkg/headers"
 	"github.com/tokenized/smart_contract_agent/pkg/locker"
 	"github.com/tokenized/smart_contract_agent/pkg/scheduler"
+	"github.com/tokenized/smart_contract_agent/pkg/statistics"
 	"github.com/tokenized/smart_contract_agent/pkg/transactions"
 	spyNodeClient "github.com/tokenized/spynode/pkg/client"
 	"github.com/tokenized/threads"
@@ -114,15 +115,20 @@ func main() {
 		logger.Fatal(ctx, "Failed to create services cache : %s", err)
 	}
 
+	statistics, err := statistics.NewProcessor(cache, 100, cfg.ChannelTimeout.Duration)
+	if err != nil {
+		logger.Fatal(ctx, "Failed to create statistics processor : %s", err)
+	}
+
 	locker := locker.NewThreadedLocker(1000)
 
 	service := service.NewService(cfg.AgentData, cfg.Agents, spyNode, caches, transactions,
 		services, locker, store, broadcaster, spyNode, headers.NewHeaders(spyNode), scheduler,
-		peerChannelsFactory, peerChannelResponses)
+		peerChannelsFactory, peerChannelResponses, statistics)
 	spyNode.RegisterHandler(service)
 
 	var spyNodeWait, lockerWait, peerChannelResponseWait, schedulerWait,
-		peerChannelWait sync.WaitGroup
+		peerChannelWait, statisticsWait sync.WaitGroup
 
 	schedulerThread, schedulerComplete := threads.NewInterruptableThreadComplete("Scheduler",
 		scheduler.Run, &schedulerWait)
@@ -139,6 +145,9 @@ func main() {
 	spyNodeThread, spyNodeComplete := threads.NewInterruptableThreadComplete("SpyNode", spyNode.Run,
 		&spyNodeWait)
 
+	statisticsThread, statisticsComplete := threads.NewInterruptableThreadComplete("Statistics",
+		statistics.Run, &statisticsWait)
+
 	peerChannelThread, peerChannelComplete := threads.NewInterruptableThreadComplete("Peer Channel Listen",
 		func(ctx context.Context, interrupt <-chan interface{}) error {
 			return service.PeerChannelListen(ctx, interrupt, cfg.AgentData.RequestPeerChannel,
@@ -154,6 +163,7 @@ func main() {
 	lockerThread.Start(ctx)
 	peerChannelResponseThread.Start(ctx)
 	spyNodeThread.Start(ctx)
+	statisticsThread.Start(ctx)
 	peerChannelThread.Start(ctx)
 
 	// Shutdown
@@ -179,6 +189,9 @@ func main() {
 	case err := <-spyNodeComplete:
 		logger.Error(ctx, "SpyNode completed : %s", err)
 
+	case err := <-statisticsComplete:
+		logger.Error(ctx, "Statistics completed : %s", err)
+
 	case err := <-peerChannelComplete:
 		logger.Error(ctx, "Peer Channel Listen completed : %s", err)
 
@@ -191,6 +204,9 @@ func main() {
 
 	spyNodeThread.Stop(ctx)
 	spyNodeWait.Wait()
+
+	statisticsThread.Stop(ctx)
+	statisticsWait.Wait()
 
 	close(peerChannelResponses)
 	peerChannelResponseWait.Wait()

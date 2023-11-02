@@ -10,6 +10,7 @@ import (
 	"github.com/tokenized/smart_contract_agent/pkg/contract_services"
 	"github.com/tokenized/smart_contract_agent/pkg/locker"
 	"github.com/tokenized/smart_contract_agent/pkg/scheduler"
+	"github.com/tokenized/smart_contract_agent/pkg/statistics"
 	"github.com/tokenized/smart_contract_agent/pkg/transactions"
 
 	"github.com/pkg/errors"
@@ -29,6 +30,7 @@ type Factory struct {
 	agentStore           Store
 	peerChannelsFactory  *peer_channels.Factory
 	peerChannelResponses chan PeerChannelResponse
+	updateStats          statistics.AddUpdate
 }
 
 func NewFactory(config Config, store storage.CopyList, cache cacher.Cacher,
@@ -36,7 +38,8 @@ func NewFactory(config Config, store storage.CopyList, cache cacher.Cacher,
 	services *contract_services.ContractServicesCache, locker locker.Locker,
 	broadcaster Broadcaster, fetcher Fetcher, headers BlockHeaders, scheduler *scheduler.Scheduler,
 	agentStore Store, peerChannelsFactory *peer_channels.Factory,
-	peerChannelResponses chan PeerChannelResponse) (*Factory, error) {
+	peerChannelResponses chan PeerChannelResponse,
+	updateStats statistics.AddUpdate) (*Factory, error) {
 
 	caches, err := state.NewCaches(cache)
 	if err != nil {
@@ -57,13 +60,14 @@ func NewFactory(config Config, store storage.CopyList, cache cacher.Cacher,
 		agentStore:           agentStore,
 		peerChannelsFactory:  peerChannelsFactory,
 		peerChannelResponses: peerChannelResponses,
+		updateStats:          updateStats,
 	}, nil
 }
 
 func (f *Factory) NewAgent(ctx context.Context, data AgentData) (*Agent, error) {
 	return NewAgent(ctx, data, f.config, f.caches, f.transactions, f.services, f.locker, f.store,
 		f.broadcaster, f.fetcher, f.headers, f.scheduler, f.agentStore, f.peerChannelsFactory,
-		f.peerChannelResponses)
+		f.peerChannelResponses, f.updateStats)
 }
 
 func (f *Factory) NewPeerChannelResponder() *PeerChannelResponder {

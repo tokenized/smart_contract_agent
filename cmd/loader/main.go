@@ -108,7 +108,7 @@ func main() {
 
 	agent, err := agents.NewAgent(ctx, cfg.AgentData, cfg.Agents, caches, transactions, services,
 		locker, store, broadcaster, woc, woc, nil, agentStore, peerChannelsFactory,
-		peerChannelResponses)
+		peerChannelResponses, nil)
 	if err != nil {
 		logger.Fatal(ctx, "Failed to create agent : %s", err)
 	}

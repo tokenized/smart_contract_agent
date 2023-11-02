@@ -19,6 +19,7 @@ import (
 	"github.com/tokenized/smart_contract_agent/pkg/contract_services"
 	"github.com/tokenized/smart_contract_agent/pkg/locker"
 	"github.com/tokenized/smart_contract_agent/pkg/scheduler"
+	"github.com/tokenized/smart_contract_agent/pkg/statistics"
 	"github.com/tokenized/smart_contract_agent/pkg/transactions"
 	"github.com/tokenized/specification/dist/golang/actions"
 	"github.com/tokenized/specification/dist/golang/instruments"
@@ -46,10 +47,13 @@ type TestData struct {
 	peerChannelResponsesComplete chan interface{}
 	PeerChannelResponses         chan PeerChannelResponse
 
-	schedulerInterrupt chan interface{}
-	schedulerComplete  chan interface{}
-	scheduler          *scheduler.Scheduler
-	headers            *state.MockHeaders
+	schedulerInterrupt  chan interface{}
+	schedulerComplete   chan interface{}
+	scheduler           *scheduler.Scheduler
+	headers             *state.MockHeaders
+	statisticsInterrupt chan interface{}
+	statisticsComplete  chan interface{}
+	Statistics          *statistics.Processor
 
 	ContractKey           bitcoin.Key
 	ContractLockingScript bitcoin.Script
@@ -277,6 +281,8 @@ func prepareTestData(ctx context.Context, t testing.TB) *TestData {
 		PeerChannelResponses:         make(chan PeerChannelResponse),
 		schedulerInterrupt:           make(chan interface{}),
 		schedulerComplete:            make(chan interface{}),
+		statisticsInterrupt:          make(chan interface{}),
+		statisticsComplete:           make(chan interface{}),
 		headers:                      state.NewMockHeaders(),
 	}
 
@@ -284,13 +290,20 @@ func prepareTestData(ctx context.Context, t testing.TB) *TestData {
 
 	test.Caches = StartTestCaches(ctx, t, test.Store, time.Second)
 
+	statProcessor, err := statistics.NewProcessor(test.Caches.Cache, 10, time.Second)
+	if err != nil {
+		t.Fatalf("Failed to create statistics processor : %s", err)
+	}
+	test.Statistics = statProcessor
+
 	if test.Caches.Transactions == nil {
 		t.Fatalf("Transactions is nil")
 	}
 
 	test.mockStore = NewMockStore(DefaultConfig(), test.FeeLockingScript, test.Caches.Caches,
 		test.Caches.Transactions, test.Caches.Services, test.Locker, test.Store, test.Broadcaster,
-		nil, nil, test.scheduler, test.PeerChannelsFactory, test.PeerChannelResponses)
+		nil, nil, test.scheduler, test.PeerChannelsFactory, test.PeerChannelResponses,
+		test.Statistics)
 
 	test.peerChannelResponder = NewPeerChannelResponder(test.Caches.Caches,
 		test.PeerChannelsFactory)
@@ -307,6 +320,20 @@ func prepareTestData(ctx context.Context, t testing.TB) *TestData {
 			t.Errorf("Scheduler returned an error : %s", err)
 		}
 		close(test.schedulerComplete)
+	}()
+
+	go func() {
+		defer func() {
+			if err := recover(); err != nil {
+				t.Errorf("Scheduler panic : %s", err)
+			}
+		}()
+
+		if err := test.Statistics.Run(ctx, test.statisticsInterrupt); err != nil &&
+			errors.Cause(err) != threads.Interrupted {
+			t.Errorf("Statistics returned an error : %s", err)
+		}
+		close(test.statisticsComplete)
 	}()
 
 	go func() {
@@ -320,6 +347,11 @@ func prepareTestData(ctx context.Context, t testing.TB) *TestData {
 func prepareTestDataWithCacher(ctx context.Context, t testing.TB, store *storage.MockStorage,
 	cache cacher.Cacher) *TestData {
 
+	statProcessor, err := statistics.NewProcessor(cache, 10, time.Second)
+	if err != nil {
+		t.Fatalf("Failed to create statistics processor : %s", err)
+	}
+
 	test := &TestData{
 		Store:                        store,
 		Broadcaster:                  state.NewMockTxBroadcaster(),
@@ -329,7 +361,10 @@ func prepareTestDataWithCacher(ctx context.Context, t testing.TB, store *storage
 		PeerChannelResponses:         make(chan PeerChannelResponse),
 		schedulerInterrupt:           make(chan interface{}),
 		schedulerComplete:            make(chan interface{}),
+		statisticsInterrupt:          make(chan interface{}),
+		statisticsComplete:           make(chan interface{}),
 		headers:                      state.NewMockHeaders(),
+		Statistics:                   statProcessor,
 	}
 
 	test.scheduler = scheduler.NewScheduler(test.Broadcaster, time.Second)
@@ -342,7 +377,8 @@ func prepareTestDataWithCacher(ctx context.Context, t testing.TB, store *storage
 
 	test.mockStore = NewMockStore(DefaultConfig(), test.FeeLockingScript, test.Caches.Caches,
 		test.Caches.Transactions, test.Caches.Services, test.Locker, test.Store, test.Broadcaster,
-		nil, nil, test.scheduler, test.PeerChannelsFactory, test.PeerChannelResponses)
+		nil, nil, test.scheduler, test.PeerChannelsFactory, test.PeerChannelResponses,
+		test.Statistics)
 
 	test.peerChannelResponder = NewPeerChannelResponder(test.Caches.Caches,
 		test.PeerChannelsFactory)
@@ -359,6 +395,20 @@ func prepareTestDataWithCacher(ctx context.Context, t testing.TB, store *storage
 			t.Errorf("Scheduler returned an error : %s", err)
 		}
 		close(test.schedulerComplete)
+	}()
+
+	go func() {
+		defer func() {
+			if err := recover(); err != nil {
+				t.Errorf("Scheduler panic : %s", err)
+			}
+		}()
+
+		if err := test.Statistics.Run(ctx, test.statisticsInterrupt); err != nil &&
+			errors.Cause(err) != threads.Interrupted {
+			t.Errorf("Statistics returned an error : %s", err)
+		}
+		close(test.statisticsComplete)
 	}()
 
 	go func() {
@@ -382,7 +432,7 @@ func finalizeTestAgent(ctx context.Context, t testing.TB, test *TestData) {
 	test.agent, err = NewAgent(ctx, test.agentData, DefaultConfig(), test.Caches.Caches,
 		test.Caches.Transactions, test.Caches.Services, test.Locker, test.Store,
 		test.Broadcaster, nil, test.headers, test.scheduler, test.mockStore,
-		test.PeerChannelsFactory, test.PeerChannelResponses)
+		test.PeerChannelsFactory, test.PeerChannelResponses, test.Statistics.Add)
 	if err != nil {
 		t.Fatalf("Failed to create agent : %s", err)
 	}
@@ -401,6 +451,13 @@ func StopTestAgent(ctx context.Context, t *testing.T, test *TestData) {
 	case <-test.schedulerComplete:
 	case <-time.After(time.Second):
 		t.Fatalf("Scheduler shut down timed out")
+	}
+
+	close(test.statisticsInterrupt)
+	select {
+	case <-test.statisticsComplete:
+	case <-time.After(time.Second):
+		t.Fatalf("Statistics shut down timed out")
 	}
 
 	if test.agent != nil {
@@ -476,6 +533,7 @@ type MockStore struct {
 	scheduler            *scheduler.Scheduler
 	peerChannelsFactory  *peer_channels.Factory
 	peerChannelResponses chan PeerChannelResponse
+	statistics           *statistics.Processor
 
 	lock sync.Mutex
 }
@@ -484,8 +542,8 @@ func NewMockStore(config Config, feeLockingScript bitcoin.Script, caches *state.
 	transactions *transactions.TransactionCache, services *contract_services.ContractServicesCache,
 	locker locker.Locker, store storage.CopyList, broadcaster Broadcaster, fetcher Fetcher,
 	headers BlockHeaders, scheduler *scheduler.Scheduler,
-	peerChannelsFactory *peer_channels.Factory,
-	peerChannelResponses chan PeerChannelResponse) *MockStore {
+	peerChannelsFactory *peer_channels.Factory, peerChannelResponses chan PeerChannelResponse,
+	statistics *statistics.Processor) *MockStore {
 
 	return &MockStore{
 		config:               config,
@@ -499,6 +557,7 @@ func NewMockStore(config Config, feeLockingScript bitcoin.Script, caches *state.
 		scheduler:            scheduler,
 		peerChannelResponses: peerChannelResponses,
 		peerChannelsFactory:  peerChannelsFactory,
+		statistics:           statistics,
 	}
 }
 
@@ -528,7 +587,7 @@ func (f *MockStore) GetAgent(ctx context.Context,
 
 	agent, err := NewAgent(ctx, *data, f.config, f.caches, f.transactions, f.services, f.locker,
 		f.store, f.broadcaster, f.fetcher, f.headers, f.scheduler, f, f.peerChannelsFactory,
-		f.peerChannelResponses)
+		f.peerChannelResponses, f.statistics.Add)
 	if err != nil {
 		return nil, errors.Wrap(err, "new agent")
 	}

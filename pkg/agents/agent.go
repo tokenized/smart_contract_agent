@@ -20,6 +20,7 @@ import (
 	"github.com/tokenized/smart_contract_agent/pkg/contract_services"
 	"github.com/tokenized/smart_contract_agent/pkg/locker"
 	"github.com/tokenized/smart_contract_agent/pkg/scheduler"
+	"github.com/tokenized/smart_contract_agent/pkg/statistics"
 	"github.com/tokenized/smart_contract_agent/pkg/transactions"
 	"github.com/tokenized/specification/dist/golang/actions"
 
@@ -96,6 +97,8 @@ type Agent struct {
 
 	peerChannelResponses chan PeerChannelResponse
 
+	updateStats atomic.Value // statistics.AddUpdate
+
 	// scheduler and store are used to schedule tasks that spawn a new agent and perform a
 	// function. For example, vote finalization and multi-contract transfer expiration.
 	scheduler  *scheduler.Scheduler
@@ -127,8 +130,8 @@ func NewAgent(ctx context.Context, data AgentData, config Config, caches *state.
 	transactions *transactions.TransactionCache, services *contract_services.ContractServicesCache,
 	locker locker.Locker, store storage.CopyList, broadcaster Broadcaster, fetcher Fetcher,
 	headers BlockHeaders, scheduler *scheduler.Scheduler, agentStore Store,
-	peerChannelsFactory *peer_channels.Factory,
-	peerChannelResponses chan PeerChannelResponse) (*Agent, error) {
+	peerChannelsFactory *peer_channels.Factory, peerChannelResponses chan PeerChannelResponse,
+	updateStats statistics.AddUpdate) (*Agent, error) {
 
 	newContract := &state.Contract{
 		LockingScript: data.LockingScript,
@@ -158,6 +161,9 @@ func NewAgent(ctx context.Context, data AgentData, config Config, caches *state.
 
 	result.config.Store(config)
 	result.channelTimeout.Store(config.ChannelTimeout.Duration)
+	if updateStats != nil {
+		result.updateStats.Store(updateStats)
+	}
 
 	return result, nil
 }
@@ -207,7 +213,10 @@ func (a *Agent) LockingScript() bitcoin.Script {
 }
 
 func (a *Agent) ContractHash() state.ContractHash {
-	return state.CalculateContractHash(a.LockingScript())
+	a.dataLock.Lock()
+	defer a.dataLock.Unlock()
+
+	return state.CalculateContractHash(a.data.LockingScript)
 }
 
 func (a *Agent) MinimumContractFee() uint64 {

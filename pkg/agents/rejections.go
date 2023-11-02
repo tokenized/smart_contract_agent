@@ -495,16 +495,19 @@ func (a *Agent) createRejection(ctx context.Context, transaction *transactions.T
 		}
 	}
 
+	contractFeeOutputIndex := -1
 	contractFee := a.ContractFee()
 	if contractFee > 0 {
+		contractFeeOutputIndex = len(rejectTx.MsgTx.TxOut)
 		if err := rejectTx.AddOutput(a.FeeLockingScript(), contractFee, false, false); err != nil {
 			return nil, errors.Wrap(err, "add contract fee")
 		}
 	}
 
 	// Add rejection action
+	now := a.Now()
 	rejection := &actions.Rejection{
-		Timestamp: a.Now(),
+		Timestamp: now,
 	}
 
 	if reject != nil {
@@ -624,6 +627,11 @@ func (a *Agent) createRejection(ctx context.Context, transaction *transactions.T
 
 	if err := a.AddResponse(ctx, txid, nil, false, etx); err != nil {
 		return etx, errors.Wrap(err, "respond")
+	}
+
+	if err := a.updateRequestStats(ctx, &tx, rejectTx.MsgTx, actionOutputIndex,
+		contractFeeOutputIndex, true, now); err != nil {
+		logger.Error(ctx, "Failed to update statistics : %s", err)
 	}
 
 	return etx, nil

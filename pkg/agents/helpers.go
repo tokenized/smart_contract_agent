@@ -68,24 +68,24 @@ func appendLockingScript(lockingScripts []bitcoin.Script,
 	return append(lockingScripts, lockingScript)
 }
 
-func findBitcoinOutput(tx *wire.MsgTx, lockingScript bitcoin.Script, value uint64) bool {
-	for _, txout := range tx.TxOut {
+func findBitcoinOutput(tx *wire.MsgTx, lockingScript bitcoin.Script, value uint64) int {
+	for outputIndex, txout := range tx.TxOut {
 		if txout.LockingScript.Equal(lockingScript) && txout.Value >= value {
-			return true
+			return outputIndex
 		}
 	}
 
-	return false
+	return -1
 }
 
-func findBitcoinOutputExact(tx *wire.MsgTx, lockingScript bitcoin.Script, value uint64) bool {
-	for _, txout := range tx.TxOut {
+func findBitcoinOutputExact(tx *wire.MsgTx, lockingScript bitcoin.Script, value uint64) int {
+	for outputIndex, txout := range tx.TxOut {
 		if txout.LockingScript.Equal(lockingScript) && txout.Value == value {
-			return true
+			return outputIndex
 		}
 	}
 
-	return false
+	return -1
 }
 
 func isRequestType(action actions.Action) bool {

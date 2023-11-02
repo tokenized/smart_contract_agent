@@ -2,7 +2,6 @@ package statistics
 
 import (
 	"context"
-	"fmt"
 	"reflect"
 	"sync/atomic"
 	"time"
@@ -85,39 +84,15 @@ func (p *Processor) Run(ctx context.Context, interrupt <-chan interface{}) error
 }
 
 func (p *Processor) Process(ctx context.Context, update *Update) error {
-	stat, err := p.Get(ctx, update)
+	// Get statistics relating to the update.
+	path := update.Path()
+	stat, err := Add(ctx, p.cache, p.typ, path)
 	if err != nil {
 		return errors.Wrap(err, "get")
 	}
-	defer p.Release(ctx, update)
+	defer p.cache.Release(ctx, path)
 
+	// Add the update's data to the statistics.
 	stat.Apply(update)
 	return nil
-}
-
-func (p *Processor) Get(ctx context.Context, update *Update) (*Statistics, error) {
-	path := update.Path()
-
-	addStat := &Statistics{}
-	addStat.Initialize()
-
-	value, err := p.cache.Add(ctx, p.typ, path, addStat)
-	if err != nil {
-		return nil, errors.Wrap(err, "add")
-	}
-
-	return value.(*Statistics), nil
-}
-
-func (p *Processor) Release(ctx context.Context, update *Update) {
-	p.cache.Release(ctx, update.Path())
-}
-
-func (u *Update) Path() string {
-	if u.InstrumentCode == nil {
-		return fmt.Sprintf("%s/%s/%s", statisticsPath, u.ContractHash, u.Time.Format(dateFormat))
-	}
-
-	return fmt.Sprintf("%s/%s/%s/%s", statisticsPath, u.ContractHash, u.InstrumentCode,
-		u.Time.Format(dateFormat))
 }

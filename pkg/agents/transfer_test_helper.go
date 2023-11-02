@@ -15,6 +15,7 @@ import (
 	"github.com/tokenized/pkg/wire"
 	"github.com/tokenized/smart_contract_agent/internal/state"
 	"github.com/tokenized/smart_contract_agent/pkg/scheduler"
+	"github.com/tokenized/smart_contract_agent/pkg/statistics"
 	"github.com/tokenized/smart_contract_agent/pkg/transactions"
 	"github.com/tokenized/specification/dist/golang/actions"
 	"github.com/tokenized/specification/dist/golang/messages"
@@ -33,7 +34,9 @@ func RunTest_Transfers_Basic(ctx context.Context, t *testing.T, store *storage.M
 	var receiverKeys []bitcoin.Key
 	var receiverLockingScripts []bitcoin.Script
 	var receiverQuantities []uint64
+	transferCount := 0
 	for i := 0; i < 100; i++ {
+		transferCount++
 		instrumentTransfer := &actions.InstrumentTransferField{
 			ContractIndex:  0,
 			InstrumentType: string(test.Instrument.InstrumentType[:]),
@@ -169,12 +172,78 @@ func RunTest_Transfers_Basic(ctx context.Context, t *testing.T, store *storage.M
 		t.Logf("Settlement : %s", js)
 
 		test.Caches.Transactions.Release(ctx, transaction.GetTxID())
+
+		time.Sleep(time.Millisecond) // wait for stats to process
+
+		stats, err := statistics.FetchContractValue(ctx, test.Caches.Cache,
+			state.CalculateContractHash(test.ContractLockingScript), uint64(time.Now().UnixNano()))
+		if err != nil {
+			t.Fatalf("Failed to fetch contract statistics : %s", err)
+		}
+
+		js, _ = json.MarshalIndent(stats, "", "  ")
+		t.Logf("Stats : %s", js)
+
+		if stats == nil {
+			t.Fatalf("Missing contract statistics")
+		}
+
+		stats.Lock()
+
+		statAction := stats.GetAction(actions.CodeTransfer)
+		if statAction == nil {
+			t.Fatalf("Missing statistics action for code")
+		}
+
+		if statAction.Count != uint64(transferCount) {
+			t.Fatalf("Wrong statistics action count : got %d, want %d", statAction.Count, transferCount)
+		}
+
+		if statAction.RejectedCount != 0 {
+			t.Fatalf("Wrong statistics action rejection count : got %d, want %d",
+				statAction.RejectedCount, 0)
+		}
+
+		stats.Unlock()
+
+		stats, err = statistics.FetchInstrumentValue(ctx, test.Caches.Cache,
+			state.CalculateContractHash(test.ContractLockingScript), test.Instrument.InstrumentCode,
+			uint64(time.Now().UnixNano()))
+		if err != nil {
+			t.Fatalf("Failed to fetch instrument statistics : %s", err)
+		}
+
+		js, _ = json.MarshalIndent(stats, "", "  ")
+		t.Logf("Stats : %s", js)
+
+		if stats == nil {
+			t.Fatalf("Missing instrument statistics")
+		}
+
+		stats.Lock()
+
+		statAction = stats.GetAction(actions.CodeTransfer)
+		if statAction == nil {
+			t.Fatalf("Missing statistics action for code")
+		}
+
+		if statAction.Count != uint64(transferCount) {
+			t.Fatalf("Wrong statistics action count : got %d, want %d", statAction.Count, transferCount)
+		}
+
+		if statAction.RejectedCount != 0 {
+			t.Fatalf("Wrong statistics action rejection count : got %d, want %d",
+				statAction.RejectedCount, 0)
+		}
+
+		stats.Unlock()
 	}
 
 	receiverOffset := 0
 	var finalLockingScripts []bitcoin.Script
 	var finalQuantities []uint64
 	for {
+		transferCount++
 		instrumentTransfer := &actions.InstrumentTransferField{
 			ContractIndex:  0,
 			InstrumentType: string(test.Instrument.InstrumentType[:]),
@@ -335,6 +404,73 @@ func RunTest_Transfers_Basic(ctx context.Context, t *testing.T, store *storage.M
 		t.Logf("Settlement : %s", js)
 
 		test.Caches.Transactions.Release(ctx, transaction.GetTxID())
+
+		time.Sleep(time.Millisecond) // wait for stats to process
+
+		stats, err := statistics.FetchContractValue(ctx, test.Caches.Cache,
+			state.CalculateContractHash(test.ContractLockingScript), uint64(time.Now().UnixNano()))
+		if err != nil {
+			t.Fatalf("Failed to fetch contract statistics : %s", err)
+		}
+
+		js, _ = json.MarshalIndent(stats, "", "  ")
+		t.Logf("Stats : %s", js)
+
+		if stats == nil {
+			t.Fatalf("Missing contract statistics")
+		}
+
+		stats.Lock()
+
+		statAction := stats.GetAction(actions.CodeTransfer)
+		if statAction == nil {
+			t.Fatalf("Missing statistics action for code")
+		}
+
+		if statAction.Count != uint64(transferCount) {
+			t.Fatalf("Wrong statistics action count : got %d, want %d", statAction.Count,
+				transferCount)
+		}
+
+		if statAction.RejectedCount != 0 {
+			t.Fatalf("Wrong statistics action rejection count : got %d, want %d",
+				statAction.RejectedCount, 0)
+		}
+
+		stats.Unlock()
+
+		stats, err = statistics.FetchInstrumentValue(ctx, test.Caches.Cache,
+			state.CalculateContractHash(test.ContractLockingScript), test.Instrument.InstrumentCode,
+			uint64(time.Now().UnixNano()))
+		if err != nil {
+			t.Fatalf("Failed to fetch instrument statistics : %s", err)
+		}
+
+		js, _ = json.MarshalIndent(stats, "", "  ")
+		t.Logf("Stats : %s", js)
+
+		if stats == nil {
+			t.Fatalf("Missing instrument statistics")
+		}
+
+		stats.Lock()
+
+		statAction = stats.GetAction(actions.CodeTransfer)
+		if statAction == nil {
+			t.Fatalf("Missing statistics action for code")
+		}
+
+		if statAction.Count != uint64(transferCount) {
+			t.Fatalf("Wrong statistics action count : got %d, want %d", statAction.Count,
+				transferCount)
+		}
+
+		if statAction.RejectedCount != 0 {
+			t.Fatalf("Wrong statistics action rejection count : got %d, want %d",
+				statAction.RejectedCount, 0)
+		}
+
+		stats.Unlock()
 	}
 
 	// Check balances
@@ -391,7 +527,7 @@ func RunTest_Transfers_Multi_Basic(ctx context.Context, t *testing.T, store *sto
 
 	agent1, err := NewAgent(ctx, agentData1, DefaultConfig(), test.Caches.Caches,
 		test.Caches.Transactions, test.Caches.Services, test.Locker, test.Store, broadcaster1, nil,
-		nil, nil, nil, test.PeerChannelsFactory, test.PeerChannelResponses)
+		nil, nil, nil, test.PeerChannelsFactory, test.PeerChannelResponses, test.Statistics.Add)
 	if err != nil {
 		t.Fatalf("Failed to create agent : %s", err)
 	}
@@ -423,7 +559,7 @@ func RunTest_Transfers_Multi_Basic(ctx context.Context, t *testing.T, store *sto
 
 	agent2, err := NewAgent(ctx, agentData2, DefaultConfig(), test.Caches.Caches,
 		test.Caches.Transactions, test.Caches.Services, test.Locker, test.Store, broadcaster2, nil,
-		nil, nil, nil, test.PeerChannelsFactory, test.PeerChannelResponses)
+		nil, nil, nil, test.PeerChannelsFactory, test.PeerChannelResponses, test.Statistics.Add)
 	if err != nil {
 		t.Fatalf("Failed to create agent : %s", err)
 	}
@@ -1131,7 +1267,7 @@ func RunTest_Transfers_Multi_Expire(ctx context.Context, t *testing.T, store *st
 
 	agent1, err := NewAgent(ctx, agentData1, config, test.Caches.Caches, test.Caches.Transactions,
 		test.Caches.Services, test.Locker, test.Store, broadcaster1, nil, nil, scheduler,
-		test.mockStore, test.PeerChannelsFactory, test.PeerChannelResponses)
+		test.mockStore, test.PeerChannelsFactory, test.PeerChannelResponses, test.Statistics.Add)
 	if err != nil {
 		t.Fatalf("Failed to create agent : %s", err)
 	}
@@ -1164,7 +1300,7 @@ func RunTest_Transfers_Multi_Expire(ctx context.Context, t *testing.T, store *st
 
 	agent2, err := NewAgent(ctx, agentData2, config, test.Caches.Caches, test.Caches.Transactions,
 		test.Caches.Services, test.Locker, test.Store, broadcaster2, nil, nil, scheduler,
-		test.mockStore, test.PeerChannelsFactory, test.PeerChannelResponses)
+		test.mockStore, test.PeerChannelsFactory, test.PeerChannelResponses, test.Statistics.Add)
 	if err != nil {
 		t.Fatalf("Failed to create agent : %s", err)
 	}
@@ -1585,7 +1721,7 @@ func RunTest_Transfers_Multi_Reject_First(ctx context.Context, t *testing.T,
 
 	agent1, err := NewAgent(ctx, agentData1, DefaultConfig(), test.Caches.Caches,
 		test.Caches.Transactions, test.Caches.Services, test.Locker, test.Store, broadcaster1, nil,
-		nil, nil, nil, test.PeerChannelsFactory, test.PeerChannelResponses)
+		nil, nil, nil, test.PeerChannelsFactory, test.PeerChannelResponses, test.Statistics.Add)
 	if err != nil {
 		t.Fatalf("Failed to create agent : %s", err)
 	}
@@ -1617,7 +1753,7 @@ func RunTest_Transfers_Multi_Reject_First(ctx context.Context, t *testing.T,
 
 	agent2, err := NewAgent(ctx, agentData2, DefaultConfig(), test.Caches.Caches,
 		test.Caches.Transactions, test.Caches.Services, test.Locker, test.Store, broadcaster2, nil,
-		nil, nil, nil, test.PeerChannelsFactory, test.PeerChannelResponses)
+		nil, nil, nil, test.PeerChannelsFactory, test.PeerChannelResponses, test.Statistics.Add)
 	if err != nil {
 		t.Fatalf("Failed to create agent : %s", err)
 	}
@@ -1902,7 +2038,7 @@ func RunTest_Transfers_Multi_Reject_Second(ctx context.Context, t *testing.T,
 
 	agent1, err := NewAgent(ctx, agentData1, DefaultConfig(), test.Caches.Caches,
 		test.Caches.Transactions, test.Caches.Services, test.Locker, test.Store, broadcaster1, nil,
-		nil, nil, nil, test.PeerChannelsFactory, test.PeerChannelResponses)
+		nil, nil, nil, test.PeerChannelsFactory, test.PeerChannelResponses, test.Statistics.Add)
 	if err != nil {
 		t.Fatalf("Failed to create agent : %s", err)
 	}
@@ -1934,7 +2070,7 @@ func RunTest_Transfers_Multi_Reject_Second(ctx context.Context, t *testing.T,
 
 	agent2, err := NewAgent(ctx, agentData2, DefaultConfig(), test.Caches.Caches,
 		test.Caches.Transactions, test.Caches.Services, test.Locker, test.Store, broadcaster2, nil,
-		nil, nil, nil, test.PeerChannelsFactory, test.PeerChannelResponses)
+		nil, nil, nil, test.PeerChannelsFactory, test.PeerChannelResponses, test.Statistics.Add)
 	if err != nil {
 		t.Fatalf("Failed to create agent : %s", err)
 	}

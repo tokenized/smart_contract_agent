@@ -17,6 +17,7 @@ import (
 	"github.com/tokenized/pkg/json"
 	"github.com/tokenized/pkg/storage"
 	"github.com/tokenized/smart_contract_agent/internal/state"
+	"github.com/tokenized/smart_contract_agent/pkg/statistics"
 	"github.com/tokenized/smart_contract_agent/pkg/transactions"
 	"github.com/tokenized/specification/dist/golang/actions"
 	"github.com/tokenized/specification/dist/golang/protocol"
@@ -211,6 +212,63 @@ func Test_Transfers_InsufficientQuantity(t *testing.T) {
 		t.Fatalf("Failed to release balances : %s", err)
 	}
 
+	time.Sleep(time.Millisecond)
+
+	stats, err := statistics.FetchContractValue(ctx, test.Caches.Cache,
+		state.CalculateContractHash(test.ContractLockingScript), uint64(time.Now().UnixNano()))
+	if err != nil {
+		t.Fatalf("Failed to fetch contract statistics : %s", err)
+	}
+
+	js, _ = json.MarshalIndent(stats, "", "  ")
+	t.Logf("Stats : %s", js)
+
+	stats.Lock()
+
+	statAction := stats.GetAction(actions.CodeTransfer)
+	if statAction == nil {
+		t.Fatalf("Missing statistics action for code")
+	}
+
+	if statAction.Count != 1 {
+		t.Fatalf("Wrong statistics action count : got %d, want %d", statAction.Count, 1)
+	}
+
+	if statAction.RejectedCount != 1 {
+		t.Fatalf("Wrong statistics action rejection count : got %d, want %d",
+			statAction.RejectedCount, 1)
+	}
+
+	stats.Unlock()
+
+	stats, err = statistics.FetchInstrumentValue(ctx, test.Caches.Cache,
+		state.CalculateContractHash(test.ContractLockingScript), test.Instrument.InstrumentCode,
+		uint64(time.Now().UnixNano()))
+	if err != nil {
+		t.Fatalf("Failed to fetch instrument statistics : %s", err)
+	}
+
+	js, _ = json.MarshalIndent(stats, "", "  ")
+	t.Logf("Stats : %s", js)
+
+	stats.Lock()
+
+	statAction = stats.GetAction(actions.CodeTransfer)
+	if statAction == nil {
+		t.Fatalf("Missing statistics action for code")
+	}
+
+	if statAction.Count != 1 {
+		t.Fatalf("Wrong statistics action count : got %d, want %d", statAction.Count, 1)
+	}
+
+	if statAction.RejectedCount != 1 {
+		t.Fatalf("Wrong statistics action rejection count : got %d, want %d",
+			statAction.RejectedCount, 1)
+	}
+
+	stats.Unlock()
+
 	StopTestAgent(ctx, t, test)
 
 	responseTx := test.Broadcaster.GetLastTx()
@@ -252,8 +310,8 @@ func Test_Transfers_InsufficientQuantity(t *testing.T) {
 	}
 }
 
-// Test_Transfers_NoQuantity creates a transfer action for locking scripts that don't have
-// any tokens and will be rejected for insufficient quantity.
+// Test_Transfers_NoQuantity creates a transfer action for locking scripts that don't have any
+// tokens and will be rejected for insufficient quantity.
 func Test_Transfers_NoQuantity(t *testing.T) {
 	ctx := logger.ContextWithLogger(context.Background(), true, true, "")
 	agent, test := StartTestAgentWithInstrument(ctx, t)
@@ -410,6 +468,71 @@ func Test_Transfers_NoQuantity(t *testing.T) {
 		test.Instrument.InstrumentCode, balances); err != nil {
 		t.Fatalf("Failed to release balances : %s", err)
 	}
+
+	time.Sleep(time.Millisecond) // wait for stats to process
+
+	stats, err := statistics.FetchContractValue(ctx, test.Caches.Cache,
+		state.CalculateContractHash(test.ContractLockingScript), uint64(time.Now().UnixNano()))
+	if err != nil {
+		t.Fatalf("Failed to fetch contract statistics : %s", err)
+	}
+
+	js, _ = json.MarshalIndent(stats, "", "  ")
+	t.Logf("Stats : %s", js)
+
+	if stats == nil {
+		t.Fatalf("Missing contract statistics")
+	}
+
+	stats.Lock()
+
+	statAction := stats.GetAction(actions.CodeTransfer)
+	if statAction == nil {
+		t.Fatalf("Missing statistics action for code")
+	}
+
+	if statAction.Count != 1 {
+		t.Fatalf("Wrong statistics action count : got %d, want %d", statAction.Count, 1)
+	}
+
+	if statAction.RejectedCount != 1 {
+		t.Fatalf("Wrong statistics action rejection count : got %d, want %d",
+			statAction.RejectedCount, 1)
+	}
+
+	stats.Unlock()
+
+	stats, err = statistics.FetchInstrumentValue(ctx, test.Caches.Cache,
+		state.CalculateContractHash(test.ContractLockingScript), test.Instrument.InstrumentCode,
+		uint64(time.Now().UnixNano()))
+	if err != nil {
+		t.Fatalf("Failed to fetch instrument statistics : %s", err)
+	}
+
+	js, _ = json.MarshalIndent(stats, "", "  ")
+	t.Logf("Stats : %s", js)
+
+	if stats == nil {
+		t.Fatalf("Missing instrument statistics")
+	}
+
+	stats.Lock()
+
+	statAction = stats.GetAction(actions.CodeTransfer)
+	if statAction == nil {
+		t.Fatalf("Missing statistics action for code")
+	}
+
+	if statAction.Count != 1 {
+		t.Fatalf("Wrong statistics action count : got %d, want %d", statAction.Count, 1)
+	}
+
+	if statAction.RejectedCount != 1 {
+		t.Fatalf("Wrong statistics action rejection count : got %d, want %d",
+			statAction.RejectedCount, 1)
+	}
+
+	stats.Unlock()
 
 	StopTestAgent(ctx, t, test)
 
@@ -574,6 +697,71 @@ func Test_Transfers_IdentityOracle_MissingSignature(t *testing.T) {
 	}
 
 	test.Caches.Transactions.Release(ctx, transaction.GetTxID())
+
+	time.Sleep(time.Millisecond) // wait for stats to process
+
+	stats, err := statistics.FetchContractValue(ctx, test.Caches.Cache,
+		state.CalculateContractHash(test.ContractLockingScript), uint64(time.Now().UnixNano()))
+	if err != nil {
+		t.Fatalf("Failed to fetch contract statistics : %s", err)
+	}
+
+	js, _ = json.MarshalIndent(stats, "", "  ")
+	t.Logf("Stats : %s", js)
+
+	if stats == nil {
+		t.Fatalf("Missing contract statistics")
+	}
+
+	stats.Lock()
+
+	statAction := stats.GetAction(actions.CodeTransfer)
+	if statAction == nil {
+		t.Fatalf("Missing statistics action for code")
+	}
+
+	if statAction.Count != 1 {
+		t.Fatalf("Wrong statistics action count : got %d, want %d", statAction.Count, 1)
+	}
+
+	if statAction.RejectedCount != 1 {
+		t.Fatalf("Wrong statistics action rejection count : got %d, want %d",
+			statAction.RejectedCount, 1)
+	}
+
+	stats.Unlock()
+
+	stats, err = statistics.FetchInstrumentValue(ctx, test.Caches.Cache,
+		state.CalculateContractHash(test.ContractLockingScript), test.Instrument.InstrumentCode,
+		uint64(time.Now().UnixNano()))
+	if err != nil {
+		t.Fatalf("Failed to fetch instrument statistics : %s", err)
+	}
+
+	js, _ = json.MarshalIndent(stats, "", "  ")
+	t.Logf("Stats : %s", js)
+
+	if stats == nil {
+		t.Fatalf("Missing instrument statistics")
+	}
+
+	stats.Lock()
+
+	statAction = stats.GetAction(actions.CodeTransfer)
+	if statAction == nil {
+		t.Fatalf("Missing statistics action for code")
+	}
+
+	if statAction.Count != 1 {
+		t.Fatalf("Wrong statistics action count : got %d, want %d", statAction.Count, 1)
+	}
+
+	if statAction.RejectedCount != 1 {
+		t.Fatalf("Wrong statistics action rejection count : got %d, want %d",
+			statAction.RejectedCount, 1)
+	}
+
+	stats.Unlock()
 
 	StopTestAgent(ctx, t, test)
 
@@ -766,6 +954,71 @@ func Test_Transfers_IdentityOracle_Valid(t *testing.T) {
 
 	test.Caches.Transactions.Release(ctx, transaction.GetTxID())
 
+	time.Sleep(time.Millisecond) // wait for stats to process
+
+	stats, err := statistics.FetchContractValue(ctx, test.Caches.Cache,
+		state.CalculateContractHash(test.ContractLockingScript), uint64(time.Now().UnixNano()))
+	if err != nil {
+		t.Fatalf("Failed to fetch contract statistics : %s", err)
+	}
+
+	js, _ = json.MarshalIndent(stats, "", "  ")
+	t.Logf("Stats : %s", js)
+
+	if stats == nil {
+		t.Fatalf("Missing contract statistics")
+	}
+
+	stats.Lock()
+
+	statAction := stats.GetAction(actions.CodeTransfer)
+	if statAction == nil {
+		t.Fatalf("Missing statistics action for code")
+	}
+
+	if statAction.Count != 1 {
+		t.Fatalf("Wrong statistics action count : got %d, want %d", statAction.Count, 1)
+	}
+
+	if statAction.RejectedCount != 0 {
+		t.Fatalf("Wrong statistics action rejection count : got %d, want %d",
+			statAction.RejectedCount, 0)
+	}
+
+	stats.Unlock()
+
+	stats, err = statistics.FetchInstrumentValue(ctx, test.Caches.Cache,
+		state.CalculateContractHash(test.ContractLockingScript), test.Instrument.InstrumentCode,
+		uint64(time.Now().UnixNano()))
+	if err != nil {
+		t.Fatalf("Failed to fetch instrument statistics : %s", err)
+	}
+
+	js, _ = json.MarshalIndent(stats, "", "  ")
+	t.Logf("Stats : %s", js)
+
+	if stats == nil {
+		t.Fatalf("Missing instrument statistics")
+	}
+
+	stats.Lock()
+
+	statAction = stats.GetAction(actions.CodeTransfer)
+	if statAction == nil {
+		t.Fatalf("Missing statistics action for code")
+	}
+
+	if statAction.Count != 1 {
+		t.Fatalf("Wrong statistics action count : got %d, want %d", statAction.Count, 1)
+	}
+
+	if statAction.RejectedCount != 0 {
+		t.Fatalf("Wrong statistics action rejection count : got %d, want %d",
+			statAction.RejectedCount, 0)
+	}
+
+	stats.Unlock()
+
 	StopTestAgent(ctx, t, test)
 
 	responseTx := test.Broadcaster.GetLastTx()
@@ -948,6 +1201,71 @@ func Test_Transfers_IdentityOracle_BadSignature(t *testing.T) {
 
 	test.Caches.Transactions.Release(ctx, transaction.GetTxID())
 
+	time.Sleep(time.Millisecond) // wait for stats to process
+
+	stats, err := statistics.FetchContractValue(ctx, test.Caches.Cache,
+		state.CalculateContractHash(test.ContractLockingScript), uint64(time.Now().UnixNano()))
+	if err != nil {
+		t.Fatalf("Failed to fetch contract statistics : %s", err)
+	}
+
+	js, _ = json.MarshalIndent(stats, "", "  ")
+	t.Logf("Stats : %s", js)
+
+	if stats == nil {
+		t.Fatalf("Missing contract statistics")
+	}
+
+	stats.Lock()
+
+	statAction := stats.GetAction(actions.CodeTransfer)
+	if statAction == nil {
+		t.Fatalf("Missing statistics action for code")
+	}
+
+	if statAction.Count != 1 {
+		t.Fatalf("Wrong statistics action count : got %d, want %d", statAction.Count, 1)
+	}
+
+	if statAction.RejectedCount != 1 {
+		t.Fatalf("Wrong statistics action rejection count : got %d, want %d",
+			statAction.RejectedCount, 1)
+	}
+
+	stats.Unlock()
+
+	stats, err = statistics.FetchInstrumentValue(ctx, test.Caches.Cache,
+		state.CalculateContractHash(test.ContractLockingScript), test.Instrument.InstrumentCode,
+		uint64(time.Now().UnixNano()))
+	if err != nil {
+		t.Fatalf("Failed to fetch instrument statistics : %s", err)
+	}
+
+	js, _ = json.MarshalIndent(stats, "", "  ")
+	t.Logf("Stats : %s", js)
+
+	if stats == nil {
+		t.Fatalf("Missing instrument statistics")
+	}
+
+	stats.Lock()
+
+	statAction = stats.GetAction(actions.CodeTransfer)
+	if statAction == nil {
+		t.Fatalf("Missing statistics action for code")
+	}
+
+	if statAction.Count != 1 {
+		t.Fatalf("Wrong statistics action count : got %d, want %d", statAction.Count, 1)
+	}
+
+	if statAction.RejectedCount != 1 {
+		t.Fatalf("Wrong statistics action rejection count : got %d, want %d",
+			statAction.RejectedCount, 1)
+	}
+
+	stats.Unlock()
+
 	StopTestAgent(ctx, t, test)
 
 	responseTx := test.Broadcaster.GetLastTx()
@@ -1024,7 +1342,7 @@ func Test_Transfers_Bitcoin_Refund(t *testing.T) {
 
 	agent, err := NewAgent(ctx, agentData, DefaultConfig(), test.Caches.Caches,
 		test.Caches.Transactions, test.Caches.Services, test.Locker, test.Store, broadcaster, nil,
-		nil, nil, nil, test.PeerChannelsFactory, test.PeerChannelResponses)
+		nil, nil, nil, test.PeerChannelsFactory, test.PeerChannelResponses, test.Statistics.Add)
 	if err != nil {
 		t.Fatalf("Failed to create agent : %s", err)
 	}
@@ -1258,6 +1576,71 @@ func Test_Transfers_Bitcoin_Refund(t *testing.T) {
 		if err := bitcoin_interpreter.VerifyTx(ctx, agentResponseTx); err != nil {
 			t.Fatalf("Failed to verify tx : %s", err)
 		}
+
+		time.Sleep(time.Millisecond) // wait for stats to process
+
+		stats, err := statistics.FetchContractValue(ctx, test.Caches.Cache,
+			state.CalculateContractHash(contractLockingScript), uint64(time.Now().UnixNano()))
+		if err != nil {
+			t.Fatalf("Failed to fetch contract statistics : %s", err)
+		}
+
+		js, _ = json.MarshalIndent(stats, "", "  ")
+		t.Logf("Stats : %s", js)
+
+		if stats == nil {
+			t.Fatalf("Missing contract statistics")
+		}
+
+		stats.Lock()
+
+		statAction := stats.GetAction(actions.CodeTransfer)
+		if statAction == nil {
+			t.Fatalf("Missing statistics action for code")
+		}
+
+		if statAction.Count != uint64(i+1) {
+			t.Fatalf("Wrong statistics action count : got %d, want %d", statAction.Count, i+1)
+		}
+
+		if statAction.RejectedCount != uint64(i+1) {
+			t.Fatalf("Wrong statistics action rejection count : got %d, want %d",
+				statAction.RejectedCount, i+1)
+		}
+
+		stats.Unlock()
+
+		stats, err = statistics.FetchInstrumentValue(ctx, test.Caches.Cache,
+			state.CalculateContractHash(contractLockingScript), instrument.InstrumentCode,
+			uint64(time.Now().UnixNano()))
+		if err != nil {
+			t.Fatalf("Failed to fetch instrument statistics : %s", err)
+		}
+
+		js, _ = json.MarshalIndent(stats, "", "  ")
+		t.Logf("Stats : %s", js)
+
+		if stats == nil {
+			t.Fatalf("Missing instrument statistics")
+		}
+
+		stats.Lock()
+
+		statAction = stats.GetAction(actions.CodeTransfer)
+		if statAction == nil {
+			t.Fatalf("Missing statistics action for code")
+		}
+
+		if statAction.Count != uint64(i+1) {
+			t.Fatalf("Wrong statistics action count : got %d, want %d", statAction.Count, i+1)
+		}
+
+		if statAction.RejectedCount != uint64(i+1) {
+			t.Fatalf("Wrong statistics action rejection count : got %d, want %d",
+				statAction.RejectedCount, i+1)
+		}
+
+		stats.Unlock()
 	}
 
 	agent.Release(ctx)
@@ -1289,7 +1672,7 @@ func Test_Transfers_Bitcoin_Approve(t *testing.T) {
 
 	agent, err := NewAgent(ctx, agentData, DefaultConfig(), test.Caches.Caches,
 		test.Caches.Transactions, test.Caches.Services, test.Locker, test.Store, broadcaster, nil,
-		nil, nil, nil, test.PeerChannelsFactory, test.PeerChannelResponses)
+		nil, nil, nil, test.PeerChannelsFactory, test.PeerChannelResponses, test.Statistics.Add)
 	if err != nil {
 		t.Fatalf("Failed to create agent : %s", err)
 	}
@@ -1587,6 +1970,71 @@ func Test_Transfers_Bitcoin_Approve(t *testing.T) {
 		if err := bitcoin_interpreter.VerifyTx(ctx, agentResponseTx); err != nil {
 			t.Fatalf("Failed to verify tx : %s", err)
 		}
+
+		time.Sleep(time.Millisecond) // wait for stats to process
+
+		stats, err := statistics.FetchContractValue(ctx, test.Caches.Cache,
+			state.CalculateContractHash(contractLockingScript), uint64(time.Now().UnixNano()))
+		if err != nil {
+			t.Fatalf("Failed to fetch contract statistics : %s", err)
+		}
+
+		js, _ = json.MarshalIndent(stats, "", "  ")
+		t.Logf("Stats : %s", js)
+
+		if stats == nil {
+			t.Fatalf("Missing contract statistics")
+		}
+
+		stats.Lock()
+
+		statAction := stats.GetAction(actions.CodeTransfer)
+		if statAction == nil {
+			t.Fatalf("Missing statistics action for code")
+		}
+
+		if statAction.Count != uint64(i+1) {
+			t.Fatalf("Wrong statistics action count : got %d, want %d", statAction.Count, i+1)
+		}
+
+		if statAction.RejectedCount != 0 {
+			t.Fatalf("Wrong statistics action rejection count : got %d, want %d",
+				statAction.RejectedCount, 0)
+		}
+
+		stats.Unlock()
+
+		stats, err = statistics.FetchInstrumentValue(ctx, test.Caches.Cache,
+			state.CalculateContractHash(contractLockingScript), instrument.InstrumentCode,
+			uint64(time.Now().UnixNano()))
+		if err != nil {
+			t.Fatalf("Failed to fetch instrument statistics : %s", err)
+		}
+
+		js, _ = json.MarshalIndent(stats, "", "  ")
+		t.Logf("Stats : %s", js)
+
+		if stats == nil {
+			t.Fatalf("Missing instrument statistics")
+		}
+
+		stats.Lock()
+
+		statAction = stats.GetAction(actions.CodeTransfer)
+		if statAction == nil {
+			t.Fatalf("Missing statistics action for code")
+		}
+
+		if statAction.Count != uint64(i+1) {
+			t.Fatalf("Wrong statistics action count : got %d, want %d", statAction.Count, i+1)
+		}
+
+		if statAction.RejectedCount != 0 {
+			t.Fatalf("Wrong statistics action rejection count : got %d, want %d",
+				statAction.RejectedCount, 0)
+		}
+
+		stats.Unlock()
 	}
 
 	agent.Release(ctx)

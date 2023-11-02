@@ -369,7 +369,9 @@ func (a *Agent) processProposal(ctx context.Context, transaction *transactions.T
 		contractFee += votingSystem.HolderProposalFee
 	}
 
+	contractFeeOutputIndex := -1
 	if contractFee > 0 {
+		contractFeeOutputIndex = len(voteTx.MsgTx.TxOut)
 		if err := voteTx.AddOutput(a.FeeLockingScript(), contractFee, true, false); err != nil {
 			return nil, errors.Wrap(err, "add contract fee")
 		}
@@ -452,6 +454,11 @@ func (a *Agent) processProposal(ctx context.Context, transaction *transactions.T
 
 		task := NewFinalizeVoteTask(cutOffTime, a.agentStore, agentLockingScript, voteTxID)
 		a.scheduler.Schedule(ctx, task)
+	}
+
+	if err := a.updateRequestStats(ctx, &tx, voteTx.MsgTx, actionIndex, contractFeeOutputIndex,
+		false, now); err != nil {
+		logger.Error(ctx, "Failed to update statistics : %s", err)
 	}
 
 	return etx, nil
@@ -720,7 +727,9 @@ func (a *Agent) processBallotCast(ctx context.Context, transaction *transactions
 	}
 
 	// Add the contract fee and holder proposal fee.
+	contractFeeOutputIndex := -1
 	if contractFee > 0 {
+		contractFeeOutputIndex = len(ballotCountedTx.MsgTx.TxOut)
 		if err := ballotCountedTx.AddOutput(a.FeeLockingScript(), contractFee, true,
 			false); err != nil {
 			return nil, errors.Wrap(err, "add contract fee")
@@ -772,6 +781,11 @@ func (a *Agent) processBallotCast(ctx context.Context, transaction *transactions
 
 	if err := a.AddResponse(ctx, txid, []bitcoin.Script{lockingScript}, false, etx); err != nil {
 		return etx, errors.Wrap(err, "respond")
+	}
+
+	if err := a.updateRequestStats(ctx, &tx, ballotCountedTx.MsgTx, actionIndex,
+		contractFeeOutputIndex, false, now); err != nil {
+		logger.Error(ctx, "Failed to update statistics : %s", err)
 	}
 
 	return etx, nil

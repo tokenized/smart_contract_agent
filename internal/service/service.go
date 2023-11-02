@@ -16,6 +16,7 @@ import (
 	"github.com/tokenized/smart_contract_agent/pkg/contract_services"
 	"github.com/tokenized/smart_contract_agent/pkg/locker"
 	"github.com/tokenized/smart_contract_agent/pkg/scheduler"
+	"github.com/tokenized/smart_contract_agent/pkg/statistics"
 	"github.com/tokenized/smart_contract_agent/pkg/transactions"
 	spynode "github.com/tokenized/spynode/pkg/client"
 
@@ -47,6 +48,7 @@ type Service struct {
 	scheduler            *scheduler.Scheduler
 	peerChannelsFactory  *peer_channels.Factory
 	peerChannelResponses chan agents.PeerChannelResponse
+	statistics           *statistics.Processor
 
 	nextSpyNodeMessageID uint64
 
@@ -59,7 +61,8 @@ func NewService(agentData agents.AgentData, config agents.Config, spyNodeClient 
 	store storage.StreamStorage, broadcaster agents.Broadcaster, fetcher agents.Fetcher,
 	headers agents.BlockHeaders, scheduler *scheduler.Scheduler,
 	peerChannelsFactory *peer_channels.Factory,
-	peerChannelResponses chan agents.PeerChannelResponse) *Service {
+	peerChannelResponses chan agents.PeerChannelResponse,
+	statistics *statistics.Processor) *Service {
 
 	return &Service{
 		agentData:            agentData,
@@ -76,6 +79,7 @@ func NewService(agentData agents.AgentData, config agents.Config, spyNodeClient 
 		scheduler:            scheduler,
 		peerChannelsFactory:  peerChannelsFactory,
 		peerChannelResponses: peerChannelResponses,
+		statistics:           statistics,
 		nextSpyNodeMessageID: 1,
 	}
 }
@@ -99,7 +103,7 @@ func (s *Service) Load(ctx context.Context) error {
 
 	agent, err := agents.NewAgent(ctx, s.agentData, s.config, s.caches, s.transactions, s.services,
 		s.locker, s.store, s.broadcaster, s.fetcher, s.headers, s.scheduler, s,
-		s.peerChannelsFactory, s.peerChannelResponses)
+		s.peerChannelsFactory, s.peerChannelResponses, s.statistics.Add)
 	if err != nil {
 		return errors.Wrap(err, "new agent")
 	}
