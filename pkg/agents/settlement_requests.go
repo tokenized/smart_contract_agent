@@ -97,21 +97,52 @@ func (a *Agent) processSettlementRequest(ctx context.Context, transaction *trans
 
 	// If there is already a reject to the transfer transaction from the first contract then ignore
 	// this request.
-	processed := transaction.ContractProcessed(a.ContractHash(), transferOutputIndex)
-	if len(processed) > 0 {
-		transferTransaction.Unlock()
-
-		logger.InfoWithFields(ctx, []logger.Field{
-			logger.Stringer("contract_locking_script", agentLockingScript),
-			logger.Stringer("transfer_txid", transferTxID),
-			logger.Int("action_index", transferOutputIndex),
-			logger.Stringer("response_txid", processed[0].ResponseTxID),
-		}, "Transfer action already rejected by first contract")
-
-		return nil, nil
-	}
-
+	txid := transaction.GetTxID()
+	processed := transferTransaction.ContractProcessed(a.ContractHash(), transferOutputIndex)
 	transferTransaction.Unlock()
+	for _, p := range processed {
+		if p.ResponseTxID == nil || p.ResponseTxID.Equal(&txid) {
+			continue
+		}
+
+		responseTransaction, err := a.transactions.Get(ctx, *p.ResponseTxID)
+		if err != nil {
+			return nil, errors.Wrap(err, "get response transaction")
+		}
+
+		if responseTransaction == nil {
+			continue
+		}
+		defer a.transactions.Release(ctx, *p.ResponseTxID)
+
+		responseTransaction.Lock()
+		responseOutputCount := responseTransaction.OutputCount()
+		isComplete := false
+		for i := 0; i < responseOutputCount; i++ {
+			output := responseTransaction.Output(i)
+			action, err := protocol.Deserialize(output.LockingScript, config.IsTest)
+			if err != nil {
+				continue
+			}
+
+			switch action.(type) {
+			case *actions.Settlement, *actions.Rejection:
+				isComplete = true
+			}
+		}
+		responseTransaction.Unlock()
+
+		if isComplete {
+			logger.InfoWithFields(ctx, []logger.Field{
+				logger.Stringer("contract_locking_script", agentLockingScript),
+				logger.Stringer("transfer_txid", transferTxID),
+				logger.Int("action_index", transferOutputIndex),
+				logger.Stringer("response_txid", processed[0].ResponseTxID),
+			}, "Transfer action already completed")
+
+			return nil, nil
+		}
+	}
 
 	transferContracts, err := parseTransferContracts(transferTransaction, transfer,
 		agentLockingScript)
@@ -148,6 +179,7 @@ func (a *Agent) processSettlementRequest(ctx context.Context, transaction *trans
 	instrumentCodes := make([]state.InstrumentCode, len(transferContracts.Outputs))
 	allSenderLockingScripts := make([][]bitcoin.Script, len(transferContracts.Outputs))
 	allReceiverLockingScripts := make([][]bitcoin.Script, len(transferContracts.Outputs))
+	transferFees := make([]*wire.TxOut, len(transferContracts.Outputs))
 	for _, contractLockingScript := range transferContracts.LockingScripts {
 		for instrumentIndex, contractOutput := range transferContracts.Outputs {
 			if !contractOutput.LockingScript.Equal(contractLockingScript) {
@@ -191,6 +223,24 @@ func (a *Agent) processSettlementRequest(ctx context.Context, transaction *trans
 					allBalances.Revert(transferTxID)
 					return nil, errors.Wrapf(err, "build settlement: %s", instrumentID)
 				}
+
+				instrument.Lock()
+				if instrument.Creation != nil && instrument.Creation.TransferFee != nil &&
+					len(instrument.Creation.TransferFee.Address) > 0 &&
+					instrument.Creation.TransferFee.Quantity > 0 {
+
+					ra, err := bitcoin.DecodeRawAddress(instrument.Creation.TransferFee.Address)
+					if err == nil {
+						ls, err := ra.LockingScript()
+						if err == nil {
+							transferFees[instrumentIndex] = &wire.TxOut{
+								LockingScript: ls,
+								Value:         instrument.Creation.TransferFee.Quantity,
+							}
+						}
+					}
+				}
+				instrument.Unlock()
 
 				instruments[instrumentIndex] = instrument
 				instrumentCodes[instrumentIndex] = instrumentCode
@@ -345,6 +395,42 @@ func (a *Agent) processSettlementRequest(ctx context.Context, transaction *trans
 			}
 		}
 
+		for _, instrumentTransferFee := range settlementRequest.TransferFees {
+			if instrumentTransferFee.Quantity == 0 {
+				continue
+			}
+
+			ra, err := bitcoin.DecodeRawAddress(instrumentTransferFee.Address)
+			if err != nil {
+				logger.Warn(ctx, "Invalid transfer fee address : %s", err)
+				allBalances.Revert(transferTxID)
+				return nil, platform.NewRejectError(actions.RejectionsMsgMalformed, err.Error())
+			}
+
+			lockingScript, err := ra.LockingScript()
+			if err != nil {
+				logger.Warn(ctx, "Invalid transfer fee locking script : %s", err)
+				allBalances.Revert(transferTxID)
+				return nil, platform.NewRejectError(actions.RejectionsMsgMalformed, err.Error())
+			}
+
+			if err := settlementTx.AddOutput(lockingScript, instrumentTransferFee.Quantity, false,
+				false); err != nil {
+				allBalances.Revert(transferTxID)
+				return nil, errors.Wrap(err, "add transfer fee")
+			}
+		}
+
+		// Add transfer fees for this contract
+		consolidatedTransferFees := consolidateOutputs(transferFees)
+		for _, transferFee := range consolidatedTransferFees {
+			if err := settlementTx.AddOutput(transferFee.LockingScript, transferFee.Value, false,
+				false); err != nil {
+				allBalances.Revert(transferTxID)
+				return nil, errors.Wrap(err, "add transfer fee")
+			}
+		}
+
 		// Add the contract fee for this agent.
 		if contractFee > 0 {
 			if err := settlementTx.AddOutput(a.FeeLockingScript(), contractFee, true,
@@ -388,18 +474,8 @@ func (a *Agent) processSettlementRequest(ctx context.Context, transaction *trans
 		return etx, nil
 	}
 
-	feeLockingScript := a.FeeLockingScript()
-	feeRawAddress, _ := bitcoin.RawAddressFromLockingScript(feeLockingScript)
-
-	// Create settlement request for the next contract agent.
-	settlementRequest.ContractFees = append(settlementRequest.ContractFees,
-		&messages.TargetAddressField{
-			Address:  feeRawAddress.Bytes(),
-			Quantity: a.ContractFee(),
-		})
-
 	etx, err := a.createSettlementRequest(ctx, transaction, transferTransaction, outputIndex,
-		transfer, transferContracts, allBalances, settlement, now)
+		transfer, transferContracts, allBalances, settlement, settlementRequest, transferFees, now)
 	if err != nil {
 		allBalances.Revert(transferTxID)
 		return nil, errors.Wrap(err, "send settlement request")
@@ -470,7 +546,8 @@ func (a *Agent) buildExternalSettlement(ctx context.Context, settlementTx *txbui
 func (a *Agent) createSettlementRequest(ctx context.Context,
 	currentTransaction, transferTransaction *transactions.Transaction, currentOutputIndex int,
 	transfer *actions.Transfer, transferContracts *TransferContracts, balances state.BalanceSet,
-	settlement *actions.Settlement, now uint64) (*expanded_tx.ExpandedTx, error) {
+	settlement *actions.Settlement, previousSettlementRequest *messages.SettlementRequest,
+	transferFees []*wire.TxOut, now uint64) (*expanded_tx.ExpandedTx, error) {
 
 	if len(transferContracts.NextLockingScript) == 0 {
 		return nil, errors.New("Next locking script missing for send settlement request")
@@ -529,6 +606,11 @@ func (a *Agent) createSettlementRequest(ctx context.Context,
 		Settlement:   settlementScript,
 	}
 
+	if previousSettlementRequest != nil {
+		settlementRequest.ContractFees = previousSettlementRequest.ContractFees
+		settlementRequest.TransferFees = previousSettlementRequest.TransferFees
+	}
+
 	contractFee := a.ContractFee()
 	if contractFee != 0 {
 		ra, err := bitcoin.RawAddressFromLockingScript(a.FeeLockingScript())
@@ -536,12 +618,27 @@ func (a *Agent) createSettlementRequest(ctx context.Context,
 			return nil, errors.Wrap(err, "agent raw address")
 		}
 
-		settlementRequest.ContractFees = []*messages.TargetAddressField{
-			{
+		settlementRequest.ContractFees = append(settlementRequest.ContractFees,
+			&messages.TargetAddressField{
 				Address:  ra.Bytes(),
 				Quantity: contractFee,
 			},
+		)
+	}
+
+	consolidatedTransferFees := consolidateOutputs(transferFees)
+	for _, transferFee := range consolidatedTransferFees {
+		ra, err := bitcoin.RawAddressFromLockingScript(transferFee.LockingScript)
+		if err != nil {
+			return nil, errors.Wrap(err, "transfer fee raw address")
 		}
+
+		settlementRequest.TransferFees = append(settlementRequest.TransferFees,
+			&messages.TargetAddressField{
+				Address:  ra.Bytes(),
+				Quantity: transferFee.Value,
+			},
+		)
 	}
 
 	payloadBuffer := &bytes.Buffer{}
@@ -627,7 +724,7 @@ func (a *Agent) createSettlementRequest(ctx context.Context,
 func (a *Agent) createSettlementRequestRejection(ctx context.Context,
 	transaction *transactions.Transaction, outputIndex int,
 	settlementRequest *messages.SettlementRequest,
-	rejectError platform.RejectError) (*expanded_tx.ExpandedTx, error) {
+	rejectError platform.RejectError) ([]*expanded_tx.ExpandedTx, error) {
 
 	agentLockingScript := a.LockingScript()
 
@@ -694,18 +791,40 @@ func (a *Agent) createSettlementRequestRejection(ctx context.Context,
 			return nil, errors.Wrap(err, "create transfer rejection")
 		}
 
-		return etx, nil
+		return []*expanded_tx.ExpandedTx{etx}, nil
 	}
 
 	// Create rejection of the settlement request to the previous contract.
 	rejectError.ReceiverLockingScript = transferContracts.PriorContractLockingScript()
 	rejectError.OutputIndex = -1
 
-	// TODO This should also spend the contract's output from the transfer transaction. --ce
+	var etxs []*expanded_tx.ExpandedTx
 	etx, err := a.createRejection(ctx, transaction, outputIndex, -1, rejectError)
 	if err != nil {
 		return nil, errors.Wrap(err, "create settlement request rejection")
 	}
+	etxs = append(etxs, etx)
 
-	return etx, nil
+	transferTransaction.Lock()
+	processed := transferTransaction.ContractProcessed(a.ContractHash(), transferOutputIndex)
+	transferTransaction.Unlock()
+	if len(processed) == 0 {
+		logger.InfoWithFields(ctx, []logger.Field{
+			logger.Stringer("transfer_txid", transferTxID),
+		}, "Creating rejection for transfer transaction")
+
+		transferRejectError := rejectError.Copy()
+		rejectError.ReceiverLockingScript = nil
+		rejectError.InputIndex = -1
+		rejectError.OutputIndex = -1
+
+		etx, err := a.createRejection(ctx, transferTransaction, transferOutputIndex, -1,
+			transferRejectError)
+		if err != nil {
+			return nil, errors.Wrap(err, "create settlement request rejection")
+		}
+		etxs = append(etxs, etx)
+	}
+
+	return etxs, nil
 }

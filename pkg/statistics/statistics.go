@@ -42,6 +42,7 @@ type Action struct {
 	InputCount    uint64 `bsor:"4" json:"input_count"`  // inputs relevant to the action (not tx funding)
 	OutputCount   uint64 `bsor:"5" json:"output_count"` // outputs relevant to the action (not the paylod or tx funding)
 	ContractFees  uint64 `bsor:"6" json:"contract_fees"`
+	TransferFees  uint64 `bsor:"7" json:"transfer_fees"`
 }
 
 type Update struct {
@@ -54,6 +55,7 @@ type Update struct {
 	InputCount   uint64
 	OutputCount  uint64
 	ContractFees uint64
+	TransferFees uint64
 }
 
 type AddUpdate func(context.Context, *Update) error
@@ -81,6 +83,7 @@ func (s *Statistics) Apply(update *Update) {
 	action.InputCount += update.InputCount
 	action.OutputCount += update.OutputCount
 	action.ContractFees += update.ContractFees
+	action.TransferFees += update.TransferFees
 
 	s.MarkModified()
 }

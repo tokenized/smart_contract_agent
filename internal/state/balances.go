@@ -215,14 +215,14 @@ func (c *BalanceCache) ReleaseMulti(ctx context.Context, contractLockingScript b
 	}
 
 	pathPrefix := balancePathPrefix(contractLockingScript, instrumentCode)
-	hashes := make([]bitcoin.Hash32, len(balances))
-	for i, balance := range balances {
+	var hashes []bitcoin.Hash32
+	for _, balance := range balances {
 		if balance == nil {
 			continue
 		}
 
 		balance.Lock()
-		hashes[i] = LockingScriptHash(balance.LockingScript)
+		hashes = append(hashes, LockingScriptHash(balance.LockingScript))
 		balance.Unlock()
 	}
 

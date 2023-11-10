@@ -178,7 +178,7 @@ func (a *Agent) processNonRelevantMessage(ctx context.Context, transaction *tran
 // which is just contract to contract.
 func (a *Agent) createMessageRejection(ctx context.Context, transaction *transactions.Transaction,
 	message *actions.Message, actionIndex int,
-	rejectError platform.RejectError) (*expanded_tx.ExpandedTx, error) {
+	rejectError platform.RejectError) ([]*expanded_tx.ExpandedTx, error) {
 
 	payload, err := messages.Deserialize(message.MessageCode, message.MessagePayload)
 	if err != nil {
@@ -191,16 +191,16 @@ func (a *Agent) createMessageRejection(ctx context.Context, transaction *transac
 		logger.String("message_type", payload.TypeName()),
 	}, "Message type")
 
-	var etx *expanded_tx.ExpandedTx
+	var etxs []*expanded_tx.ExpandedTx
 	switch p := payload.(type) {
 	case *messages.SettlementRequest:
-		etx, err = a.createSettlementRequestRejection(ctx, transaction, actionIndex, p, rejectError)
+		etxs, err = a.createSettlementRequestRejection(ctx, transaction, actionIndex, p, rejectError)
 		if err != nil {
 			err = errors.Wrap(err, "settlement request")
 		}
 
 	case *messages.SignatureRequest:
-		etx, err = a.createSignatureRequestRejection(ctx, transaction, actionIndex, p, rejectError)
+		etxs, err = a.createSignatureRequestRejection(ctx, transaction, actionIndex, p, rejectError)
 		if err != nil {
 			err = errors.Wrap(err, "signature request")
 		}
@@ -210,5 +210,5 @@ func (a *Agent) createMessageRejection(ctx context.Context, transaction *transac
 		err = nil
 	}
 
-	return etx, err
+	return etxs, err
 }

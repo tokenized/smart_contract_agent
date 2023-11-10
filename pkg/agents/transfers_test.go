@@ -33,6 +33,94 @@ func Test_Transfers_Basic(t *testing.T) {
 	RunTest_Transfers_Basic(ctx, t, store, cache)
 }
 
+func Test_Transfers_TransferFee_Success(t *testing.T) {
+	ctx := logger.ContextWithLogger(context.Background(), true, true, "")
+	store := storage.NewMockStorage()
+	cache := cacher.NewSimpleCache(store)
+
+	RunTest_Transfers_TransferFee_Success(ctx, t, store, cache)
+}
+
+func Test_Transfers_TransferFee_Reject(t *testing.T) {
+	ctx := logger.ContextWithLogger(context.Background(), true, true, "")
+	store := storage.NewMockStorage()
+	cache := cacher.NewSimpleCache(store)
+
+	RunTest_Transfers_TransferFee_Reject(ctx, t, store, cache)
+}
+
+func Test_Transfers_Multi_Basic(t *testing.T) {
+	ctx := logger.ContextWithLogger(context.Background(), true, true, "")
+	store := storage.NewMockStorage()
+	cache := cacher.NewSimpleCache(store)
+
+	RunTest_Transfers_Multi_Basic(ctx, t, store, cache, 100, time.Millisecond)
+
+	if !cache.IsEmpty(ctx) {
+		t.Fatalf("Cache not empty")
+	}
+}
+
+func Test_Transfers_Multi_TransferFee_Success(t *testing.T) {
+	ctx := logger.ContextWithLogger(context.Background(), true, true, "")
+	store := storage.NewMockStorage()
+	cache := cacher.NewSimpleCache(store)
+
+	RunTest_Transfers_Multi_TransferFee_Success(ctx, t, store, cache, 100, time.Millisecond)
+
+	if !cache.IsEmpty(ctx) {
+		t.Fatalf("Cache not empty")
+	}
+}
+
+func Test_Transfers_Multi_TransferFee_Reject_First(t *testing.T) {
+	ctx := logger.ContextWithLogger(context.Background(), true, true, "")
+	store := storage.NewMockStorage()
+	cache := cacher.NewSimpleCache(store)
+
+	RunTest_Transfers_Multi_TransferFee_Reject_First(ctx, t, store, cache, 100, time.Millisecond)
+
+	if !cache.IsEmpty(ctx) {
+		t.Fatalf("Cache not empty")
+	}
+}
+
+func Test_Transfers_Multi_TransferFee_Reject_Second(t *testing.T) {
+	ctx := logger.ContextWithLogger(context.Background(), true, true, "")
+	store := storage.NewMockStorage()
+	cache := cacher.NewSimpleCache(store)
+
+	RunTest_Transfers_Multi_TransferFee_Reject_Second(ctx, t, store, cache, 100, time.Millisecond)
+
+	if !cache.IsEmpty(ctx) {
+		t.Fatalf("Cache not empty")
+	}
+}
+
+func Test_Transfers_Multi_Expire(t *testing.T) {
+	ctx := logger.ContextWithLogger(context.Background(), true, true, "")
+	store := storage.NewMockStorage()
+	cache := cacher.NewSimpleCache(store)
+
+	RunTest_Transfers_Multi_Expire(ctx, t, store, cache)
+}
+
+func Test_Transfers_Multi_Reject_First(t *testing.T) {
+	ctx := logger.ContextWithLogger(context.Background(), true, true, "")
+	store := storage.NewMockStorage()
+	cache := cacher.NewSimpleCache(store)
+
+	RunTest_Transfers_Multi_Reject_First(ctx, t, store, cache)
+}
+
+func Test_Transfers_Multi_Reject_Second(t *testing.T) {
+	ctx := logger.ContextWithLogger(context.Background(), true, true, "")
+	store := storage.NewMockStorage()
+	cache := cacher.NewSimpleCache(store)
+
+	RunTest_Transfers_Multi_Reject_Second(ctx, t, store, cache)
+}
+
 // Test_Transfers_InsufficientQuantity creates a transfer action for locking scripts that don't have
 // any tokens and will be rejected for insufficient quantity.
 func Test_Transfers_InsufficientQuantity(t *testing.T) {
@@ -1307,18 +1395,6 @@ func Test_Transfers_IdentityOracle_BadSignature(t *testing.T) {
 	}
 }
 
-func Test_Transfers_Multi_Basic(t *testing.T) {
-	ctx := logger.ContextWithLogger(context.Background(), true, true, "")
-	store := storage.NewMockStorage()
-	cache := cacher.NewSimpleCache(store)
-
-	RunTest_Transfers_Multi_Basic(ctx, t, store, cache, 100, time.Millisecond)
-
-	if !cache.IsEmpty(ctx) {
-		t.Fatalf("Cache not empty")
-	}
-}
-
 func Test_Transfers_Bitcoin_Refund(t *testing.T) {
 	ctx := logger.ContextWithLogger(context.Background(), true, true, "")
 	test := StartTestData(ctx, t)
@@ -2041,30 +2117,6 @@ func Test_Transfers_Bitcoin_Approve(t *testing.T) {
 	test.Caches.Caches.Instruments.Release(ctx, contractLockingScript, instrument.InstrumentCode)
 	test.Caches.Caches.Contracts.Release(ctx, contractLockingScript)
 	StopTestAgent(ctx, t, test)
-}
-
-func Test_Transfers_Multi_Expire(t *testing.T) {
-	ctx := logger.ContextWithLogger(context.Background(), true, true, "")
-	store := storage.NewMockStorage()
-	cache := cacher.NewSimpleCache(store)
-
-	RunTest_Transfers_Multi_Expire(ctx, t, store, cache)
-}
-
-func Test_Transfers_Multi_Reject_First(t *testing.T) {
-	ctx := logger.ContextWithLogger(context.Background(), true, true, "")
-	store := storage.NewMockStorage()
-	cache := cacher.NewSimpleCache(store)
-
-	RunTest_Transfers_Multi_Reject_First(ctx, t, store, cache)
-}
-
-func Test_Transfers_Multi_Reject_Second(t *testing.T) {
-	ctx := logger.ContextWithLogger(context.Background(), true, true, "")
-	store := storage.NewMockStorage()
-	cache := cacher.NewSimpleCache(store)
-
-	RunTest_Transfers_Multi_Reject_Second(ctx, t, store, cache)
 }
 
 func Test_AgentBitcoinTransfer_Script(t *testing.T) {

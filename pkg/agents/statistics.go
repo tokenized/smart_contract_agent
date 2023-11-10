@@ -13,7 +13,24 @@ import (
 )
 
 func (a *Agent) updateRequestStats(ctx context.Context, requestTx, responseTx *wire.MsgTx,
-	requestOutputIndex, contractFeeOutputIndex int, wasRejected bool, now uint64) error {
+	requestOutputIndex, contractFeeOutputIndex int, wasRejected bool,
+	now uint64) error {
+
+	return a.updateRequestStatsFull(ctx, requestTx, responseTx, requestOutputIndex,
+		contractFeeOutputIndex, nil, wasRejected, now)
+}
+
+func (a *Agent) updateRequestStatsTransfer(ctx context.Context, requestTx, responseTx *wire.MsgTx,
+	requestOutputIndex, contractFeeOutputIndex int, transferFees []*wire.TxOut, wasRejected bool,
+	now uint64) error {
+
+	return a.updateRequestStatsFull(ctx, requestTx, responseTx, requestOutputIndex,
+		contractFeeOutputIndex, transferFees, wasRejected, now)
+}
+
+func (a *Agent) updateRequestStatsFull(ctx context.Context, requestTx, responseTx *wire.MsgTx,
+	requestOutputIndex, contractFeeOutputIndex int, transferFees []*wire.TxOut, wasRejected bool,
+	now uint64) error {
 
 	us := a.updateStats.Load()
 	if us == nil {
@@ -42,6 +59,15 @@ func (a *Agent) updateRequestStats(ctx context.Context, requestTx, responseTx *w
 		Code:         action.Code(),
 		WasRejected:  wasRejected,
 		ContractFees: contractFee,
+	}
+
+	if !wasRejected {
+		for _, transferFee := range transferFees {
+			if transferFee == nil {
+				continue
+			}
+			contractUpdate.TransferFees = transferFee.Value
+		}
 	}
 
 	switch act := action.(type) {
@@ -103,7 +129,7 @@ func (a *Agent) updateRequestStats(ctx context.Context, requestTx, responseTx *w
 		instrumentUpdates = append(instrumentUpdates, instrumentUpdate)
 
 	case *actions.Transfer:
-		for _, instrumentTransfer := range act.Instruments {
+		for instrumentIndex, instrumentTransfer := range act.Instruments {
 			if instrumentTransfer.InstrumentType == protocol.BSVInstrumentID {
 				continue
 			}
@@ -129,6 +155,11 @@ func (a *Agent) updateRequestStats(ctx context.Context, requestTx, responseTx *w
 				ContractFees:   contractFee,
 			}
 			instrumentUpdates = append(instrumentUpdates, instrumentUpdate)
+
+			if !wasRejected && len(transferFees) > instrumentIndex &&
+				transferFees[instrumentIndex] != nil {
+				instrumentUpdate.TransferFees = transferFees[instrumentIndex].Value
+			}
 
 			inputCount := uint64(len(instrumentTransfer.InstrumentSenders))
 			outputCount := uint64(len(instrumentTransfer.InstrumentReceivers))

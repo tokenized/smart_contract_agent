@@ -667,6 +667,7 @@ func (a *Agent) processAction(ctx context.Context, agentLockingScript bitcoin.Sc
 
 	logger.InfoWithFields(ctx, []logger.Field{
 		logger.MillisecondsFromNano("elapsed_ms", time.Since(start).Nanoseconds()),
+		logger.String("action_code", action.Code()),
 	}, "Processed action")
 
 	if responseEtx != nil {
@@ -685,13 +686,13 @@ func (a *Agent) processAction(ctx context.Context, agentLockingScript bitcoin.Sc
 
 				switch act := action.(type) {
 				case *actions.Message:
-					etx, err := a.createMessageRejection(ctx, transaction, act, actionIndex,
+					etxs, err := a.createMessageRejection(ctx, transaction, act, actionIndex,
 						rejectError)
 					if err != nil {
 						return errors.Wrap(err, "create rejection")
 					}
 
-					if etx != nil {
+					for _, etx := range etxs {
 						logger.InfoWithFields(ctx, []logger.Field{
 							logger.Stringer("response_txid", etx.TxID()),
 						}, "Broadcasting response")

@@ -134,8 +134,8 @@ func (a *Agent) CancelPendingTransfer(ctx context.Context,
 			continue
 		}
 
-		if a, ok := action.(*actions.Transfer); ok {
-			transfer = a
+		if act, ok := action.(*actions.Transfer); ok {
+			transfer = act
 			transferOutputIndex = i
 		}
 	}

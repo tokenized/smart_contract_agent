@@ -147,7 +147,7 @@ func Test_Transfers_Random_Multi_Contract_P2PKH(t *testing.T) {
 func MockExecuteTransferRandom(t *testing.T, ctx context.Context, agent *agents.Agent,
 	test *agents.TestData, senderCount int, useMulti bool) {
 
-	var balances []*state.MockBalance
+	var balances []*state.MockBalanceData
 	if useMulti {
 		signerCount := mathRand.Intn(5) + 1
 		signerThreshold := mathRand.Intn(signerCount) + 1
@@ -382,8 +382,8 @@ func MockExecuteTransferRandom(t *testing.T, ctx context.Context, agent *agents.
 func MockExecuteTransferRandomBitcoin(t *testing.T, ctx context.Context, agent *agents.Agent,
 	test *agents.TestData, senderCount int, useMulti bool) {
 
-	var balances []*state.MockBalance
-	var bitcoinBalances []*state.MockBalance
+	var balances []*state.MockBalanceData
+	var bitcoinBalances []*state.MockBalanceData
 	if useMulti {
 		signerCount := mathRand.Intn(5) + 1
 		signerThreshold := mathRand.Intn(signerCount) + 1
@@ -412,7 +412,7 @@ func MockExecuteTransferRandomBitcoin(t *testing.T, ctx context.Context, agent *
 
 			quantity := uint64(mathRand.Intn(100000000) + 1)
 
-			bitcoinBalances = append(bitcoinBalances, &state.MockBalance{
+			bitcoinBalances = append(bitcoinBalances, &state.MockBalanceData{
 				Keys:          keys,
 				LockingScript: lockingScript,
 				Quantity:      quantity,
@@ -426,7 +426,7 @@ func MockExecuteTransferRandomBitcoin(t *testing.T, ctx context.Context, agent *
 			key, lockingScript, _ := state.MockKey()
 			quantity := uint64(mathRand.Intn(100000000) + 1)
 
-			bitcoinBalances = append(bitcoinBalances, &state.MockBalance{
+			bitcoinBalances = append(bitcoinBalances, &state.MockBalanceData{
 				Keys:          []bitcoin.Key{key},
 				LockingScript: lockingScript,
 				Quantity:      quantity,
@@ -725,7 +725,7 @@ func MockExecuteTransferMultiContractRandom(t *testing.T, ctx context.Context,
 	test *agents.TestData, agent1, agent2 *agents.TestAgentData, senderCount int,
 	useMulti bool) {
 
-	var balances1, balances2 []*state.MockBalance
+	var balances1, balances2 []*state.MockBalanceData
 	if useMulti {
 		signerCount := mathRand.Intn(5) + 1
 		signerThreshold := mathRand.Intn(signerCount) + 1

@@ -32,7 +32,7 @@ type InstrumentCache struct {
 type Instrument struct {
 	InstrumentType [3]byte                     `bsor:"1" json:"instrument_type"`
 	InstrumentCode InstrumentCode              `bsor:"2" json:"instrument_id"`
-	Creation       *actions.InstrumentCreation `bsor:"3" json:"creation`
+	Creation       *actions.InstrumentCreation `bsor:"3" json:"creation"`
 	CreationTxID   *bitcoin.Hash32             `bsor:"4" json:"creation_txid"`
 
 	FreezeTimestamp *uint64         `bsor:"5" json:"freeze_timestamp"`

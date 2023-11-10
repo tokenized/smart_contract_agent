@@ -92,6 +92,7 @@ func (a *Agent) processTransfer(ctx context.Context, transaction *transactions.T
 	allBalances := make(state.BalanceSet, len(transfer.Instruments))
 	allSenderLockingScripts := make([][]bitcoin.Script, len(transfer.Instruments))
 	allReceiverLockingScripts := make([][]bitcoin.Script, len(transfer.Instruments))
+	transferFees := make([]*wire.TxOut, len(transfer.Instruments))
 	for index, instrumentTransfer := range transfer.Instruments {
 		if instrumentTransfer.InstrumentType == protocol.BSVInstrumentID {
 			continue
@@ -123,6 +124,24 @@ func (a *Agent) processTransfer(ctx context.Context, transaction *transactions.T
 		if err != nil {
 			return nil, errors.Wrapf(err, "build settlement: %s", instrumentID)
 		}
+
+		instrument.Lock()
+		if instrument.Creation != nil && instrument.Creation.TransferFee != nil &&
+			len(instrument.Creation.TransferFee.Address) > 0 &&
+			instrument.Creation.TransferFee.Quantity > 0 {
+
+			ra, err := bitcoin.DecodeRawAddress(instrument.Creation.TransferFee.Address)
+			if err == nil {
+				ls, err := ra.LockingScript()
+				if err == nil {
+					transferFees[index] = &wire.TxOut{
+						LockingScript: ls,
+						Value:         instrument.Creation.TransferFee.Quantity,
+					}
+				}
+			}
+		}
+		instrument.Unlock()
 
 		instruments[index] = instrument
 		instrumentCodes[index] = instrumentCode
@@ -265,6 +284,15 @@ func (a *Agent) processTransfer(ctx context.Context, transaction *transactions.T
 		}
 	}
 
+	consolidatedTransferFees := consolidateOutputs(transferFees)
+	for _, transferFee := range consolidatedTransferFees {
+		if err := settlementTx.AddOutput(transferFee.LockingScript, transferFee.Value, false,
+			false); err != nil {
+			allBalances.Revert(txid)
+			return nil, errors.Wrap(err, "add transfer fee")
+		}
+	}
+
 	// Add the contract fee
 	contractFeeOutputIndex := -1
 	if contractFee > 0 {
@@ -282,7 +310,7 @@ func (a *Agent) processTransfer(ctx context.Context, transaction *transactions.T
 	if transferContracts.IsMultiContract() {
 		// Send a settlement request to the next contract.
 		etx, err := a.createSettlementRequest(ctx, transaction, transaction, actionIndex, transfer,
-			transferContracts, allBalances, settlement, now)
+			transferContracts, allBalances, settlement, nil, transferFees, now)
 		if err != nil {
 			return etx, errors.Wrap(err, "send settlement request")
 		}
@@ -301,13 +329,37 @@ func (a *Agent) processTransfer(ctx context.Context, transaction *transactions.T
 	}
 
 	etx, err := a.completeSettlement(ctx, transaction, actionIndex, txid, settlementTx,
-		settlementScriptOutputIndex, allBalances, contractFeeOutputIndex, now)
+		settlementScriptOutputIndex, allBalances, contractFeeOutputIndex, transferFees, now)
 	if err != nil {
 		allBalances.Revert(txid)
 		return etx, errors.Wrap(err, "complete settlement")
 	}
 
 	return etx, nil
+}
+
+// consolidateOutputs consolidates the value of outputs with the same locking scripts.
+func consolidateOutputs(txouts []*wire.TxOut) []*wire.TxOut {
+	var result []*wire.TxOut
+	for _, txout := range txouts {
+		if txout == nil || txout.Value == 0 {
+			continue
+		}
+
+		found := false
+		for _, txo := range result {
+			if txo.LockingScript.Equal(txout.LockingScript) {
+				found = true
+				txo.Value += txout.Value
+			}
+		}
+
+		if !found {
+			result = append(result, txout)
+		}
+	}
+
+	return result
 }
 
 func (a *Agent) buildBitcoinTransfer(ctx context.Context, transferTransaction *transactions.Transaction,
@@ -506,7 +558,7 @@ func (a *Agent) buildBitcoinTransfer(ctx context.Context, transferTransaction *t
 func (a *Agent) completeSettlement(ctx context.Context, transferTransaction *transactions.Transaction,
 	transferOutputIndex int, transferTxID bitcoin.Hash32, settlementTx *txbuilder.TxBuilder,
 	settlementScriptOutputIndex int, balances state.BalanceSet, contractFeeOutputIndex int,
-	now uint64) (*expanded_tx.ExpandedTx, error) {
+	transferFees []*wire.TxOut, now uint64) (*expanded_tx.ExpandedTx, error) {
 
 	settlementTxID := *settlementTx.MsgTx.TxHash()
 	settlementTransaction, err := a.transactions.AddRaw(ctx, settlementTx.MsgTx, nil)
@@ -542,8 +594,8 @@ func (a *Agent) completeSettlement(ctx context.Context, transferTransaction *tra
 		return etx, errors.Wrap(err, "respond")
 	}
 
-	if err := a.updateRequestStats(ctx, &transferTx, settlementTx.MsgTx, transferOutputIndex,
-		contractFeeOutputIndex, false, now); err != nil {
+	if err := a.updateRequestStatsTransfer(ctx, &transferTx, settlementTx.MsgTx,
+		transferOutputIndex, contractFeeOutputIndex, transferFees, false, now); err != nil {
 		logger.Error(ctx, "Failed to update statistics : %s", err)
 	}
 

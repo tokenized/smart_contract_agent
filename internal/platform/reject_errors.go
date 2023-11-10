@@ -58,6 +58,22 @@ func NewRejectErrorFull(code int, message string, inputIndex, outputIndex int,
 	}
 }
 
+func (e RejectError) Copy() RejectError {
+	return RejectError{
+		Code:                  e.Code,
+		Message:               CopyString(e.Message),
+		InputIndex:            e.InputIndex,
+		OutputIndex:           e.OutputIndex,
+		ReceiverLockingScript: e.ReceiverLockingScript.Copy(),
+	}
+}
+
+func CopyString(s string) string {
+	result := make([]byte, len(s))
+	copy(result, s)
+	return string(result)
+}
+
 func (e RejectError) Label() string {
 	rejectData := actions.RejectionsData(e.Code)
 	if rejectData != nil {

@@ -5,10 +5,12 @@ import (
 	"context"
 	"crypto/rand"
 	"fmt"
+	"runtime/debug"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/tokenized/config"
 	"github.com/tokenized/pkg/bitcoin"
 	"github.com/tokenized/pkg/cacher"
 	"github.com/tokenized/pkg/expanded_tx"
@@ -89,7 +91,7 @@ type TestAgentData struct {
 }
 
 func (t *TestAgentData) ProcessTx(ctx context.Context,
-	etx *expanded_tx.ExpandedTx) *expanded_tx.ExpandedTx {
+	etx *expanded_tx.ExpandedTx) []*expanded_tx.ExpandedTx {
 
 	transaction, err := t.Caches.Transactions.AddExpandedTx(ctx, etx)
 	if err != nil {
@@ -119,9 +121,7 @@ func (t *TestAgentData) ProcessTx(ctx context.Context,
 		panic(fmt.Sprintf("Failed to process transaction : %s : %s", err, etx))
 	}
 
-	responseTx := t.Broadcaster.GetLastTx()
-	t.Broadcaster.ClearTxs()
-	return responseTx
+	return t.Broadcaster.GetAndClearTxs()
 }
 
 func TestProcessTx(ctx context.Context, agents []*TestAgentData,
@@ -131,15 +131,20 @@ func TestProcessTx(ctx context.Context, agents []*TestAgentData,
 	currentTx := etx
 	for {
 		var currentResponseTx *expanded_tx.ExpandedTx
+		println("TestProcessTx processing request", currentTx.TxID().String())
 		for _, agent := range agents {
-			responseTx := agent.ProcessTx(ctx, currentTx)
-			if responseTx != nil {
-				currentResponseTx = responseTx
-				responses = append(responses, responseTx)
+			responseTxs := agent.ProcessTx(ctx, currentTx)
+			if len(responseTxs) > 0 {
+				println("TestProcessTx response txs", len(responseTxs))
+				currentResponseTx = responseTxs[len(responseTxs)-1]
+				responses = append(responses, responseTxs...)
+			} else {
+				println("TestProcessTx no response txs")
 			}
 		}
 
 		if currentResponseTx == nil {
+			println("TestProcessTx complete")
 			return responses
 		}
 		currentTx = currentResponseTx
@@ -151,9 +156,9 @@ func TestProcessTxSingle(ctx context.Context, agents []*TestAgentData,
 
 	var responses []*expanded_tx.ExpandedTx
 	for _, agent := range agents {
-		responseTx := agent.ProcessTx(ctx, etx)
-		if responseTx != nil {
-			responses = append(responses, responseTx)
+		responseTxs := agent.ProcessTx(ctx, etx)
+		if len(responseTxs) > 0 {
+			responses = append(responses, responseTxs...)
 		}
 	}
 
@@ -227,6 +232,21 @@ func StartTestAgentWithCacherWithInstrument(ctx context.Context, t testing.TB,
 
 	test.ContractKey, test.ContractLockingScript, test.AdminKey, test.AdminLockingScript, test.Contract, test.Instrument = state.MockInstrument(ctx,
 		&test.Caches.TestCaches)
+	_, test.FeeLockingScript, _ = state.MockKey()
+
+	finalizeTestAgent(ctx, t, test)
+
+	return test.agent, test
+}
+
+func StartTestAgentWithCacherWithInstrumentTransferFee(ctx context.Context, t testing.TB,
+	store *storage.MockStorage, cache cacher.Cacher, transferFee uint64,
+	transferFeeLockingScript bitcoin.Script) (*Agent, *TestData) {
+
+	test := prepareTestDataWithCacher(ctx, t, store, cache)
+
+	test.ContractKey, test.ContractLockingScript, test.AdminKey, test.AdminLockingScript, test.Contract, test.Instrument = state.MockInstrumentWithTransferFee(ctx,
+		&test.Caches.TestCaches, transferFee, transferFeeLockingScript)
 	_, test.FeeLockingScript, _ = state.MockKey()
 
 	finalizeTestAgent(ctx, t, test)
@@ -375,7 +395,10 @@ func prepareTestDataWithCacher(ctx context.Context, t testing.TB, store *storage
 		t.Fatalf("Transactions is nil")
 	}
 
-	test.mockStore = NewMockStore(DefaultConfig(), test.FeeLockingScript, test.Caches.Caches,
+	agentConfig := DefaultConfig()
+	agentConfig.MultiContractExpiration = config.NewDuration(time.Second)
+
+	test.mockStore = NewMockStore(agentConfig, test.FeeLockingScript, test.Caches.Caches,
 		test.Caches.Transactions, test.Caches.Services, test.Locker, test.Store, test.Broadcaster,
 		nil, nil, test.scheduler, test.PeerChannelsFactory, test.PeerChannelResponses,
 		test.Statistics)
@@ -386,7 +409,7 @@ func prepareTestDataWithCacher(ctx context.Context, t testing.TB, store *storage
 	go func() {
 		defer func() {
 			if err := recover(); err != nil {
-				t.Errorf("Scheduler panic : %s", err)
+				t.Errorf("Scheduler panic : %s : %s", err, string(debug.Stack()))
 			}
 		}()
 
@@ -400,7 +423,7 @@ func prepareTestDataWithCacher(ctx context.Context, t testing.TB, store *storage
 	go func() {
 		defer func() {
 			if err := recover(); err != nil {
-				t.Errorf("Scheduler panic : %s", err)
+				t.Errorf("Statistics panic : %s : %s", err, string(debug.Stack()))
 			}
 		}()
 
@@ -518,7 +541,8 @@ func StartTestCachesWithCacher(ctx context.Context, t testing.TB, cache cacher.C
 }
 
 type MockStore struct {
-	data []*AgentData
+	data   []*AgentData
+	agents []*Agent
 
 	config               Config
 	feeLockingScript     bitcoin.Script
@@ -568,10 +592,25 @@ func (f *MockStore) Add(data AgentData) {
 	f.data = append(f.data, &data)
 }
 
+func (f *MockStore) AddAgent(agent *Agent) {
+	f.lock.Lock()
+	defer f.lock.Unlock()
+
+	f.agents = append(f.agents, agent)
+}
+
 func (f *MockStore) GetAgent(ctx context.Context,
 	lockingScript bitcoin.Script) (*Agent, error) {
 	f.lock.Lock()
 	defer f.lock.Unlock()
+
+	for _, a := range f.agents {
+		if a.LockingScript().Equal(lockingScript) {
+			// Get from contracts so it can be released
+			f.caches.Contracts.Get(ctx, lockingScript)
+			return a, nil
+		}
+	}
 
 	var data *AgentData
 	for _, d := range f.data {
@@ -591,6 +630,7 @@ func (f *MockStore) GetAgent(ctx context.Context,
 	if err != nil {
 		return nil, errors.Wrap(err, "new agent")
 	}
+	f.agents = append(f.agents, agent)
 
 	return agent, nil
 }

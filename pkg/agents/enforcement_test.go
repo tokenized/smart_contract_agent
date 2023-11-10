@@ -24,7 +24,7 @@ func Test_Freeze_Balances_Valid(t *testing.T) {
 	balances := state.MockBalances(ctx, &test.Caches.TestCaches, test.Contract, test.Instrument,
 		500)
 
-	var freezeBalances []*state.MockBalance
+	var freezeBalances []*state.MockBalanceData
 	var freezeQuantities []uint64
 	balanceIndex := 0
 	for i := 0; i < 100; i++ {

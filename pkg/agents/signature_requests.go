@@ -116,21 +116,52 @@ func (a *Agent) processSignatureRequest(ctx context.Context, transaction *transa
 
 	// If there is already a reject to the transfer transaction from the first contract then ignore
 	// this request.
-	processed := transaction.ContractProcessed(a.ContractHash(), transferOutputIndex)
-	if len(processed) > 0 {
-		transferTransaction.Unlock()
-
-		logger.InfoWithFields(ctx, []logger.Field{
-			logger.Stringer("contract_locking_script", agentLockingScript),
-			logger.Stringer("transfer_txid", transferTxID),
-			logger.Int("action_index", transferOutputIndex),
-			logger.Stringer("response_txid", processed[0].ResponseTxID),
-		}, "Transfer action already rejected by first contract")
-
-		return nil, nil
-	}
-
+	txid := transaction.GetTxID()
+	processed := transferTransaction.ContractProcessed(a.ContractHash(), transferOutputIndex)
 	transferTransaction.Unlock()
+	for _, p := range processed {
+		if p.ResponseTxID == nil || p.ResponseTxID.Equal(&txid) {
+			continue
+		}
+
+		responseTransaction, err := a.transactions.Get(ctx, *p.ResponseTxID)
+		if err != nil {
+			return nil, errors.Wrap(err, "get response transaction")
+		}
+
+		if responseTransaction == nil {
+			continue
+		}
+		defer a.transactions.Release(ctx, *p.ResponseTxID)
+
+		responseTransaction.Lock()
+		responseOutputCount := responseTransaction.OutputCount()
+		isComplete := false
+		for i := 0; i < responseOutputCount; i++ {
+			output := responseTransaction.Output(i)
+			action, err := protocol.Deserialize(output.LockingScript, config.IsTest)
+			if err != nil {
+				continue
+			}
+
+			switch action.(type) {
+			case *actions.Settlement, *actions.Rejection:
+				isComplete = true
+			}
+		}
+		responseTransaction.Unlock()
+
+		if isComplete {
+			logger.InfoWithFields(ctx, []logger.Field{
+				logger.Stringer("contract_locking_script", agentLockingScript),
+				logger.Stringer("transfer_txid", transferTxID),
+				logger.Int("action_index", transferOutputIndex),
+				logger.Stringer("response_txid", processed[0].ResponseTxID),
+			}, "Transfer action already completed")
+
+			return nil, nil
+		}
+	}
 
 	transferContracts, err := parseTransferContracts(transferTransaction, transfer,
 		agentLockingScript)
@@ -139,7 +170,8 @@ func (a *Agent) processSignatureRequest(ctx context.Context, transaction *transa
 	}
 
 	if transferContracts.IsFirstContract() {
-		processeds := transferTransaction.GetContractProcessed(a.ContractHash(), transferOutputIndex)
+		processeds := transferTransaction.GetContractProcessed(a.ContractHash(),
+			transferOutputIndex)
 		for _, processed := range processeds {
 			if processed.ResponseTxID == nil {
 				continue
@@ -185,6 +217,48 @@ func (a *Agent) processSignatureRequest(ctx context.Context, transaction *transa
 			}, "Action already processed")
 			return nil, nil
 		}
+	}
+
+	transferFees := make([]*wire.TxOut, len(transfer.Instruments))
+	for index, instrumentTransfer := range transfer.Instruments {
+		if instrumentTransfer.InstrumentType == protocol.BSVInstrumentID {
+			continue
+		}
+
+		if !agentLockingScript.Equal(transferContracts.Outputs[index].LockingScript) {
+			continue
+		}
+
+		var instrumentCode state.InstrumentCode
+		copy(instrumentCode[:], instrumentTransfer.InstrumentCode)
+
+		instrument, err := a.caches.Instruments.Get(ctx, agentLockingScript, instrumentCode)
+		if err != nil {
+			return nil, errors.Wrap(err, "get instrument")
+		}
+
+		if instrument == nil {
+			continue
+		}
+		defer a.caches.Instruments.Release(ctx, agentLockingScript, instrumentCode)
+
+		instrument.Lock()
+		if instrument.Creation != nil && instrument.Creation.TransferFee != nil &&
+			len(instrument.Creation.TransferFee.Address) > 0 &&
+			instrument.Creation.TransferFee.Quantity > 0 {
+
+			ra, err := bitcoin.DecodeRawAddress(instrument.Creation.TransferFee.Address)
+			if err == nil {
+				ls, err := ra.LockingScript()
+				if err == nil {
+					transferFees[index] = &wire.TxOut{
+						LockingScript: ls,
+						Value:         instrument.Creation.TransferFee.Quantity,
+					}
+				}
+			}
+		}
+		instrument.Unlock()
 	}
 
 	rejectOutputIndex := -1
@@ -287,6 +361,20 @@ func (a *Agent) processSignatureRequest(ctx context.Context, transaction *transa
 			continue
 		}
 
+		var instrumentCode state.InstrumentCode
+		copy(instrumentCode[:], instrumentSettlement.InstrumentCode)
+
+		instrument, err := a.caches.Instruments.Get(ctx, agentLockingScript, instrumentCode)
+		if err != nil {
+			return nil, errors.Wrap(err, "get instrument")
+		}
+
+		if instrument == nil {
+			return nil, platform.NewRejectErrorWithOutputIndex(actions.RejectionsInstrumentNotFound,
+				"", int(instrumentSettlement.ContractIndex))
+		}
+		defer a.caches.Instruments.Release(ctx, agentLockingScript, instrumentCode)
+
 		if err := a.verifyInstrumentSettlement(instrumentCtx, agentLockingScript,
 			instrumentCodes[index], settlementTx, allBalances[index], transferTxID,
 			instrumentSettlement, now); err != nil {
@@ -319,6 +407,17 @@ func (a *Agent) processSignatureRequest(ctx context.Context, transaction *transa
 
 			return nil, platform.NewRejectErrorFull(actions.RejectionsMsgMalformed,
 				"missing exchange fee output", 0, rejectOutputIndex, rejectLockingScript)
+		}
+	}
+
+	// Verify transfer fees
+	consolidatedTransferFees := consolidateOutputs(transferFees)
+	for _, transferFee := range consolidatedTransferFees {
+		if findBitcoinOutput(settlementTx.MsgTx, transferFee.LockingScript,
+			transferFee.Value) == -1 {
+			allBalances.Revert(transferTxID)
+			return nil, platform.NewRejectErrorFull(actions.RejectionsMsgMalformed,
+				"missing transfer fee output", 0, rejectOutputIndex, rejectLockingScript)
 		}
 	}
 
@@ -357,7 +456,7 @@ func (a *Agent) processSignatureRequest(ctx context.Context, transaction *transa
 	if transferContracts.IsFirstContract() {
 		etx, err := a.completeSettlement(ctx, transferTransaction, transferOutputIndex,
 			transferTxID, settlementTx, settlementScriptOutputIndex, allBalances,
-			contractFeeOutputIndex, now)
+			contractFeeOutputIndex, transferFees, now)
 		if err != nil {
 			allBalances.Revert(transferTxID)
 			return etx, errors.Wrap(err, "complete settlement")
@@ -633,7 +732,7 @@ func (a *Agent) createSignatureRequest(ctx context.Context,
 func (a *Agent) createSignatureRequestRejection(ctx context.Context,
 	transaction *transactions.Transaction, outputIndex int,
 	signatureRequest *messages.SignatureRequest,
-	rejectError platform.RejectError) (*expanded_tx.ExpandedTx, error) {
+	rejectError platform.RejectError) ([]*expanded_tx.ExpandedTx, error) {
 
 	agentLockingScript := a.LockingScript()
 
@@ -710,17 +809,40 @@ func (a *Agent) createSignatureRequestRejection(ctx context.Context,
 			return nil, errors.Wrap(err, "create transfer rejection")
 		}
 
-		return etx, nil
+		return []*expanded_tx.ExpandedTx{etx}, nil
 	}
 
 	// Create rejection of the settlement request to the previous contract.
 	rejectError.ReceiverLockingScript = transferContracts.PriorContractLockingScript()
 	rejectError.OutputIndex = -1
 
+	var etxs []*expanded_tx.ExpandedTx
 	etx, err := a.createRejection(ctx, transaction, outputIndex, -1, rejectError)
 	if err != nil {
 		return nil, errors.Wrap(err, "create settlement request rejection")
 	}
+	etxs = append(etxs, etx)
 
-	return etx, nil
+	transferTransaction.Lock()
+	processed := transferTransaction.ContractProcessed(a.ContractHash(), transferOutputIndex)
+	transferTransaction.Unlock()
+	if len(processed) == 0 {
+		logger.InfoWithFields(ctx, []logger.Field{
+			logger.Stringer("transfer_txid", transferTx.TxHash()),
+		}, "Creating rejection for transfer transaction")
+
+		transferRejectError := rejectError.Copy()
+		rejectError.ReceiverLockingScript = nil
+		rejectError.InputIndex = -1
+		rejectError.OutputIndex = -1
+
+		etx, err := a.createRejection(ctx, transferTransaction, transferOutputIndex, -1,
+			transferRejectError)
+		if err != nil {
+			return nil, errors.Wrap(err, "create settlement request rejection")
+		}
+		etxs = append(etxs, etx)
+	}
+
+	return etxs, nil
 }
