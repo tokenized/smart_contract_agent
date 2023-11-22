@@ -321,6 +321,8 @@ func (a *Agent) UpdateTransaction(ctx context.Context, transaction *transactions
 		if err := a.ProcessUnsafe(ctx, transaction, actionList); err != nil {
 			return errors.Wrap(err, "process unsafe")
 		}
+
+		return nil
 	}
 
 	return nil
@@ -682,7 +684,7 @@ func (a *Agent) processAction(ctx context.Context, agentLockingScript bitcoin.Sc
 	if processError != nil {
 		if rejectError, ok := errors.Cause(processError).(platform.RejectError); ok {
 			if isRequest {
-				logger.Warn(ctx, "Received reject from response processing : %s", processError)
+				logger.Warn(ctx, "Received reject from action processing : %s", processError)
 
 				switch act := action.(type) {
 				case *actions.Message:

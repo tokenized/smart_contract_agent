@@ -6,7 +6,7 @@ require (
 	github.com/google/uuid v1.3.0
 	github.com/pkg/errors v0.9.1
 	github.com/spf13/cobra v0.0.5
-	github.com/tokenized/bitcoin_interpreter v0.1.1
+	github.com/tokenized/bitcoin_interpreter v0.1.2-0.20231122211758-38562b0f6929
 	github.com/tokenized/channels v0.1.2-0.20230926230238-6eb5e935b94c
 	github.com/tokenized/config v0.2.2
 	github.com/tokenized/envelope v1.1.0

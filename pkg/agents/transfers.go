@@ -193,9 +193,9 @@ func (a *Agent) processTransfer(ctx context.Context, transaction *transactions.T
 
 		if agentBitcoinTransferUnlocker == nil {
 			// Create an unlocker for the agent bitcoin transfer script.
-			signer := p2pkh.NewUnlockerFull(a.Key(), true, bitcoin_interpreter.SigHashDefault,
-				-1)
-			agentBitcoinTransferUnlocker = agent_bitcoin_transfer.NewAgentApproveUnlocker(signer)
+			agentUnlocker := p2pkh.NewUnlockerFull(a.Key(), true,
+				bitcoin_interpreter.SigHashDefault, -1)
+			agentBitcoinTransferUnlocker = agent_bitcoin_transfer.NewAgentApproveUnlocker(agentUnlocker)
 			additionalUnlockers = append(additionalUnlockers, agentBitcoinTransferUnlocker)
 		}
 
@@ -362,9 +362,10 @@ func consolidateOutputs(txouts []*wire.TxOut) []*wire.TxOut {
 	return result
 }
 
-func (a *Agent) buildBitcoinTransfer(ctx context.Context, transferTransaction *transactions.Transaction,
-	settlementTx *txbuilder.TxBuilder, instrumentTransfer *actions.InstrumentTransferField,
-	unlocker bitcoin_interpreter.Unlocker, minimumRecover time.Duration) error {
+func (a *Agent) buildBitcoinTransfer(ctx context.Context,
+	transferTransaction *transactions.Transaction, settlementTx *txbuilder.TxBuilder,
+	instrumentTransfer *actions.InstrumentTransferField, unlocker bitcoin_interpreter.Unlocker,
+	minimumRecover time.Duration) error {
 
 	transferTransaction.Lock()
 	defer transferTransaction.Unlock()

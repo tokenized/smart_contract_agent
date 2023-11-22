@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/tokenized/bitcoin_interpreter"
 	"github.com/tokenized/bitcoin_interpreter/agent_bitcoin_transfer"
 	"github.com/tokenized/bitcoin_interpreter/p2pkh"
 	"github.com/tokenized/logger"
@@ -435,13 +436,17 @@ func (a *Agent) processSignatureRequest(ctx context.Context, transaction *transa
 		}
 	}
 
+	// agentBitcoinTransferUnlocker might be needed if this is the first contract.
+	agentUnlocker := p2pkh.NewUnlockerFull(a.Key(), true, bitcoin_interpreter.SigHashDefault, -1)
+	agentBitcoinTransferUnlocker := agent_bitcoin_transfer.NewAgentApproveUnlocker(agentUnlocker)
 	p2pkhEstimator := p2pkh.NewUnlockEstimator()
 	bitcoinTransferEstimator := agent_bitcoin_transfer.NewApproveUnlockEstimator(p2pkhEstimator)
 
 	// Sign settlement tx.
 	// Use a nil change locking script because we don't want to modify the tx at all because it is
 	// already signed by some agents.
-	if err := a.Sign(ctx, settlementTx, nil, p2pkhEstimator, bitcoinTransferEstimator); err != nil {
+	if err := a.Sign(ctx, settlementTx, nil, agentBitcoinTransferUnlocker, p2pkhEstimator,
+		bitcoinTransferEstimator); err != nil {
 		allBalances.Revert(transferTxID)
 
 		if errors.Cause(err) == txbuilder.ErrInsufficientValue {

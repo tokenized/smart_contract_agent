@@ -95,8 +95,8 @@ github.com/stretchr/objx v0.1.0/go.mod h1:HFkY916IF+rwdDfMAkV7OtwuqBVzrE8GR6GFx+
 github.com/stretchr/testify v1.2.2/go.mod h1:a8OnRcib4nhh0OaRAV+Yts87kKdq0PP7pXfy6kDkUVs=
 github.com/stretchr/testify v1.5.1 h1:nOGnQDM7FYENwehXlg/kFVnos3rEvtKTjRvOWSzb6H4=
 github.com/stretchr/testify v1.5.1/go.mod h1:5W2xD1RspED5o8YsWQXVCued0rvSQ+mT+I5cxcmMvtA=
-github.com/tokenized/bitcoin_interpreter v0.1.1 h1:l78d1x28TptKd3ijy6ZmCA09ro29RVYqcISeexv+KWA=
-github.com/tokenized/bitcoin_interpreter v0.1.1/go.mod h1:bSMGbxCxf/NrBmq+VYQS94P/ctOAhFis/nO4y6RwI/c=
+github.com/tokenized/bitcoin_interpreter v0.1.2-0.20231122211758-38562b0f6929 h1:aACADn/p6BlrlnJxf4IsBzd0lDmnUgs8sOq/Ic6WR94=
+github.com/tokenized/bitcoin_interpreter v0.1.2-0.20231122211758-38562b0f6929/go.mod h1:bSMGbxCxf/NrBmq+VYQS94P/ctOAhFis/nO4y6RwI/c=
 github.com/tokenized/channels v0.1.2-0.20230926230238-6eb5e935b94c h1:IieblerRpvatfs9s4gz8SZCUqQBvsvsBW9oBw2N/DIc=
 github.com/tokenized/channels v0.1.2-0.20230926230238-6eb5e935b94c/go.mod h1:BKbZa4QdVbaa9NNohEHKWe5iV4aUlnssPg0+b8YYePk=
 github.com/tokenized/config v0.2.2 h1:dGfFdv3P6JK9TcHvud34vozocm3Qq2Wxbc9PRctgDL8=
