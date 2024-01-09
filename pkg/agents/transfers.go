@@ -1220,7 +1220,7 @@ func (a *Agent) initiateInstrumentTransferBalances(ctx context.Context,
 		logger.Warn(ctx, "Wrong instrument type: %s (should be %s)",
 			instrumentTransfer.InstrumentType, instrument.InstrumentType)
 		return nil, nil, nil, platform.NewRejectErrorWithOutputIndex(actions.RejectionsInstrumentNotFound,
-			"", int(instrumentTransfer.ContractIndex))
+			"wrong instrument type", int(instrumentTransfer.ContractIndex))
 	}
 
 	logger.Info(ctx, "Initiating transfer settlement")
