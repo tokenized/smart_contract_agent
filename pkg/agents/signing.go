@@ -140,6 +140,12 @@ func (a *Agent) Sign(ctx context.Context, tx *txbuilder.TxBuilder,
 			}
 
 			if fee < int64(feeEstimate) {
+				logger.InfoWithFields(ctx, []logger.Field{
+					logger.Uint64("inputs", inputsValue),
+					logger.Uint64("outputs", outputsValue),
+					logger.Uint64("needed_tx_fee", feeEstimate),
+				}, "Insufficient tx fee")
+
 				description := fmt.Sprintf("inputs: %d < outputs: %d (+ tx fee: %d)", inputsValue,
 					outputsValue, feeEstimate)
 				return errors.Wrapf(txbuilder.ErrInsufficientValue, description)
