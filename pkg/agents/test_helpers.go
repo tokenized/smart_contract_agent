@@ -462,6 +462,30 @@ func finalizeTestAgent(ctx context.Context, t testing.TB, test *TestData) {
 }
 
 func StopTestAgent(ctx context.Context, t *testing.T, test *TestData) {
+	// Verify no txs are locked
+	txs, err := test.Caches.Transactions.List(ctx)
+	if err != nil {
+		t.Fatalf("Failed to list transactions : %s", err)
+	}
+
+	for _, tx := range txs {
+		complete := make(chan interface{})
+		go func() {
+			tx.Lock()
+			close(complete)
+		}()
+
+		select {
+		case <-complete:
+			txid := tx.TxID()
+			tx.Unlock()
+			test.Caches.Transactions.Release(ctx, txid)
+			t.Logf("Tx was succussfully locked : %s", txid)
+		case <-time.After(time.Millisecond * 10):
+			t.Fatalf("Failed to lock tx : %s", tx.TxID())
+		}
+	}
+
 	close(test.PeerChannelResponses)
 	select {
 	case <-test.peerChannelResponsesComplete:
@@ -633,6 +657,21 @@ func (f *MockStore) GetAgent(ctx context.Context,
 	f.agents = append(f.agents, agent)
 
 	return agent, nil
+}
+
+func (f *MockStore) Release(ctx context.Context, agent *Agent) {
+	f.lock.Lock()
+	defer f.lock.Unlock()
+
+	lockingScript := agent.LockingScript()
+	for i, a := range f.agents {
+		if a.LockingScript().Equal(lockingScript) {
+			f.agents = append(f.agents[:i], f.agents[i+1:]...)
+			break
+		}
+	}
+
+	agent.Release(ctx)
 }
 
 func MockVoteContractAmendmentCompleted(ctx context.Context, caches *TestCaches,

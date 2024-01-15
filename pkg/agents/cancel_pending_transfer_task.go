@@ -99,7 +99,7 @@ func CancelPendingTransfer(ctx context.Context, store Store, contractLockingScri
 	if agent == nil {
 		return nil, errors.New("Agent not found")
 	}
-	defer agent.Release(ctx)
+	defer store.Release(ctx, agent)
 
 	return agent.CancelPendingTransfer(ctx, transferTxID)
 }
@@ -204,6 +204,9 @@ func (a *Agent) CancelPendingTransfer(ctx context.Context,
 	}
 
 	// Send rejection
+	logger.VerboseWithFields(ctx, []logger.Field{
+		logger.Stringer("request_txid", transferTxID),
+	}, "Creating rejection")
 	rejectError := platform.NewRejectError(actions.RejectionsTransferExpired, "")
 	contractOutputIndex := transferContracts.CurrentOutputIndex()
 	etx, err := a.createRejection(ctx, transferTransaction, transferOutputIndex,

@@ -341,3 +341,7 @@ func (s *Store) GetAgent(ctx context.Context,
 
 	return s.agent.Copy(ctx), nil
 }
+
+func (s *Store) Release(ctx context.Context, agent *agents.Agent) {
+	s.agent.Release(ctx)
+}

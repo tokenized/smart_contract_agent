@@ -164,7 +164,17 @@ func (s *Service) GetAgent(ctx context.Context,
 	return s.agent.Copy(ctx), nil
 }
 
-func (s *Service) Release(ctx context.Context) {
+func (s *Service) Release(ctx context.Context, agent *agents.Agent) {
+	s.lock.Lock()
+	defer s.lock.Unlock()
+
+	if s.agent != nil {
+		s.agent.Release(ctx)
+		s.agent = nil
+	}
+}
+
+func (s *Service) ReleaseAll(ctx context.Context) {
 	s.lock.Lock()
 	defer s.lock.Unlock()
 

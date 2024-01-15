@@ -335,6 +335,35 @@ func (c *TransactionCache) PopulateAncestors(ctx context.Context, transaction *T
 	return nil
 }
 
+func (c *TransactionCache) List(ctx context.Context) ([]*Transaction, error) {
+	paths, err := c.cacher.List(ctx, txPath, "")
+	if err != nil {
+		return nil, errors.Wrap(err, "list txs")
+	}
+
+	var result []*Transaction
+	for _, path := range paths {
+		item, err := c.cacher.Get(ctx, c.typ, path)
+		if err != nil {
+			for i := range result {
+				c.cacher.Release(ctx, paths[i])
+			}
+			return nil, errors.Wrap(err, "get tx")
+		}
+
+		transaction, ok := item.(*Transaction)
+		if !ok {
+			for i := range result {
+				c.cacher.Release(ctx, paths[i])
+			}
+			return nil, fmt.Errorf("Cache item is not a transaction : %s : %v", path, item)
+		}
+		result = append(result, transaction)
+	}
+
+	return result, nil
+}
+
 func (tx *Transaction) addAncestors(ancestors expanded_tx.AncestorTxs) {
 	for _, ancestor := range ancestors {
 		atxid := ancestor.GetTxID()

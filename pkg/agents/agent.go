@@ -124,6 +124,7 @@ type BlockHeaders interface {
 
 type Store interface {
 	GetAgent(ctx context.Context, lockingScript bitcoin.Script) (*Agent, error)
+	Release(ctx context.Context, agent *Agent)
 }
 
 func NewAgent(ctx context.Context, data AgentData, config Config, caches *state.Caches,

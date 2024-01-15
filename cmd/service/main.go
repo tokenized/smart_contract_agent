@@ -155,7 +155,7 @@ func main() {
 		}, &peerChannelWait)
 
 	if err := service.Load(ctx); err != nil {
-		service.Release(ctx)
+		service.ReleaseAll(ctx)
 		logger.Fatal(ctx, "Failed to load service : %s", err)
 	}
 
@@ -222,7 +222,7 @@ func main() {
 	schedulerThread.Stop(ctx)
 	schedulerWait.Wait()
 
-	service.Release(ctx)
+	service.ReleaseAll(ctx)
 }
 
 type SpyNodeBroadcaster struct {

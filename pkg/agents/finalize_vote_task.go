@@ -92,7 +92,7 @@ func FinalizeVote(ctx context.Context, store Store, contractLockingScript bitcoi
 	if agent == nil {
 		return nil, errors.New("Agent not found")
 	}
-	defer agent.Release(ctx)
+	defer store.Release(ctx, agent)
 
 	return agent.FinalizeVote(ctx, voteTxID)
 }

@@ -103,6 +103,14 @@ func Test_Transfers_Multi_Expire(t *testing.T) {
 	cache := cacher.NewSimpleCache(store)
 
 	RunTest_Transfers_Multi_Expire(ctx, t, store, cache)
+
+	if !cache.IsEmpty(ctx) {
+		remaining := cache.ListCached(ctx)
+		for _, path := range remaining {
+			println(path)
+		}
+		t.Fatalf("Cache is not empty")
+	}
 }
 
 func Test_Transfers_Multi_Reject_First(t *testing.T) {
@@ -111,6 +119,14 @@ func Test_Transfers_Multi_Reject_First(t *testing.T) {
 	cache := cacher.NewSimpleCache(store)
 
 	RunTest_Transfers_Multi_Reject_First(ctx, t, store, cache)
+
+	if !cache.IsEmpty(ctx) {
+		remaining := cache.ListCached(ctx)
+		for _, path := range remaining {
+			println(path)
+		}
+		t.Fatalf("Cache is not empty")
+	}
 }
 
 func Test_Transfers_Multi_Reject_Second(t *testing.T) {
@@ -119,6 +135,14 @@ func Test_Transfers_Multi_Reject_Second(t *testing.T) {
 	cache := cacher.NewSimpleCache(store)
 
 	RunTest_Transfers_Multi_Reject_Second(ctx, t, store, cache)
+
+	if !cache.IsEmpty(ctx) {
+		remaining := cache.ListCached(ctx)
+		for _, path := range remaining {
+			println(path)
+		}
+		t.Fatalf("Cache is not empty")
+	}
 }
 
 // Test_Transfers_InsufficientQuantity creates a transfer action for locking scripts that don't have

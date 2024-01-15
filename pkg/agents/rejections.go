@@ -166,6 +166,10 @@ func (a *Agent) processRejection(ctx context.Context, transaction *transactions.
 		}
 
 		transferTxID = transferTransaction.GetTxID()
+		logger.InfoWithFields(ctx, []logger.Field{
+			logger.Stringer("rejected_txid", rejectedTxID),
+			logger.Stringer("transfer_txid", transferTxID),
+		}, "Rejected transaction traced to a transfer")
 		defer a.transactions.Release(ctx, transferTxID)
 	} else if transfer == nil {
 		logger.InfoWithFields(ctx, []logger.Field{
@@ -278,10 +282,11 @@ func (a *Agent) traceToTransfer(ctx context.Context,
 				if err := a.transactions.PopulateAncestors(ctx,
 					previousTransaction); err != nil {
 					previousTransaction.Unlock()
+					a.transactions.Release(ctx, txid)
 					return nil, nil, 0, errors.Wrap(err, "populate ancestors")
 				}
-				previousTransaction.Unlock()
 
+				previousTransaction.Unlock()
 				return previousTransaction, act, i, nil
 			case *actions.Message:
 				message = act
@@ -372,7 +377,7 @@ func (a *Agent) createRejection(ctx context.Context, transaction *transactions.T
 		responseTransaction.Lock()
 		responseOutputCount := responseTransaction.OutputCount()
 		isComplete := false
-		for i := 0; i < responseOutputCount; i++ {
+		for i := 0; i < responseOutputCount && !isComplete; i++ {
 			output := responseTransaction.Output(i)
 			action, err := protocol.Deserialize(output.LockingScript, config.IsTest)
 			if err != nil {

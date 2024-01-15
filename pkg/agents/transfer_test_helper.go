@@ -2834,6 +2834,7 @@ func RunTest_Transfers_Multi_Expire(ctx context.Context, t *testing.T, store *st
 	_, feeLockingScript, _ := state.MockKey()
 
 	schedulerInterrupt := make(chan interface{})
+	schedulerComplete := make(chan interface{})
 	go func() {
 		defer func() {
 			if err := recover(); err != nil {
@@ -2845,6 +2846,8 @@ func RunTest_Transfers_Multi_Expire(ctx context.Context, t *testing.T, store *st
 			errors.Cause(err) != threads.Interrupted {
 			t.Errorf("Scheduler returned an error : %s", err)
 		}
+
+		close(schedulerComplete)
 	}()
 
 	contractKey1, contractLockingScript1, adminKey1, adminLockingScript1, contract1, instrument1 := state.MockInstrument(ctx,
@@ -3275,6 +3278,13 @@ func RunTest_Transfers_Multi_Expire(ctx context.Context, t *testing.T, store *st
 			test.Caches.Caches.Balances.Release(ctx, contractLockingScript2,
 				instrument2.InstrumentCode, balance)
 		}
+	}
+
+	close(schedulerInterrupt)
+	select {
+	case <-schedulerComplete:
+		t.Logf("Scheduler completed")
+	case <-time.After(time.Second):
 	}
 
 	agent1.Release(ctx)
@@ -3885,11 +3895,11 @@ func RunTest_Transfers_Multi_Reject_Second(ctx context.Context, t *testing.T,
 		}
 
 		js, _ = json.MarshalIndent(rejection, "", "  ")
-		t.Logf("Rejection : %s", js)
+		t.Logf("Secondary Rejection : %s", js)
 
 		responseTx3 := responseTxs[2]
 
-		t.Logf("Agent 2 response tx 3 : %s", responseTx3)
+		t.Logf("Agent 1 response tx 2 : %s", responseTx3)
 
 		// Find rejection action
 		rejection = nil
@@ -3914,7 +3924,7 @@ func RunTest_Transfers_Multi_Reject_Second(ctx context.Context, t *testing.T,
 		}
 
 		js, _ = json.MarshalIndent(rejection, "", "  ")
-		t.Logf("Rejection : %s", js)
+		t.Logf("Master Rejection : %s", js)
 
 		if !responseTx3.Tx.TxIn[0].PreviousOutPoint.Hash.Equal(transferTxID) {
 			t.Errorf("Wrong rejection input txid : got %s, want %s",

@@ -897,9 +897,9 @@ func (a *Agent) cancelTransfer(ctx context.Context, transaction *transactions.Tr
 		}
 		a.caches.Instruments.Release(instrumentCtx, agentLockingScript, instrumentCode)
 
-		logger.Info(instrumentCtx, "Processing settlement")
+		logger.Info(instrumentCtx, "Collecting instrument balances")
 
-		// Build balances based on the instrument's settlement quantities.
+		// Collect relevant balances
 		for i, sender := range instrumentTransfer.InstrumentSenders {
 			if int(sender.Index) >= inputCount {
 				logger.ErrorWithFields(instrumentCtx, []logger.Field{
