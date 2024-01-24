@@ -101,7 +101,7 @@ func (a *Agent) processRejection(ctx context.Context, transaction *transactions.
 
 	// Check if this is a reject from another contract in a multi-contract transfer to a settlement
 	// request.
-	rejectedTransaction, err := a.transactions.Get(ctx, rejectedTxID)
+	rejectedTransaction, err := a.transactions.GetTxWithAncestors(ctx, rejectedTxID)
 	if err != nil {
 		return nil, errors.Wrap(err, "get tx")
 	}
@@ -257,7 +257,7 @@ func firstInputTxID(transaction *transactions.Transaction) bitcoin.Hash32 {
 func (a *Agent) traceToTransfer(ctx context.Context,
 	txid bitcoin.Hash32) (*transactions.Transaction, *actions.Transfer, int, error) {
 
-	previousTransaction, err := a.transactions.Get(ctx, txid)
+	previousTransaction, err := a.transactions.GetTxWithAncestors(ctx, txid)
 	if err != nil {
 		return nil, nil, 0, errors.Wrap(err, "get tx")
 	}
