@@ -110,6 +110,12 @@ func (c *TestCaches) IsFailed() error {
 func MockContract(ctx context.Context,
 	caches *TestCaches) (bitcoin.Key, bitcoin.Script, bitcoin.Key, bitcoin.Script, *Contract) {
 
+	return MockContractWithFee(ctx, caches, 100)
+}
+
+func MockContractWithFee(ctx context.Context, caches *TestCaches,
+	contractFee uint64) (bitcoin.Key, bitcoin.Script, bitcoin.Key, bitcoin.Script, *Contract) {
+
 	contractKey, contractLockingScript, _ := MockKey()
 	adminKey, adminLockingScript, adminAddress := MockKey()
 	_, _, entityAddress := MockKey()
@@ -119,7 +125,7 @@ func MockContract(ctx context.Context,
 		Formation: &actions.ContractFormation{
 			ContractName:           "Test",
 			AdminAddress:           adminAddress.Bytes(),
-			ContractFee:            100,
+			ContractFee:            contractFee,
 			ContractType:           actions.ContractTypeInstrument,
 			EntityContract:         entityAddress.Bytes(),
 			AdministrationProposal: true,
@@ -234,8 +240,14 @@ func MockInstrumentOnly(ctx context.Context, caches *TestCaches, contract *Contr
 func MockInstrument(ctx context.Context,
 	caches *TestCaches) (bitcoin.Key, bitcoin.Script, bitcoin.Key, bitcoin.Script, *Contract, *Instrument) {
 
-	contractKey, contractLockingScript, adminKey, adminLockingScript, contract := MockContract(ctx,
-		caches)
+	return MockInstrumentWithContractFee(ctx, caches, 100)
+}
+
+func MockInstrumentWithContractFee(ctx context.Context, caches *TestCaches,
+	contractFee uint64) (bitcoin.Key, bitcoin.Script, bitcoin.Key, bitcoin.Script, *Contract, *Instrument) {
+
+	contractKey, contractLockingScript, adminKey, adminLockingScript, contract := MockContractWithFee(ctx,
+		caches, contractFee)
 
 	currency := &instruments.Currency{
 		CurrencyCode: instruments.CurrenciesUnitedStatesDollar,

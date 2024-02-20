@@ -131,20 +131,15 @@ func TestProcessTx(ctx context.Context, agents []*TestAgentData,
 	currentTx := etx
 	for {
 		var currentResponseTx *expanded_tx.ExpandedTx
-		println("TestProcessTx processing request", currentTx.TxID().String())
 		for _, agent := range agents {
 			responseTxs := agent.ProcessTx(ctx, currentTx)
 			if len(responseTxs) > 0 {
-				println("TestProcessTx response txs", len(responseTxs))
 				currentResponseTx = responseTxs[len(responseTxs)-1]
 				responses = append(responses, responseTxs...)
-			} else {
-				println("TestProcessTx no response txs")
 			}
 		}
 
 		if currentResponseTx == nil {
-			println("TestProcessTx complete")
 			return responses
 		}
 		currentTx = currentResponseTx
@@ -218,6 +213,19 @@ func StartTestAgentWithInstrument(ctx context.Context, t testing.TB) (*Agent, *T
 
 	test.ContractKey, test.ContractLockingScript, test.AdminKey, test.AdminLockingScript, test.Contract, test.Instrument = state.MockInstrument(ctx,
 		&test.Caches.TestCaches)
+	_, test.FeeLockingScript, _ = state.MockKey()
+
+	finalizeTestAgent(ctx, t, test)
+
+	return test.agent, test
+}
+
+func StartTestAgentWithInstrumentWithContractFee(ctx context.Context, t testing.TB,
+	contractFee uint64) (*Agent, *TestData) {
+	test := prepareTestData(ctx, t)
+
+	test.ContractKey, test.ContractLockingScript, test.AdminKey, test.AdminLockingScript, test.Contract, test.Instrument = state.MockInstrumentWithContractFee(ctx,
+		&test.Caches.TestCaches, contractFee)
 	_, test.FeeLockingScript, _ = state.MockKey()
 
 	finalizeTestAgent(ctx, t, test)
