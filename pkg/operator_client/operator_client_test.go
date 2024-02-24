@@ -142,7 +142,7 @@ func Test_RequestNewAgent(t *testing.T) {
 	}
 }
 
-func Test_SignContractOffer(t *testing.T) {
+func Test_RequestSignedInput(t *testing.T) {
 	ctx := logger.ContextWithLogger(context.Background(), true, true, "")
 
 	peerChannelFactory := peer_channels.NewFactory()
@@ -230,7 +230,7 @@ func Test_SignContractOffer(t *testing.T) {
 		},
 	}
 
-	signedTx, err := client.SignContractOffer(ctx, etx)
+	signedTx, err := client.RequestSignedInput(ctx, etx)
 	if err != nil {
 		t.Fatalf("Failed to get signed tx : %s", err)
 	}

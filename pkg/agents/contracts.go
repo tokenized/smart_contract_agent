@@ -458,7 +458,7 @@ func (a *Agent) processContractAmendment(ctx context.Context, transaction *trans
 				return nil, platform.NewRejectError(actions.RejectionsSignatureNotSigHashAll, "")
 			}
 		} else {
-			// Verify administrator or operator signed.
+			// Verify administrator signed.
 			firstUnlockingScript := transaction.Input(0).UnlockingScript
 			firstInputOutput, err := transaction.InputOutput(0)
 			if err != nil {

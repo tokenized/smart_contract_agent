@@ -76,7 +76,7 @@ func (c *MockClient) GetAgents() []*MockAgent {
 	return c.agents
 }
 
-func (c *MockClient) SignContractOffer(ctx context.Context,
+func (c *MockClient) RequestSignedInput(ctx context.Context,
 	etx *expanded_tx.ExpandedTx) (*expanded_tx.ExpandedTx, error) {
 
 	etxc := etx.Copy()
