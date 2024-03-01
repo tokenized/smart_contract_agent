@@ -12,6 +12,7 @@ import (
 	"github.com/tokenized/pkg/peer_channels"
 	"github.com/tokenized/pkg/wire"
 	"github.com/tokenized/smart_contract_agent/internal/platform"
+	"github.com/tokenized/smart_contract_agent/internal/state"
 	"github.com/tokenized/smart_contract_agent/pkg/headers"
 	"github.com/tokenized/smart_contract_agent/pkg/transactions"
 	"github.com/tokenized/specification/dist/golang/actions"
@@ -514,6 +515,7 @@ func (a *Agent) processContractAmendment(ctx context.Context, transaction *trans
 	if err != nil {
 		return nil, errors.Wrap(err, "admin locking script")
 	}
+	previousAdminLockingScript := adminLockingScript
 
 	if amendment.ChangeAdministrationAddress {
 		transaction.Lock()
@@ -539,6 +541,7 @@ func (a *Agent) processContractAmendment(ctx context.Context, transaction *trans
 			logger.Stringer("previous_admin_locking_script", adminLockingScript),
 			logger.Stringer("new_admin_locking_script", inputOutput.LockingScript),
 		}, "Updating admin locking script")
+
 		isNewAdminLockingScript = true
 		adminLockingScript = inputOutput.LockingScript
 		formation.AdminAddress = ra.Bytes()
@@ -701,10 +704,12 @@ func (a *Agent) processContractAmendment(ctx context.Context, transaction *trans
 	contract.MarkModified()
 
 	if isNewAdminLockingScript {
-		logger.InfoWithFields(ctx, []logger.Field{
-			logger.Stringer("admin_locking_script", adminLockingScript),
-		}, "Updating admin locking script")
 		a.SetAdminLockingScript(adminLockingScript)
+
+		if err := a.migrateAdminBalances(ctx, previousAdminLockingScript, adminLockingScript,
+			formationTxID, now); err != nil {
+			return nil, errors.Wrap(err, "migrate admin balance")
+		}
 	}
 
 	formationTransaction, err := a.transactions.AddRaw(ctx, formationTx.MsgTx, nil)
@@ -738,6 +743,91 @@ func (a *Agent) processContractAmendment(ctx context.Context, transaction *trans
 	}
 
 	return etx, nil
+}
+
+func (a *Agent) migrateAdminBalances(ctx context.Context,
+	previousAdminLockingScript, adminLockingScript bitcoin.Script, txid bitcoin.Hash32,
+	now uint64) error {
+
+	contractLockingScript := a.LockingScript()
+	contractHash := state.CalculateContractHash(contractLockingScript)
+	instrumentCodes, err := a.caches.Instruments.List(ctx, contractHash)
+	if err != nil {
+		return errors.Wrap(err, "list instruments")
+	}
+
+	allBalances := make(state.BalanceSet, len(instrumentCodes))
+	for i, instrumentCode := range instrumentCodes {
+		fromBalance, err := a.caches.Balances.Get(ctx, contractLockingScript, instrumentCode,
+			previousAdminLockingScript)
+		if err != nil {
+			return errors.Wrap(err, "get previous balance")
+		}
+
+		if fromBalance == nil {
+			logger.InfoWithFields(ctx, []logger.Field{
+				logger.Stringer("instrument_code", instrumentCode),
+			}, "No previous admin balance for instrument")
+			continue
+		}
+
+		toInitialBalance := &state.Balance{
+			LockingScript: adminLockingScript,
+			Quantity:      0,
+			Timestamp:     now,
+			TxID:          &txid,
+		}
+		toInitialBalance.Initialize()
+
+		toBalance, err := a.caches.Balances.Add(ctx, contractLockingScript, instrumentCode,
+			toInitialBalance)
+		if err != nil {
+			return errors.Wrap(err, "get new balance")
+		}
+
+		allBalances[i] = state.Balances{fromBalance, toBalance}
+	}
+
+	lockerResponseChannel := a.locker.AddRequest(allBalances)
+	lockerResponse := <-lockerResponseChannel
+	switch v := lockerResponse.(type) {
+	case uint64:
+		// now = v // timestamp
+	case error:
+		return errors.Wrap(v, "locker")
+	}
+	defer allBalances.Unlock()
+
+	for i, balances := range allBalances {
+		fromBalance := balances[0]
+		toBalance := balances[1]
+
+		logger.InfoWithFields(ctx, []logger.Field{
+			logger.Stringer("instrument_code", instrumentCodes[i]),
+			logger.Timestamp("timestamp", int64(now)),
+			logger.Stringer("previous_locking_script", previousAdminLockingScript),
+			logger.Stringer("new_locking_script", adminLockingScript),
+			logger.Uint64("previous_quantity", fromBalance.Quantity),
+			logger.Uint64("new_quantity", toBalance.Quantity+fromBalance.Quantity),
+		}, "Migrating admin balance")
+
+		toBalance.Quantity += fromBalance.Quantity
+		fromBalance.Quantity = 0
+
+		toBalance.Timestamp = now
+		fromBalance.Timestamp = now
+
+		toBalance.TxID = &txid
+		fromBalance.TxID = &txid
+
+		toBalance.Adjustments = append(toBalance.Adjustments, fromBalance.Adjustments...)
+		fromBalance.Adjustments = nil
+
+		toBalance.MarkModified()
+		fromBalance.MarkModified()
+	}
+
+	return nil
 }
 
 func (a *Agent) processContractFormation(ctx context.Context, transaction *transactions.Transaction,

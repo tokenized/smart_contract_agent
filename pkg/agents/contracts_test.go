@@ -756,9 +756,22 @@ func Test_Contracts_Amendment_Valid(t *testing.T) {
 
 func Test_Contracts_Amendment_AdminChange(t *testing.T) {
 	ctx := logger.ContextWithLogger(context.Background(), true, true, "")
-	agent, test := StartTestAgentWithContract(ctx, t)
+	agent, test := StartTestAgentWithInstrument(ctx, t)
 
+	previousAdminLockingScript := test.AdminLockingScript
 	newAdminKey, newAdminLockingScript, newAdminAddress := state.MockKey()
+
+	adminBalance, err := test.Caches.TestCaches.Caches.Balances.Get(ctx,
+		test.ContractLockingScript, test.Instrument.InstrumentCode, test.AdminLockingScript)
+	if err != nil {
+		t.Fatalf("Failed to get balance : %s", err)
+	}
+
+	now := agent.Now()
+	previousAdminAvailable := adminBalance.Available(now)
+	if previousAdminAvailable == 0 {
+		t.Fatalf("Admin balance should not be zero")
+	}
 
 	tx := txbuilder.NewTxBuilder(0.05, 0.0)
 
@@ -912,6 +925,29 @@ func Test_Contracts_Amendment_AdminChange(t *testing.T) {
 			responseTxID)
 	}
 	test.Contract.Unlock()
+
+	adminBalances, err := test.Caches.TestCaches.Caches.Balances.GetMulti(ctx,
+		test.ContractLockingScript, test.Instrument.InstrumentCode,
+		[]bitcoin.Script{previousAdminLockingScript, newAdminLockingScript})
+	if err != nil {
+		t.Fatalf("Failed to get balances : %s", err)
+	}
+
+	if len(adminBalances) != 2 {
+		t.Fatalf("Wrong balance count : got %d, want %d", len(adminBalances), 2)
+	}
+
+	now = agent.Now()
+	newPreviousAdminAvailable := adminBalances[0].Available(now)
+	if newPreviousAdminAvailable != 0 {
+		t.Fatalf("Wrong previous admin balance : got %d, want %d", newPreviousAdminAvailable, 0)
+	}
+
+	newAdminAvailable := adminBalances[1].Available(now)
+	if newAdminAvailable != previousAdminAvailable {
+		t.Fatalf("Wrong new admin balance : got %d, want %d", newAdminAvailable,
+			previousAdminAvailable)
+	}
 
 	time.Sleep(time.Millisecond) // wait for statistics to process
 

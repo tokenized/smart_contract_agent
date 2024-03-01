@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"reflect"
+	"strings"
 	"sync"
 	"sync/atomic"
 
@@ -102,6 +103,34 @@ func (c *InstrumentCache) Get(ctx context.Context, contractLockingScript bitcoin
 	}
 
 	return item.(*Instrument), nil
+}
+
+func (c *InstrumentCache) List(ctx context.Context,
+	contractHash ContractHash) ([]InstrumentCode, error) {
+
+	pathPrefix := contractHash.String()
+	pathRegex := fmt.Sprintf("%s/[a-f0-9]{40}/%s", pathPrefix, instrumentPath)
+	paths, err := c.cacher.List(ctx, pathPrefix, pathRegex)
+	if err != nil {
+		return nil, errors.Wrap(err, "list instrument paths")
+	}
+
+	result := make([]InstrumentCode, len(paths))
+	for i, path := range paths {
+		parts := strings.Split(path, "/")
+		if len(parts) != 3 {
+			return nil, fmt.Errorf("Invalid instrument path : %s", path)
+		}
+
+		hash, err := bitcoin.NewHash20FromStr(parts[1])
+		if err != nil {
+			return nil, errors.Wrap(err, "hash from string")
+		}
+
+		result[i] = InstrumentCode(*hash)
+	}
+
+	return result, nil
 }
 
 func (c *InstrumentCache) Release(ctx context.Context, contractLockingScript bitcoin.Script,

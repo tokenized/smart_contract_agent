@@ -7,11 +7,11 @@ require (
 	github.com/pkg/errors v0.9.1
 	github.com/spf13/cobra v0.0.5
 	github.com/tokenized/bitcoin_interpreter v0.1.2-0.20231122211758-38562b0f6929
-	github.com/tokenized/channels v0.1.2-0.20230926230238-6eb5e935b94c
+	github.com/tokenized/channels v0.1.2-0.20240224000422-689cbd7f0d49
 	github.com/tokenized/config v0.2.2
 	github.com/tokenized/envelope v1.1.0
 	github.com/tokenized/logger v0.1.4-0.20230915152315-06e93587a3c5
-	github.com/tokenized/pkg v0.7.1-0.20240115151924-a16ebf1e225a
+	github.com/tokenized/pkg v0.7.1-0.20240221001011-1716cd646265
 	github.com/tokenized/specification v1.3.2-0.20240105200908-6b27de883834
 	github.com/tokenized/spynode v0.4.3-0.20231215000849-3194f2f4bfa0
 	github.com/tokenized/threads v0.1.2
