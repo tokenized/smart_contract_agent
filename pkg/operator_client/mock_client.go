@@ -5,6 +5,7 @@ import (
 	"math/rand"
 
 	"github.com/tokenized/channels/contract_operator"
+	"github.com/tokenized/channels/unlocking_data"
 	"github.com/tokenized/logger"
 	"github.com/tokenized/pkg/bitcoin"
 	"github.com/tokenized/pkg/expanded_tx"
@@ -79,9 +80,14 @@ func (c *MockClient) GetAgents() []*MockAgent {
 func (c *MockClient) RequestSignedInput(ctx context.Context,
 	etx *expanded_tx.ExpandedTx) (*expanded_tx.ExpandedTx, error) {
 
+	println("RequestSignedInput")
+
 	etxc := etx.Copy()
 	etx = &etxc
-	tx := etx.Tx
+	txb, err := txbuilder.NewTxBuilderFromTransactionWithOutputs(0.05, 0.0, etx)
+	if err != nil {
+		return nil, errors.Wrap(err, "tx builder")
+	}
 
 	serviceAddress, err := c.operatorKey.RawAddress()
 	if err != nil {
@@ -115,37 +121,27 @@ func (c *MockClient) RequestSignedInput(ctx context.Context,
 		LockingScript: fundingTx.TxOut[0].LockingScript,
 	}
 
-	// Add dust input from service key and output back to service key.
-	inputIndex := 1 // contract operator input must be immediately after admin input
-	input := wire.NewTxIn(wire.NewOutPoint(&utxo.Hash, utxo.Index), nil)
+	if err := txb.InsertInput(1, utxo); err != nil {
+		return nil, errors.Wrap(err, "insert input")
+	}
 
-	if len(tx.TxIn) > 1 {
-		after := make([]*wire.TxIn, len(tx.TxIn)-1)
-		copy(after, tx.TxIn[1:])
-		tx.TxIn = append(append(tx.TxIn[:1], input), after...)
-	} else {
-		tx.TxIn = append(tx.TxIn, input)
+	if err := txb.AddOutput(serviceLockingScript, utxo.Value, false, true); err != nil {
+		return nil, errors.Wrap(err, "add output")
+	}
+
+	if err := txb.SignP2PKHInput(1, c.operatorKey, &txbuilder.SigHashCache{}); err != nil {
+		return nil, errors.Wrap(err, "sign")
 	}
 
 	etx.Ancestors = append(etx.Ancestors, &expanded_tx.AncestorTx{
 		Tx: fundingTx,
 	})
 
-	output := wire.NewTxOut(utxo.Value, serviceLockingScript)
-	tx.AddTxOut(output)
-
-	// Sign input based on current tx. Note: The client can only add signatures after this or they
-	// will invalidate this signature.
-	input.UnlockingScript, err = txbuilder.P2PKHUnlockingScript(c.operatorKey, tx, inputIndex,
-		utxo.LockingScript, utxo.Value, txbuilder.SigHashAll+txbuilder.SigHashForkID,
-		&txbuilder.SigHashCache{})
-	if err != nil {
-		return nil, errors.Wrap(err, "sign")
-	}
+	println("signed tx", unlocking_data.TxString(etx))
 
 	logger.InfoWithFields(ctx, []logger.Field{
 		logger.Stringer("hash", utxo.Hash),
-		logger.Stringer("unlocking_script", input.UnlockingScript),
+		logger.Stringer("unlocking_script", txb.MsgTx.TxIn[1].UnlockingScript),
 	}, "Added contract agent input")
 
 	logger.InfoWithFields(ctx, []logger.Field{
