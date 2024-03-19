@@ -11,7 +11,9 @@ import (
 
 	"github.com/tokenized/logger"
 	"github.com/tokenized/pkg/bitcoin"
+	"github.com/tokenized/pkg/cacher"
 	"github.com/tokenized/pkg/expanded_tx"
+	"github.com/tokenized/pkg/storage"
 	"github.com/tokenized/smart_contract_agent/internal/state"
 	"github.com/tokenized/smart_contract_agent/pkg/statistics"
 	"github.com/tokenized/smart_contract_agent/pkg/transactions"
@@ -615,6 +617,447 @@ func Test_Instruments_Amendment_Basic(t *testing.T) {
 
 	js, _ := json.MarshalIndent(amendments, "", "  ")
 	t.Logf("Amendments : %s", js)
+
+	modification := &actions.InstrumentModification{
+		InstrumentType:     test.Instrument.Creation.InstrumentType,
+		InstrumentCode:     test.Instrument.Creation.InstrumentCode,
+		InstrumentRevision: 0,
+		Amendments:         amendments,
+	}
+
+	tx := txbuilder.NewTxBuilder(0.05, 0.0)
+
+	// Add input
+	outpoint := state.MockOutPoint(test.AdminLockingScript, 1)
+	spentOutputs := []*expanded_tx.Output{
+		{
+			LockingScript: test.AdminLockingScript,
+			Value:         1,
+		},
+	}
+
+	if err := tx.AddInput(*outpoint, test.AdminLockingScript, 1); err != nil {
+		t.Fatalf("Failed to add input : %s", err)
+	}
+
+	// Add contract output
+	if err := tx.AddOutput(test.ContractLockingScript, 150, false, false); err != nil {
+		t.Fatalf("Failed to add contract output : %s", err)
+	}
+
+	// Add action output
+	modificationScript, err := protocol.Serialize(modification, true)
+	if err != nil {
+		t.Fatalf("Failed to serialize instrument modification action : %s", err)
+	}
+
+	modificationScriptOutputIndex := len(tx.Outputs)
+	if err := tx.AddOutput(modificationScript, 0, false, false); err != nil {
+		t.Fatalf("Failed to add instrument modification action output : %s", err)
+	}
+
+	// Add funding
+	fundingKey, fundingLockingScript, _ := state.MockKey()
+	fundingOutpoint := state.MockOutPoint(fundingLockingScript, 300)
+	spentOutputs = append(spentOutputs, &expanded_tx.Output{
+		LockingScript: fundingLockingScript,
+		Value:         300,
+	})
+
+	if err := tx.AddInput(*fundingOutpoint, fundingLockingScript, 300); err != nil {
+		t.Fatalf("Failed to add input : %s", err)
+	}
+
+	_, changeLockingScript, _ := state.MockKey()
+	tx.SetChangeLockingScript(changeLockingScript, "")
+
+	if _, err := tx.Sign([]bitcoin.Key{test.AdminKey, fundingKey}); err != nil {
+		t.Fatalf("Failed to sign tx : %s", err)
+	}
+
+	t.Logf("Created tx : %s", tx.String(bitcoin.MainNet))
+
+	addTransaction := &transactions.Transaction{
+		Tx:           tx.MsgTx,
+		SpentOutputs: spentOutputs,
+	}
+
+	transaction, err := test.Caches.Transactions.Add(ctx, addTransaction)
+	if err != nil {
+		t.Fatalf("Failed to add transaction : %s", err)
+	}
+
+	if err := agent.Process(ctx, transaction, []Action{{
+		OutputIndex: modificationScriptOutputIndex,
+		Action:      modification,
+		Agents: []ActionAgent{
+			{
+				LockingScript: test.ContractLockingScript,
+				IsRequest:     true,
+			},
+		},
+	}}); err != nil {
+		t.Fatalf("Failed to process transaction : %s", err)
+	}
+
+	test.Caches.Transactions.Release(ctx, transaction.GetTxID())
+
+	responseTx := test.Broadcaster.GetLastTx()
+	if responseTx == nil {
+		t.Fatalf("No response tx")
+	}
+
+	t.Logf("Response Tx : %s", responseTx)
+
+	// Find creation action
+	var creation *actions.InstrumentCreation
+	for _, txout := range responseTx.Tx.TxOut {
+		action, err := protocol.Deserialize(txout.LockingScript, true)
+		if err != nil {
+			continue
+		}
+
+		if a, ok := action.(*actions.InstrumentCreation); ok {
+			creation = a
+			break
+		}
+	}
+
+	if creation == nil {
+		t.Fatalf("Missing creation action")
+	}
+
+	js, _ = json.MarshalIndent(creation, "", "  ")
+	t.Logf("InstrumentCreation : %s", js)
+
+	payload, err := instruments.Deserialize([]byte(creation.InstrumentType),
+		creation.InstrumentPayload)
+	if err != nil {
+		t.Fatalf("Failed to deserialize payload : %s", err)
+	}
+
+	js, _ = json.MarshalIndent(payload, "", "  ")
+	t.Logf("Instrument Payload : %s", js)
+
+	_, ok := payload.(*instruments.Currency)
+	if !ok {
+		t.Errorf("Instrument payload not a currency")
+	}
+
+	time.Sleep(time.Millisecond) // wait for statistics to process
+
+	stats, err := statistics.FetchContractValue(ctx, test.Caches.Cache,
+		state.CalculateContractHash(test.ContractLockingScript), uint64(time.Now().UnixNano()))
+	if err != nil {
+		t.Fatalf("Failed to fetch contract statistics : %s", err)
+	}
+
+	js, _ = json.MarshalIndent(stats, "", "  ")
+	t.Logf("Stats : %s", js)
+
+	stats.Lock()
+
+	statAction := stats.GetAction(actions.CodeInstrumentModification)
+	if statAction == nil {
+		t.Fatalf("Missing statistics action for code")
+	}
+
+	if statAction.Count != 1 {
+		t.Fatalf("Wrong statistics action count : got %d, want %d", statAction.Count, 1)
+	}
+
+	if statAction.RejectedCount != 0 {
+		t.Fatalf("Wrong statistics action rejection count : got %d, want %d",
+			statAction.RejectedCount, 0)
+	}
+
+	stats.Unlock()
+
+	var instrumentCode state.InstrumentCode
+	copy(instrumentCode[:], creation.InstrumentCode)
+	stats, err = statistics.FetchInstrumentValue(ctx, test.Caches.Cache,
+		state.CalculateContractHash(test.ContractLockingScript), instrumentCode,
+		uint64(time.Now().UnixNano()))
+	if err != nil {
+		t.Fatalf("Failed to fetch instrument statistics : %s", err)
+	}
+
+	js, _ = json.MarshalIndent(stats, "", "  ")
+	t.Logf("Stats : %s", js)
+
+	stats.Lock()
+
+	statAction = stats.GetAction(actions.CodeInstrumentModification)
+	if statAction == nil {
+		t.Fatalf("Missing statistics action for code")
+	}
+
+	if statAction.Count != 1 {
+		t.Fatalf("Wrong statistics action count : got %d, want %d", statAction.Count, 1)
+	}
+
+	if statAction.RejectedCount != 0 {
+		t.Fatalf("Wrong statistics action rejection count : got %d, want %d",
+			statAction.RejectedCount, 0)
+	}
+
+	stats.Unlock()
+
+	StopTestAgent(ctx, t, test)
+}
+
+func Test_Instruments_Amendment_AddTransferFee(t *testing.T) {
+	ctx := logger.ContextWithLogger(context.Background(), true, true, "")
+	agent, test := StartTestAgentWithInstrument(ctx, t)
+
+	js, _ := json.MarshalIndent(test.Instrument.Creation, "", "  ")
+	t.Logf("Original Instrument Creation : %s", js)
+
+	key, _ := bitcoin.GenerateKey(bitcoin.MainNet)
+	ra, _ := key.RawAddress()
+	newDefinition := &actions.InstrumentDefinition{
+		AuthorizedTokenQty:         test.Instrument.Creation.AuthorizedTokenQty,
+		EnforcementOrdersPermitted: true,
+		InstrumentType:             test.Instrument.Creation.InstrumentType,
+		InstrumentPayload:          test.Instrument.Creation.InstrumentPayload,
+		TransferFee: &actions.FeeField{
+			Address:  ra.Bytes(),
+			Quantity: 5000,
+		},
+	}
+
+	amendments, err := test.Instrument.Creation.CreateAmendments(newDefinition)
+	if err != nil {
+		t.Fatalf("Failed to create amendments : %s", err)
+	}
+
+	for _, amendment := range amendments {
+		t.Logf("Amendment : %s", amendment.FullString())
+	}
+
+	if len(amendments) != 1 {
+		t.Fatalf("Wrong amendment count : got %d, want %d", len(amendments), 1)
+	}
+
+	modification := &actions.InstrumentModification{
+		InstrumentType:     test.Instrument.Creation.InstrumentType,
+		InstrumentCode:     test.Instrument.Creation.InstrumentCode,
+		InstrumentRevision: 0,
+		Amendments:         amendments,
+	}
+
+	tx := txbuilder.NewTxBuilder(0.05, 0.0)
+
+	// Add input
+	outpoint := state.MockOutPoint(test.AdminLockingScript, 1)
+	spentOutputs := []*expanded_tx.Output{
+		{
+			LockingScript: test.AdminLockingScript,
+			Value:         1,
+		},
+	}
+
+	if err := tx.AddInput(*outpoint, test.AdminLockingScript, 1); err != nil {
+		t.Fatalf("Failed to add input : %s", err)
+	}
+
+	// Add contract output
+	if err := tx.AddOutput(test.ContractLockingScript, 150, false, false); err != nil {
+		t.Fatalf("Failed to add contract output : %s", err)
+	}
+
+	// Add action output
+	modificationScript, err := protocol.Serialize(modification, true)
+	if err != nil {
+		t.Fatalf("Failed to serialize instrument modification action : %s", err)
+	}
+
+	modificationScriptOutputIndex := len(tx.Outputs)
+	if err := tx.AddOutput(modificationScript, 0, false, false); err != nil {
+		t.Fatalf("Failed to add instrument modification action output : %s", err)
+	}
+
+	// Add funding
+	fundingKey, fundingLockingScript, _ := state.MockKey()
+	fundingOutpoint := state.MockOutPoint(fundingLockingScript, 300)
+	spentOutputs = append(spentOutputs, &expanded_tx.Output{
+		LockingScript: fundingLockingScript,
+		Value:         300,
+	})
+
+	if err := tx.AddInput(*fundingOutpoint, fundingLockingScript, 300); err != nil {
+		t.Fatalf("Failed to add input : %s", err)
+	}
+
+	_, changeLockingScript, _ := state.MockKey()
+	tx.SetChangeLockingScript(changeLockingScript, "")
+
+	if _, err := tx.Sign([]bitcoin.Key{test.AdminKey, fundingKey}); err != nil {
+		t.Fatalf("Failed to sign tx : %s", err)
+	}
+
+	t.Logf("Created tx : %s", tx.String(bitcoin.MainNet))
+
+	addTransaction := &transactions.Transaction{
+		Tx:           tx.MsgTx,
+		SpentOutputs: spentOutputs,
+	}
+
+	transaction, err := test.Caches.Transactions.Add(ctx, addTransaction)
+	if err != nil {
+		t.Fatalf("Failed to add transaction : %s", err)
+	}
+
+	if err := agent.Process(ctx, transaction, []Action{{
+		OutputIndex: modificationScriptOutputIndex,
+		Action:      modification,
+		Agents: []ActionAgent{
+			{
+				LockingScript: test.ContractLockingScript,
+				IsRequest:     true,
+			},
+		},
+	}}); err != nil {
+		t.Fatalf("Failed to process transaction : %s", err)
+	}
+
+	test.Caches.Transactions.Release(ctx, transaction.GetTxID())
+
+	responseTx := test.Broadcaster.GetLastTx()
+	if responseTx == nil {
+		t.Fatalf("No response tx")
+	}
+
+	t.Logf("Response Tx : %s", responseTx)
+
+	// Find creation action
+	var creation *actions.InstrumentCreation
+	for _, txout := range responseTx.Tx.TxOut {
+		action, err := protocol.Deserialize(txout.LockingScript, true)
+		if err != nil {
+			continue
+		}
+
+		if a, ok := action.(*actions.InstrumentCreation); ok {
+			creation = a
+			break
+		}
+	}
+
+	if creation == nil {
+		t.Fatalf("Missing creation action")
+	}
+
+	js, _ = json.MarshalIndent(creation, "", "  ")
+	t.Logf("InstrumentCreation : %s", js)
+
+	payload, err := instruments.Deserialize([]byte(creation.InstrumentType),
+		creation.InstrumentPayload)
+	if err != nil {
+		t.Fatalf("Failed to deserialize payload : %s", err)
+	}
+
+	js, _ = json.MarshalIndent(payload, "", "  ")
+	t.Logf("Instrument Payload : %s", js)
+
+	_, ok := payload.(*instruments.Currency)
+	if !ok {
+		t.Errorf("Instrument payload not a currency")
+	}
+
+	time.Sleep(time.Millisecond) // wait for statistics to process
+
+	stats, err := statistics.FetchContractValue(ctx, test.Caches.Cache,
+		state.CalculateContractHash(test.ContractLockingScript), uint64(time.Now().UnixNano()))
+	if err != nil {
+		t.Fatalf("Failed to fetch contract statistics : %s", err)
+	}
+
+	js, _ = json.MarshalIndent(stats, "", "  ")
+	t.Logf("Stats : %s", js)
+
+	stats.Lock()
+
+	statAction := stats.GetAction(actions.CodeInstrumentModification)
+	if statAction == nil {
+		t.Fatalf("Missing statistics action for code")
+	}
+
+	if statAction.Count != 1 {
+		t.Fatalf("Wrong statistics action count : got %d, want %d", statAction.Count, 1)
+	}
+
+	if statAction.RejectedCount != 0 {
+		t.Fatalf("Wrong statistics action rejection count : got %d, want %d",
+			statAction.RejectedCount, 0)
+	}
+
+	stats.Unlock()
+
+	var instrumentCode state.InstrumentCode
+	copy(instrumentCode[:], creation.InstrumentCode)
+	stats, err = statistics.FetchInstrumentValue(ctx, test.Caches.Cache,
+		state.CalculateContractHash(test.ContractLockingScript), instrumentCode,
+		uint64(time.Now().UnixNano()))
+	if err != nil {
+		t.Fatalf("Failed to fetch instrument statistics : %s", err)
+	}
+
+	js, _ = json.MarshalIndent(stats, "", "  ")
+	t.Logf("Stats : %s", js)
+
+	stats.Lock()
+
+	statAction = stats.GetAction(actions.CodeInstrumentModification)
+	if statAction == nil {
+		t.Fatalf("Missing statistics action for code")
+	}
+
+	if statAction.Count != 1 {
+		t.Fatalf("Wrong statistics action count : got %d, want %d", statAction.Count, 1)
+	}
+
+	if statAction.RejectedCount != 0 {
+		t.Fatalf("Wrong statistics action rejection count : got %d, want %d",
+			statAction.RejectedCount, 0)
+	}
+
+	stats.Unlock()
+
+	StopTestAgent(ctx, t, test)
+}
+
+func Test_Instruments_Amendment_RemoveTransferFee(t *testing.T) {
+	ctx := logger.ContextWithLogger(context.Background(), true, true, "")
+	store := storage.NewMockStorage()
+	cacher := cacher.NewSimpleCache(store)
+	key, _ := bitcoin.GenerateKey(bitcoin.MainNet)
+	ls, _ := key.LockingScript()
+	agent, test := StartTestAgentWithCacherWithInstrumentTransferFee(ctx, t, store, cacher, 5000,
+		ls)
+
+	js, _ := json.MarshalIndent(test.Instrument.Creation, "", "  ")
+	t.Logf("Original Instrument Creation : %s", js)
+
+	newDefinition := &actions.InstrumentDefinition{
+		AuthorizedTokenQty:         test.Instrument.Creation.AuthorizedTokenQty,
+		EnforcementOrdersPermitted: true,
+		InstrumentType:             test.Instrument.Creation.InstrumentType,
+		InstrumentPayload:          test.Instrument.Creation.InstrumentPayload,
+	}
+
+	amendments, err := test.Instrument.Creation.CreateAmendments(newDefinition)
+	if err != nil {
+		t.Fatalf("Failed to create amendments : %s", err)
+	}
+
+	for _, amendment := range amendments {
+		t.Logf("Amendment : %s", amendment.FullString())
+	}
+
+	if len(amendments) != 1 {
+		t.Fatalf("Wrong amendment count : got %d, want %d", len(amendments), 1)
+	}
 
 	modification := &actions.InstrumentModification{
 		InstrumentType:     test.Instrument.Creation.InstrumentType,

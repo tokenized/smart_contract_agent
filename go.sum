@@ -110,10 +110,10 @@ github.com/tokenized/logger v0.1.4-0.20230915152315-06e93587a3c5/go.mod h1:bA5Pf
 github.com/tokenized/metrics v0.1.0 h1:iOn8Eax2WsYas0AZj4F0KXAw5aD86B9B4Ojn6kwgKsA=
 github.com/tokenized/metrics v0.1.0/go.mod h1:mL3Vm5rNdp90hZrfY5oVk9b8GpM89YqYGyBaLVIo2wE=
 github.com/tokenized/pkg v0.6.0/go.mod h1:reIXdZflcfFbuX1RvX90yAjlYVJaUiYDc5CWJ6qCQww=
-github.com/tokenized/pkg v0.7.1-0.20240221001011-1716cd646265 h1:ZbB3SlsgKcyvP5lXL+XYSjcvEuyG61WASU6VkAufNLY=
-github.com/tokenized/pkg v0.7.1-0.20240221001011-1716cd646265/go.mod h1:c1xkP+9ON6kwoMQB9LMpy34YcqUwqNXjPMlltYTYZIc=
-github.com/tokenized/specification v1.3.2-0.20240105200908-6b27de883834 h1:hvYXPkqoj6K6Y4qRUhkwyzX2wAdfhfIo/PbCLUK9fbM=
-github.com/tokenized/specification v1.3.2-0.20240105200908-6b27de883834/go.mod h1:RNuhWeIw0/QNVKmJQyY12a76HbS+353abuDT/ibgmfg=
+github.com/tokenized/pkg v0.7.1-0.20240318203228-bd5a23006dd1 h1:/SfYQOU6xBcOhWbkmdh4Qqln4Otipffv/qXtOJExFxI=
+github.com/tokenized/pkg v0.7.1-0.20240318203228-bd5a23006dd1/go.mod h1:c1xkP+9ON6kwoMQB9LMpy34YcqUwqNXjPMlltYTYZIc=
+github.com/tokenized/specification v1.3.2-0.20240319164336-d3d9a076f61e h1:HqmcmA3sfl3pEeIhBTqEsglSC/F8EQnNWZ2n4z36DmY=
+github.com/tokenized/specification v1.3.2-0.20240319164336-d3d9a076f61e/go.mod h1:RNuhWeIw0/QNVKmJQyY12a76HbS+353abuDT/ibgmfg=
 github.com/tokenized/spynode v0.4.3-0.20231215000849-3194f2f4bfa0 h1:z6ukWSQHg9RNSvrodfBdN1OT4xVXpN0CPbFWrt6bimo=
 github.com/tokenized/spynode v0.4.3-0.20231215000849-3194f2f4bfa0/go.mod h1:fH6wo6AFZOpk16dahXMzXb/0NUL1JKtbePwD29hT3xs=
 github.com/tokenized/threads v0.1.2 h1:olWOi2kZ4GLX4XmRbgHJzMbaTxp7CKMdiMbHJjKZaRQ=

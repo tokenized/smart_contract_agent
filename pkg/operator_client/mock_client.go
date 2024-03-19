@@ -142,16 +142,13 @@ func (c *MockClient) RequestSignedInput(ctx context.Context,
 	logger.InfoWithFields(ctx, []logger.Field{
 		logger.Stringer("hash", utxo.Hash),
 		logger.Stringer("unlocking_script", txb.MsgTx.TxIn[1].UnlockingScript),
-	}, "Added contract agent input")
+		logger.Stringer("public_key", c.operatorKey.PublicKey()),
+	}, "Added contract operator input")
 
 	logger.InfoWithFields(ctx, []logger.Field{
 		logger.Uint64("value", utxo.Value),
 		logger.Stringer("script", serviceLockingScript),
-	}, "Adding contract agent output")
-
-	logger.InfoWithFields(ctx, []logger.Field{
-		logger.Stringer("public_key", c.operatorKey.PublicKey()),
-	}, "Signing contract agent input with key")
+	}, "Adding contract operator output")
 
 	return etx, nil
 }
