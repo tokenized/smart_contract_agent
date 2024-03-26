@@ -790,7 +790,7 @@ func (a *Agent) migrateAdminBalances(ctx context.Context,
 		if err != nil {
 			return errors.Wrap(err, "get new balance")
 		}
-		defer a.caches.Balances.Release(ctx, contractLockingScript, instrumentCode, fromBalance)
+		defer a.caches.Balances.Release(ctx, contractLockingScript, instrumentCode, toBalance)
 
 		found = true
 		allBalances[i] = state.Balances{fromBalance, toBalance}
