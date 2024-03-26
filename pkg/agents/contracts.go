@@ -757,6 +757,7 @@ func (a *Agent) migrateAdminBalances(ctx context.Context,
 	}
 
 	allBalances := make(state.BalanceSet, len(instrumentCodes))
+	found := false
 	for i, instrumentCode := range instrumentCodes {
 		fromBalance, err := a.caches.Balances.Get(ctx, contractLockingScript, instrumentCode,
 			previousAdminLockingScript)
@@ -767,9 +768,14 @@ func (a *Agent) migrateAdminBalances(ctx context.Context,
 		if fromBalance == nil {
 			logger.InfoWithFields(ctx, []logger.Field{
 				logger.Stringer("instrument_code", instrumentCode),
-			}, "No previous admin balance for instrument")
+			}, "No previous admin balance found for instrument")
 			continue
 		}
+		defer a.caches.Balances.Release(ctx, contractLockingScript, instrumentCode, fromBalance)
+
+		logger.InfoWithFields(ctx, []logger.Field{
+			logger.Stringer("instrument_code", instrumentCode),
+		}, "Previous admin balance found for instrument")
 
 		toInitialBalance := &state.Balance{
 			LockingScript: adminLockingScript,
@@ -784,8 +790,15 @@ func (a *Agent) migrateAdminBalances(ctx context.Context,
 		if err != nil {
 			return errors.Wrap(err, "get new balance")
 		}
+		defer a.caches.Balances.Release(ctx, contractLockingScript, instrumentCode, fromBalance)
 
+		found = true
 		allBalances[i] = state.Balances{fromBalance, toBalance}
+	}
+
+	if !found {
+		logger.Info(ctx, "No previous admin balances found any instrument")
+		return nil
 	}
 
 	lockerResponseChannel := a.locker.AddRequest(allBalances)
@@ -799,6 +812,10 @@ func (a *Agent) migrateAdminBalances(ctx context.Context,
 	defer allBalances.Unlock()
 
 	for i, balances := range allBalances {
+		if len(balances) != 2 {
+			continue // no previous admin balance found
+		}
+
 		fromBalance := balances[0]
 		toBalance := balances[1]
 

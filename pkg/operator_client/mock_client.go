@@ -5,7 +5,6 @@ import (
 	"math/rand"
 
 	"github.com/tokenized/channels/contract_operator"
-	"github.com/tokenized/channels/unlocking_data"
 	"github.com/tokenized/logger"
 	"github.com/tokenized/pkg/bitcoin"
 	"github.com/tokenized/pkg/expanded_tx"
@@ -137,7 +136,7 @@ func (c *MockClient) RequestSignedInput(ctx context.Context,
 		Tx: fundingTx,
 	})
 
-	println("signed tx", unlocking_data.TxString(etx))
+	println("signed tx", txbuilder.TxString(etx))
 
 	logger.InfoWithFields(ctx, []logger.Field{
 		logger.Stringer("hash", utxo.Hash),
