@@ -187,6 +187,12 @@ func (a *Agent) ProcessPeerChannelMessage(ctx context.Context, msg peer_channels
 func (a *Agent) AddResponder(ctx context.Context, requestTxID bitcoin.Hash32,
 	peerChannel *peer_channels.Channel) error {
 
+	logger.InfoWithFields(ctx, []logger.Field{
+		logger.Stringer("agent_locking_script", a.LockingScript()),
+		logger.String("peer_channel", peerChannel.MaskedString()),
+		logger.Stringer("request_txid", requestTxID),
+	}, "Adding response peer channel")
+
 	newResponder := &state.Responder{
 		PeerChannels: peer_channels.Channels{peerChannel},
 	}
@@ -285,6 +291,23 @@ func ProcessResponses(ctx context.Context, peerChannelResponder *PeerChannelResp
 
 func Respond(ctx context.Context, caches *state.Caches, peerChannelsFactory *peer_channels.Factory,
 	response PeerChannelResponse) error {
+
+	ctx = logger.ContextWithLogTrace(ctx, uuid.New().String())
+
+	fields := []logger.Field{
+		logger.Stringer("agent_locking_script", response.AgentLockingScript),
+		logger.Stringer("request_txid", response.RequestTxID),
+	}
+
+	if response.Etx != nil {
+		fields = append(fields, logger.Stringer("response_txid", response.Etx.TxID()))
+	}
+
+	if response.Response != nil {
+		fields = append(fields, logger.Stringer("response_status", response.Response.Status))
+	}
+
+	logger.InfoWithFields(ctx, fields, "Sending peer channel response")
 
 	if err := postToResponders(ctx, caches, peerChannelsFactory, response.AgentLockingScript,
 		response.RequestTxID, response.Etx, response.Response, response.Key); err != nil {

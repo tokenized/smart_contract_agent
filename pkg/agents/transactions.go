@@ -361,8 +361,8 @@ func (a *Agent) Process(ctx context.Context, transaction *transactions.Transacti
 
 	logger.InfoWithFields(txCtx, []logger.Field{
 		logger.Stringer("txid", txid),
-		logger.Stringer("contract_locking_script", agentLockingScript),
-	}, "Processing transaction")
+		logger.Stringer("agent_locking_script", agentLockingScript),
+	}, "Processing transaction for agent")
 
 	config := a.Config()
 	minFeeRate := config.MinFeeRate
@@ -408,8 +408,8 @@ func (a *Agent) ProcessUnsafe(ctx context.Context, transaction *transactions.Tra
 	agentLockingScript := a.LockingScript()
 	logger.WarnWithFields(ctx, []logger.Field{
 		logger.Stringer("txid", txid),
-		logger.Stringer("contract_locking_script", agentLockingScript),
-	}, "Processing unsafe transaction")
+		logger.Stringer("agent_locking_script", agentLockingScript),
+	}, "Processing unsafe transaction for agent")
 
 	for i, action := range actionList {
 		for _, actionAgent := range action.Agents {
@@ -470,7 +470,7 @@ func (a *Agent) processAction(ctx context.Context, agentLockingScript bitcoin.Sc
 	if len(processed) > 0 {
 		logger.InfoWithFields(ctx, []logger.Field{
 			logger.Stringer("tx_trace", trace), // link tx processing to action processing
-			logger.Stringer("contract_locking_script", agentLockingScript),
+			logger.Stringer("agent_locking_script", agentLockingScript),
 			logger.Stringer("txid", txid),
 			logger.Int("action_index", actionIndex),
 			logger.String("action_code", action.Code()),
@@ -488,7 +488,7 @@ func (a *Agent) processAction(ctx context.Context, agentLockingScript bitcoin.Sc
 		} else if added {
 			logger.InfoWithFields(ctx, []logger.Field{
 				logger.Stringer("tx_trace", trace), // link tx processing to action processing
-				logger.Stringer("contract_locking_script", agentLockingScript),
+				logger.Stringer("agent_locking_script", agentLockingScript),
 				logger.Stringer("txid", txid),
 				logger.String("action", action.Code()),
 				logger.Int("action_index", actionIndex),
@@ -496,7 +496,7 @@ func (a *Agent) processAction(ctx context.Context, agentLockingScript bitcoin.Sc
 		} else {
 			logger.InfoWithFields(ctx, []logger.Field{
 				logger.Stringer("tx_trace", trace), // link tx processing to action processing
-				logger.Stringer("contract_locking_script", agentLockingScript),
+				logger.Stringer("agent_locking_script", agentLockingScript),
 				logger.Stringer("txid", txid),
 				logger.String("action", action.Code()),
 				logger.Int("action_index", actionIndex),
@@ -557,7 +557,7 @@ func (a *Agent) processAction(ctx context.Context, agentLockingScript bitcoin.Sc
 
 	logger.InfoWithFields(ctx, []logger.Field{
 		logger.Stringer("tx_trace", trace), // link tx processing to action processing
-		logger.Stringer("contract_locking_script", agentLockingScript),
+		logger.Stringer("agent_locking_script", agentLockingScript),
 		logger.Stringer("txid", txid),
 		logger.Int("action_index", actionIndex),
 		logger.String("action_code", action.Code()),
