@@ -322,7 +322,7 @@ func (a *Agent) processFreezeOrder(ctx context.Context, transaction *transaction
 					fmt.Sprintf("Balance[%d]: not found", i))
 			}
 
-			quantity := balance.AddFreeze(txid, quantities[i], order.FreezePeriod)
+			quantity := balance.AddFreeze(txid, actionIndex, quantities[i], order.FreezePeriod)
 
 			freeze.Quantities = append(freeze.Quantities, &actions.QuantityIndexField{
 				Index:    uint32(len(freezeTx.Outputs)),
@@ -403,7 +403,7 @@ func (a *Agent) processFreezeOrder(ctx context.Context, transaction *transaction
 			instrument.Freeze(freezeTxID, order.FreezePeriod, now)
 		}
 	} else {
-		balances.SettleFreeze(txid, freezeTxID)
+		balances.SettleFreeze(txid, actionIndex, freezeTxID, freezeScriptOutputIndex)
 	}
 
 	// Set freeze tx as processed.
@@ -485,6 +485,7 @@ func (a *Agent) processThawOrder(ctx context.Context, transaction *transactions.
 	freezeTransaction.Lock()
 
 	var freeze *actions.Freeze
+	freezeIndex := 0
 	outputCount := freezeTransaction.OutputCount()
 	for i := 0; i < outputCount; i++ {
 		output := freezeTransaction.Output(i)
@@ -494,6 +495,7 @@ func (a *Agent) processThawOrder(ctx context.Context, transaction *transactions.
 		}
 
 		if a, ok := action.(*actions.Freeze); ok {
+			freezeIndex = i
 			freeze = a
 		}
 	}
@@ -676,7 +678,7 @@ func (a *Agent) processThawOrder(ctx context.Context, transaction *transactions.
 		if isFull {
 			instrument.Thaw(freeze.Timestamp)
 		} else {
-			balances.RemoveFreeze(freezeTxID)
+			balances.RemoveFreeze(freezeTxID, freezeIndex)
 		}
 	}
 
@@ -886,7 +888,7 @@ func (a *Agent) processConfiscateOrder(ctx context.Context, transaction *transac
 		}
 
 		quantity := quantities[i]
-		finalQuantity, err := balance.AddConfiscation(txid, quantity)
+		finalQuantity, err := balance.AddConfiscation(txid, actionIndex, quantity)
 		if err != nil {
 			balances.RevertPending()
 
@@ -978,8 +980,9 @@ func (a *Agent) processConfiscateOrder(ctx context.Context, transaction *transac
 	}
 	defer a.transactions.Release(ctx, confiscationTxID)
 
-	balances.FinalizeConfiscation(txid, confiscationTxID, now)
-	depositBalance.Settle(ctx, txid, confiscationTxID, now)
+	balances.FinalizeConfiscation(txid, confiscationTxID, confiscationScriptOutputIndex, now)
+	depositBalance.Settle(ctx, txid, actionIndex, confiscationTxID, confiscationScriptOutputIndex,
+		now)
 
 	// Set confiscation tx as processed.
 	confiscationTransaction.Lock()
@@ -1174,7 +1177,7 @@ func (a *Agent) processFreeze(ctx context.Context, transaction *transactions.Tra
 					continue
 				}
 
-				balance.AddFreeze(txid, quantities[i], freeze.FreezePeriod)
+				balance.AddFreeze(txid, actionIndex, quantities[i], freeze.FreezePeriod)
 			}
 		}
 	}
@@ -1235,6 +1238,7 @@ func (a *Agent) processThaw(ctx context.Context, transaction *transactions.Trans
 
 	config := a.Config()
 	var freeze *actions.Freeze
+	freezeIndex := 0
 	outputCount := freezeTransaction.OutputCount()
 	for i := 0; i < outputCount; i++ {
 		output := freezeTransaction.Output(i)
@@ -1244,6 +1248,7 @@ func (a *Agent) processThaw(ctx context.Context, transaction *transactions.Trans
 		}
 
 		if a, ok := action.(*actions.Freeze); ok {
+			freezeIndex = i
 			freeze = a
 		}
 	}
@@ -1345,7 +1350,7 @@ func (a *Agent) processThaw(ctx context.Context, transaction *transactions.Trans
 			}
 			defer balances.Unlock()
 
-			balances.RemoveFreeze(freezeTxID)
+			balances.RemoveFreeze(freezeTxID, freezeIndex)
 		}
 	}
 
@@ -1379,7 +1384,33 @@ func (a *Agent) processConfiscation(ctx context.Context, transaction *transactio
 		return nil // Not for this agent's contract
 	}
 
-	outputCount := transaction.OutputCount()
+	orderTransaction, err := a.transactions.Get(ctx, orderTxID)
+	if err != nil {
+		transaction.Unlock()
+		return errors.Wrapf(err, "get order tx: %s", orderTxID)
+	}
+
+	if orderTransaction == nil {
+		transaction.Unlock()
+		return errors.Wrapf(err, "missing order tx: %s", orderTxID)
+	}
+
+	isTest := a.Config().IsTest
+	orderOutputIndex := 0
+	orderTransaction.Lock()
+	for outputIndex, txout := range orderTransaction.Tx.TxOut {
+		action, err := protocol.Deserialize(txout.LockingScript, isTest)
+		if err != nil {
+			continue
+		}
+
+		if _, ok := action.(*actions.Order); ok {
+			orderOutputIndex = outputIndex
+			break
+		}
+	}
+	orderTransaction.Unlock()
+	a.transactions.Release(ctx, orderTxID)
 
 	if _, err := a.addResponseTxID(ctx, orderTxID, txid, confiscation, actionIndex); err != nil {
 		transaction.Unlock()
@@ -1395,6 +1426,7 @@ func (a *Agent) processConfiscation(ctx context.Context, transaction *transactio
 		logger.String("instrument_id", instrumentID),
 	}, "Confiscation of instrument")
 
+	outputCount := transaction.OutputCount()
 	highestIndex := 0
 	balances := make(state.Balances, len(confiscation.Quantities))
 	for i, target := range confiscation.Quantities {
@@ -1496,7 +1528,8 @@ func (a *Agent) processConfiscation(ctx context.Context, transaction *transactio
 		}
 
 		// Update balance
-		if addedBalance.Settle(ctx, orderTxID, txid, confiscation.Timestamp) {
+		if addedBalance.Settle(ctx, orderTxID, orderOutputIndex, txid, actionIndex,
+			confiscation.Timestamp) {
 			logger.WarnWithFields(ctx, []logger.Field{
 				logger.Timestamp("timestamp", int64(addedBalance.Timestamp)),
 				logger.Timestamp("existing_timestamp", int64(confiscation.Timestamp)),
@@ -1539,7 +1572,8 @@ func (a *Agent) processConfiscation(ctx context.Context, transaction *transactio
 			logger.Uint64("quantity", addedDepositBalance.Quantity),
 			logger.Uint64("old_quantity", depositBalance.Quantity),
 		}, "Older confiscation ignored")
-	} else if addedDepositBalance.Settle(ctx, orderTxID, txid, confiscation.Timestamp) {
+	} else if addedDepositBalance.Settle(ctx, orderTxID, orderOutputIndex, txid, actionIndex,
+		confiscation.Timestamp) {
 		// Update balance
 		logger.WarnWithFields(ctx, []logger.Field{
 			logger.Timestamp("timestamp", int64(addedDepositBalance.Timestamp)),

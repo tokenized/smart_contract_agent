@@ -696,6 +696,20 @@ func (a *Agent) processAction(ctx context.Context, agentLockingScript bitcoin.Sc
 		if err := a.BroadcastTx(ctx, responseEtx, nil); err != nil {
 			return errors.Wrap(err, "broadcast")
 		}
+
+		if isRequest && a.responseIsFinal(responseEtx) {
+			if err := a.updateRequestDependencies(ctx, transaction, txid, actionIndex); err != nil {
+				return errors.Wrap(err, "update request dependencies")
+			}
+		}
+	}
+
+	if !isRequest && action.Code() != actions.CodeMessage {
+		// A multi-contract settlement will come in as a settlement that the agent hasn't seen.
+		if err := a.updateResponseDependencies(ctx, transaction, txid,
+			actionIndex); err != nil {
+			return errors.Wrap(err, "update response dependencies")
+		}
 	}
 
 	if processError != nil {
@@ -745,6 +759,154 @@ func (a *Agent) processAction(ctx context.Context, agentLockingScript bitcoin.Sc
 		}
 
 		return errors.Wrap(processError, "process")
+	}
+
+	return nil
+}
+
+func (a *Agent) responseIsFinal(etx *expanded_tx.ExpandedTx) bool {
+	isTest := a.Config().IsTest
+	for _, txout := range etx.Tx.TxOut {
+		action, err := protocol.Deserialize(txout.LockingScript, isTest)
+		if err != nil {
+			continue
+		}
+
+		switch action.(type) {
+		case *actions.Message: // inter contract communication, not a response to the request
+			return false
+		default:
+			return true
+		}
+	}
+
+	return false
+}
+
+func (a *Agent) updateRequestDependencies(ctx context.Context,
+	transaction *transactions.Transaction, txid bitcoin.Hash32, actionIndex int) error {
+
+	transaction.Lock()
+	dependsOnActions := transaction.DependsOnActions.Copy()
+	dependentActions := transaction.DependentActions.Copy()
+	transaction.Unlock()
+
+	if len(dependsOnActions) > 0 {
+		for _, dependsOnAction := range dependsOnActions {
+			logger.InfoWithFields(ctx, []logger.Field{
+				logger.JSON("action", dependsOnAction),
+			}, "Removing dependency for action")
+
+			dependsOnTransaction, err := a.transactions.Get(ctx, dependsOnAction.TxID)
+			if err != nil {
+				return errors.Wrapf(err, "get depends on tx: %s", dependsOnAction.TxID)
+			}
+
+			if dependsOnTransaction == nil {
+				return errors.Wrap(ErrNotFound, dependsOnAction.TxID.String())
+			}
+			defer a.transactions.Release(ctx, dependsOnAction.TxID)
+
+			dependsOnTransaction.Lock()
+			dependsOnTransaction.RemoveDependentAction(dependsOnAction)
+			dependsOnTransaction.Unlock()
+		}
+	}
+
+	if len(dependentActions) > 0 {
+		// Trigger this tx to reprocess out of band.
+		action := transactions.Action{
+			TxID:  txid,
+			Index: uint32(actionIndex),
+		}
+
+		if err := a.triggerDependency(ctx, action); err != nil {
+			return errors.Wrap(err, "trigger dependencies")
+		}
+	}
+
+	return nil
+}
+
+func (a *Agent) updateResponseDependencies(ctx context.Context,
+	transaction *transactions.Transaction, txid bitcoin.Hash32, actionIndex int) error {
+
+	transaction.Lock()
+	if transaction.Tx == nil || len(transaction.Tx.TxIn) == 0 {
+		transaction.Unlock()
+		logger.WarnWithFields(ctx, []logger.Field{
+			logger.Stringer("txid", txid),
+		}, "Response tx with no inputs")
+
+		return nil // no inputs
+	}
+	requestTxID := transaction.Tx.TxIn[0].PreviousOutPoint.Hash
+	transaction.Unlock()
+
+	requestTransaction, err := a.transactions.Get(ctx, requestTxID)
+	if err != nil {
+		return errors.Wrapf(err, "get request tx: %s", requestTxID)
+	}
+
+	if requestTransaction == nil {
+		return errors.Wrap(ErrNotFound, requestTxID.String())
+	}
+	defer a.transactions.Release(ctx, requestTxID)
+
+	requestTransaction.Lock()
+	dependsOnActions := requestTransaction.DependsOnActions.Copy()
+	dependentActions := requestTransaction.DependentActions.Copy()
+	requestTransaction.Unlock()
+
+	if len(dependsOnActions) > 0 {
+		for _, dependsOnAction := range dependsOnActions {
+			logger.InfoWithFields(ctx, []logger.Field{
+				logger.JSON("action", dependsOnAction),
+			}, "Removing dependency for action")
+
+			dependsOnTransaction, err := a.transactions.Get(ctx, dependsOnAction.TxID)
+			if err != nil {
+				return errors.Wrapf(err, "get depends on tx: %s", dependsOnAction.TxID)
+			}
+
+			if dependsOnTransaction == nil {
+				return errors.Wrap(ErrNotFound, dependsOnAction.TxID.String())
+			}
+			defer a.transactions.Release(ctx, dependsOnAction.TxID)
+
+			dependsOnTransaction.Lock()
+			dependsOnTransaction.RemoveDependentAction(dependsOnAction)
+			dependsOnTransaction.Unlock()
+		}
+	}
+
+	if len(dependentActions) > 0 {
+		isTest := a.Config().IsTest
+		requestTransaction.Lock()
+		requestActionIndex := 0
+		for outputIndex, txout := range requestTransaction.Tx.TxOut {
+			action, err := protocol.Deserialize(txout.LockingScript, isTest)
+			if err != nil {
+				continue
+			}
+
+			switch action.(type) {
+			case *actions.Message: // inter contract communication, not the request we are looking for
+			default:
+				requestActionIndex = outputIndex
+			}
+		}
+		requestTransaction.Unlock()
+
+		// Trigger this tx to reprocess out of band.
+		action := transactions.Action{
+			TxID:  requestTxID,
+			Index: uint32(requestActionIndex),
+		}
+
+		if err := a.triggerDependency(ctx, action); err != nil {
+			return errors.Wrap(err, "trigger dependencies")
+		}
 	}
 
 	return nil

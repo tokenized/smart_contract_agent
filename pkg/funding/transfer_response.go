@@ -53,6 +53,7 @@ type InstrumentData struct {
 	Code                         []byte
 	TransferFee                  uint64
 	TransferFeeLockingScriptSize int
+	TransferFeeInCurrentToken    bool
 }
 
 type Contracts []*ContractData
@@ -247,8 +248,16 @@ func CalculateTransferResponseFee(transferTx *wire.MsgTx, inputLockingScriptSize
 				instrumentTransfer.InstrumentCode)
 		}
 
-		currentFeeData.fee += instrument.TransferFee
 		if instrument.TransferFee > 0 && instrument.TransferFeeLockingScriptSize > 0 {
+			if !instrument.TransferFeeInCurrentToken {
+				currentFeeData.fee += instrument.TransferFee
+			} else {
+				// Dust for settlement output of transfer fee locking script
+				dust := fees.DustLimitForLockingScriptSize(instrument.TransferFeeLockingScriptSize,
+					dustFeeRate)
+				currentFeeData.dust += dust
+			}
+
 			outputSize := fees.OutputSizeForLockingScriptSize(instrument.TransferFeeLockingScriptSize)
 			currentFeeData.responseSize += outputSize
 		}
@@ -257,7 +266,7 @@ func CalculateTransferResponseFee(transferTx *wire.MsgTx, inputLockingScriptSize
 		for _, sender := range instrumentTransfer.InstrumentSenders {
 			outputSize := fees.OutputSizeForLockingScriptSize(inputLockingScriptSizes[sender.Index])
 			currentFeeData.responseSize += outputSize
-			currentFeeData.dust += fees.DustLimit(outputSize, float64(dustFeeRate))
+			currentFeeData.dust += fees.DustLimit(outputSize, dustFeeRate)
 			currentFeeData.payloadSize += FlatSettlementEntrySize
 		}
 
@@ -275,7 +284,7 @@ func CalculateTransferResponseFee(transferTx *wire.MsgTx, inputLockingScriptSize
 
 			outputSize := fees.OutputSizeForLockingScriptSize(len(lockingScript))
 			currentFeeData.responseSize += outputSize
-			currentFeeData.dust += fees.DustLimit(outputSize, float64(dustFeeRate))
+			currentFeeData.dust += fees.DustLimit(outputSize, dustFeeRate)
 			currentFeeData.payloadSize += FlatSettlementEntrySize
 		}
 	}

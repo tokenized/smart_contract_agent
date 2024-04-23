@@ -36,10 +36,12 @@ type Config struct {
 	Agents    agents.Config    `json:"agents"`
 
 	WhatsOnChainAPIKey         string          `envconfig:"WOC_API_KEY" json:"api_key" masked:"true"`
-	WhatsOnChainDialTimeout    config.Duration `envconfig:"WOC_DIAL_TIMEOUT" json:"woc_dial_timeout"`
-	WhatsOnChainRequestTimeout config.Duration `envconfig:"WOC_REQUEST_TIMEOUT" json:"woc_request_timeout"`
+	WhatsOnChainDialTimeout    config.Duration `default:"10s" envconfig:"WOC_DIAL_TIMEOUT" json:"woc_dial_timeout"`
+	WhatsOnChainRequestTimeout config.Duration `default:"30s" envconfig:"WOC_REQUEST_TIMEOUT" json:"woc_request_timeout"`
 
 	Network bitcoin.Network `default:"mainnet" json:"network" envconfig:"NETWORK"`
+
+	ChannelTimeout config.Duration `default:"1s" envconfig:"CHANNEL_TIMEOUT" json:"channel_timeout"`
 
 	Storage storage.Config     `json:"storage"`
 	Logger  logger.SetupConfig `json:"logger"`
@@ -106,16 +108,18 @@ func main() {
 
 	peerChannelResponses := make(chan agents.PeerChannelResponse)
 
+	dependencyTrigger := agents.NewDependencyTrigger(1, cfg.ChannelTimeout.Duration, transactions)
+
 	agent, err := agents.NewAgent(ctx, cfg.AgentData, cfg.Agents, caches, transactions, services,
 		locker, store, broadcaster, woc, woc, nil, agentStore, peerChannelsFactory,
-		peerChannelResponses, nil)
+		peerChannelResponses, nil, dependencyTrigger.Trigger)
 	if err != nil {
 		logger.Fatal(ctx, "Failed to create agent : %s", err)
 	}
 
 	agentStore.SetAgent(agent)
 
-	var lockerWait, peerChannelResponseWait, loadWait sync.WaitGroup
+	var lockerWait, peerChannelResponseWait, loadWait, dependencyTriggerWait sync.WaitGroup
 
 	lockerThread, lockerComplete := threads.NewInterruptableThreadComplete("Balance Locker",
 		locker.Run, &lockerWait)
@@ -126,6 +130,9 @@ func main() {
 			return agents.ProcessResponses(ctx, peerChannelResponder, peerChannelResponses)
 		}, &peerChannelResponseWait)
 
+	dependencyTriggerThread, dependencyTriggerComplete := threads.NewInterruptableThreadComplete("Dependency Trigger",
+		dependencyTrigger.Run, &dependencyTriggerWait)
+
 	loadThread, loadComplete := threads.NewInterruptableThreadComplete("Load",
 		func(ctx context.Context, interrupt <-chan interface{}) error {
 			return load(ctx, interrupt, agent, transactions, woc)
@@ -133,6 +140,7 @@ func main() {
 
 	lockerThread.Start(ctx)
 	peerChannelResponseThread.Start(ctx)
+	dependencyTriggerThread.Start(ctx)
 	loadThread.Start(ctx)
 
 	// Shutdown
@@ -152,6 +160,9 @@ func main() {
 	case err := <-peerChannelResponseComplete:
 		logger.Error(ctx, "Peer Channel Response completed : %s", err)
 
+	case err := <-dependencyTriggerComplete:
+		logger.Error(ctx, "Dependency Trigger completed : %s", err)
+
 	case err := <-loadComplete:
 		if err != nil {
 			logger.Error(ctx, "Load completed : %s", err)
@@ -165,6 +176,9 @@ func main() {
 
 	loadThread.Stop(ctx)
 	loadWait.Wait()
+
+	dependencyTriggerThread.Stop(ctx)
+	dependencyTriggerWait.Wait()
 
 	lockerThread.Stop(ctx)
 	lockerWait.Wait()

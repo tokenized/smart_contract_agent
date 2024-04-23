@@ -49,6 +49,7 @@ type Service struct {
 	peerChannelsFactory  *peer_channels.Factory
 	peerChannelResponses chan agents.PeerChannelResponse
 	statistics           *statistics.Processor
+	triggerDependency    agents.TriggerDependency
 
 	nextSpyNodeMessageID uint64
 
@@ -61,8 +62,8 @@ func NewService(agentData agents.AgentData, config agents.Config, spyNodeClient 
 	store storage.StreamStorage, broadcaster agents.Broadcaster, fetcher agents.Fetcher,
 	headers agents.BlockHeaders, scheduler *scheduler.Scheduler,
 	peerChannelsFactory *peer_channels.Factory,
-	peerChannelResponses chan agents.PeerChannelResponse,
-	statistics *statistics.Processor) *Service {
+	peerChannelResponses chan agents.PeerChannelResponse, statistics *statistics.Processor,
+	triggerDependency agents.TriggerDependency) *Service {
 
 	return &Service{
 		agentData:            agentData,
@@ -80,6 +81,7 @@ func NewService(agentData agents.AgentData, config agents.Config, spyNodeClient 
 		peerChannelsFactory:  peerChannelsFactory,
 		peerChannelResponses: peerChannelResponses,
 		statistics:           statistics,
+		triggerDependency:    triggerDependency,
 		nextSpyNodeMessageID: 1,
 	}
 }
@@ -103,7 +105,7 @@ func (s *Service) Load(ctx context.Context) error {
 
 	agent, err := agents.NewAgent(ctx, s.agentData, s.config, s.caches, s.transactions, s.services,
 		s.locker, s.store, s.broadcaster, s.fetcher, s.headers, s.scheduler, s,
-		s.peerChannelsFactory, s.peerChannelResponses, s.statistics.Add)
+		s.peerChannelsFactory, s.peerChannelResponses, s.statistics.Add, s.triggerDependency)
 	if err != nil {
 		return errors.Wrap(err, "new agent")
 	}

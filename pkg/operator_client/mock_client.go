@@ -79,8 +79,6 @@ func (c *MockClient) GetAgents() []*MockAgent {
 func (c *MockClient) RequestSignedInput(ctx context.Context,
 	etx *expanded_tx.ExpandedTx) (*expanded_tx.ExpandedTx, error) {
 
-	println("RequestSignedInput")
-
 	etxc := etx.Copy()
 	etx = &etxc
 	txb, err := txbuilder.NewTxBuilderFromTransactionWithOutputs(0.05, 0.0, etx)
@@ -135,8 +133,6 @@ func (c *MockClient) RequestSignedInput(ctx context.Context,
 	etx.Ancestors = append(etx.Ancestors, &expanded_tx.AncestorTx{
 		Tx: fundingTx,
 	})
-
-	println("signed tx", txbuilder.TxString(etx))
 
 	logger.InfoWithFields(ctx, []logger.Field{
 		logger.Stringer("hash", utxo.Hash),

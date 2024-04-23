@@ -221,6 +221,7 @@ func (a *Agent) processSignatureRequest(ctx context.Context, transaction *transa
 	}
 
 	transferFees := make([]*wire.TxOut, len(transfer.Instruments))
+	instrumentTransferFeeInInstrument := make(map[state.InstrumentCode]bool)
 	for index, instrumentTransfer := range transfer.Instruments {
 		if instrumentTransfer.InstrumentType == protocol.BSVInstrumentID {
 			continue
@@ -232,6 +233,7 @@ func (a *Agent) processSignatureRequest(ctx context.Context, transaction *transa
 
 		var instrumentCode state.InstrumentCode
 		copy(instrumentCode[:], instrumentTransfer.InstrumentCode)
+		instrumentTransferFeeInInstrument[instrumentCode] = false
 
 		instrument, err := a.caches.Instruments.Get(ctx, agentLockingScript, instrumentCode)
 		if err != nil {
@@ -247,6 +249,10 @@ func (a *Agent) processSignatureRequest(ctx context.Context, transaction *transa
 		if instrument.Creation != nil && instrument.Creation.TransferFee != nil &&
 			len(instrument.Creation.TransferFee.Address) > 0 &&
 			instrument.Creation.TransferFee.Quantity > 0 {
+
+			if instrument.Creation.TransferFee.UseCurrentInstrument {
+				instrumentTransferFeeInInstrument[instrumentCode] = true
+			}
 
 			ra, err := bitcoin.DecodeRawAddress(instrument.Creation.TransferFee.Address)
 			if err == nil {
@@ -378,7 +384,7 @@ func (a *Agent) processSignatureRequest(ctx context.Context, transaction *transa
 
 		if err := a.verifyInstrumentSettlement(instrumentCtx, agentLockingScript,
 			instrumentCodes[index], settlementTx, allBalances[index], transferTxID,
-			instrumentSettlement, now); err != nil {
+			transferOutputIndex, instrumentSettlement, now); err != nil {
 			return nil, errors.Wrapf(err, "verify settlement: %s", instrumentID)
 		}
 	}
@@ -387,7 +393,7 @@ func (a *Agent) processSignatureRequest(ctx context.Context, transaction *transa
 	if transfer.ExchangeFee > 0 {
 		ra, err := bitcoin.DecodeRawAddress(transfer.ExchangeFeeAddress)
 		if err != nil {
-			allBalances.Revert(transferTxID)
+			allBalances.Revert(transferTxID, transferOutputIndex)
 
 			logger.Warn(ctx, "Invalid exchange fee address : %s", err)
 			return nil, platform.NewRejectErrorFull(actions.RejectionsMsgMalformed, err.Error(), 0,
@@ -396,7 +402,7 @@ func (a *Agent) processSignatureRequest(ctx context.Context, transaction *transa
 
 		lockingScript, err := ra.LockingScript()
 		if err != nil {
-			allBalances.Revert(transferTxID)
+			allBalances.Revert(transferTxID, transferOutputIndex)
 
 			logger.Warn(ctx, "Invalid exchange fee locking script : %s", err)
 			return nil, platform.NewRejectErrorFull(actions.RejectionsMsgMalformed, err.Error(), 0,
@@ -404,7 +410,7 @@ func (a *Agent) processSignatureRequest(ctx context.Context, transaction *transa
 		}
 
 		if findBitcoinOutput(settlementTx.MsgTx, lockingScript, transfer.ExchangeFee) == -1 {
-			allBalances.Revert(transferTxID)
+			allBalances.Revert(transferTxID, transferOutputIndex)
 
 			return nil, platform.NewRejectErrorFull(actions.RejectionsMsgMalformed,
 				"missing exchange fee output", 0, rejectOutputIndex, rejectLockingScript)
@@ -412,13 +418,50 @@ func (a *Agent) processSignatureRequest(ctx context.Context, transaction *transa
 	}
 
 	// Verify transfer fees
-	consolidatedTransferFees := consolidateOutputs(transferFees)
-	for _, transferFee := range consolidatedTransferFees {
-		if findBitcoinOutput(settlementTx.MsgTx, transferFee.LockingScript,
-			transferFee.Value) == -1 {
-			allBalances.Revert(transferTxID)
+	consolidatedTransferFees := consolidateTransferFees(transferFees)
+	for instrumentIndex, transferFee := range consolidatedTransferFees {
+		if transferFee == nil || transferFee.Value == 0 {
+			continue
+		}
+
+		if outputIndex := findOutput(settlementTx.MsgTx,
+			transferFee.LockingScript); outputIndex == -1 {
+			allBalances.Revert(transferTxID, transferOutputIndex)
+
 			return nil, platform.NewRejectErrorFull(actions.RejectionsMsgMalformed,
 				"missing transfer fee output", 0, rejectOutputIndex, rejectLockingScript)
+		} else {
+			if !agentLockingScript.Equal(transferContracts.Outputs[instrumentIndex].LockingScript) {
+				continue
+			}
+
+			instrumentSettlement := settlement.Instruments[instrumentIndex]
+			var instrumentCode state.InstrumentCode
+			copy(instrumentCode[:], instrumentSettlement.InstrumentCode)
+
+			inCurrentInstrument, exists := instrumentTransferFeeInInstrument[instrumentCode]
+			if !exists {
+				return nil, platform.NewRejectErrorFull(actions.RejectionsMsgMalformed,
+					"settlement index not in transfer", 0, rejectOutputIndex, rejectLockingScript)
+			}
+
+			if inCurrentInstrument {
+				// Find settlement for transfer fee. If it is in the tx then the quantity has
+				// already been verified above.
+				found := false
+				for _, s := range instrumentSettlement.Settlements {
+					if int(s.Index) == outputIndex {
+						found = true
+						break
+					}
+				}
+
+				if !found {
+					return nil, platform.NewRejectErrorFull(actions.RejectionsMsgMalformed,
+						"missing transfer fee settlement", 0, rejectOutputIndex,
+						rejectLockingScript)
+				}
+			}
 		}
 	}
 
@@ -429,7 +472,7 @@ func (a *Agent) processSignatureRequest(ctx context.Context, transaction *transa
 		contractFeeOutputIndex = findBitcoinOutput(settlementTx.MsgTx, feeLockingScript,
 			contractFee)
 		if contractFeeOutputIndex == -1 {
-			allBalances.Revert(transferTxID)
+			allBalances.Revert(transferTxID, transferOutputIndex)
 
 			return nil, platform.NewRejectErrorFull(actions.RejectionsMsgMalformed,
 				"missing contract fee output", 0, rejectOutputIndex, rejectLockingScript)
@@ -447,7 +490,7 @@ func (a *Agent) processSignatureRequest(ctx context.Context, transaction *transa
 	// already signed by some agents.
 	if err := a.Sign(ctx, settlementTx, nil, agentBitcoinTransferUnlocker, p2pkhEstimator,
 		bitcoinTransferEstimator); err != nil {
-		allBalances.Revert(transferTxID)
+		allBalances.Revert(transferTxID, transferOutputIndex)
 
 		if errors.Cause(err) == txbuilder.ErrInsufficientValue {
 			return nil, platform.NewRejectErrorFull(actions.RejectionsInsufficientTxFeeFunding,
@@ -463,7 +506,7 @@ func (a *Agent) processSignatureRequest(ctx context.Context, transaction *transa
 			transferTxID, settlementTx, settlementScriptOutputIndex, allBalances,
 			contractFeeOutputIndex, transferFees, now)
 		if err != nil {
-			allBalances.Revert(transferTxID)
+			allBalances.Revert(transferTxID, transferOutputIndex)
 			return etx, errors.Wrap(err, "complete settlement")
 		}
 
@@ -479,7 +522,7 @@ func (a *Agent) processSignatureRequest(ctx context.Context, transaction *transa
 	etx, err := a.createSignatureRequest(ctx, transaction, outputIndex, transferContracts,
 		settlementTx, now)
 	if err != nil {
-		allBalances.Revert(transferTxID)
+		allBalances.Revert(transferTxID, transferOutputIndex)
 		return nil, errors.Wrap(err, "send signature request")
 	}
 
@@ -595,8 +638,8 @@ func (a *Agent) fetchInstrumentSettlementBalances(ctx context.Context,
 
 func (a *Agent) verifyInstrumentSettlement(ctx context.Context, agentLockingScript bitcoin.Script,
 	instrumentCode state.InstrumentCode, settlementTx *txbuilder.TxBuilder, balances state.Balances,
-	transferTxID bitcoin.Hash32, instrumentSettlement *actions.InstrumentSettlementField,
-	now uint64) error {
+	transferTxID bitcoin.Hash32, transferOutputIndex int,
+	instrumentSettlement *actions.InstrumentSettlementField, now uint64) error {
 
 	for i, settlement := range instrumentSettlement.Settlements {
 		txout := settlementTx.MsgTx.TxOut[settlement.Index]
@@ -611,7 +654,7 @@ func (a *Agent) verifyInstrumentSettlement(ctx context.Context, agentLockingScri
 				fmt.Sprintf("missing settlement balance %d", i))
 		}
 
-		if rejectCode := balance.VerifySettlement(transferTxID,
+		if rejectCode := balance.VerifySettlement(transferTxID, transferOutputIndex,
 			settlement.Quantity, now); rejectCode != 0 {
 			return platform.NewRejectError(rejectCode, fmt.Sprintf("settlement %d", i))
 		}

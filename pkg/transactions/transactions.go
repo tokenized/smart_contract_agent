@@ -57,6 +57,13 @@ type Processed struct {
 	ResponseTxID *bitcoin.Hash32 `bsor:"3" json:"response_txid"`
 }
 
+type Action struct {
+	TxID  bitcoin.Hash32 `bsor:"1" json:"txid"`
+	Index uint32         `bsor:"2" json:"index"`
+}
+
+type ActionList []Action
+
 type Transaction struct {
 	Tx           *wire.MsgTx               `bsor:"1" json:"tx"`
 	State        TxState                   `bsor:"2" json:"state,omitempty"`
@@ -68,6 +75,19 @@ type Transaction struct {
 	// ConflictingTxIDs lists txs that have conflicting inputs and will "double spend" this tx if
 	// confirmed.
 	// ConflictingTxIDs []bitcoin.Hash32 `bsor:"7" json:"conflicting_txids"`
+
+	// DependentActions lists the request actions that require this tx to be complete before they
+	// can be processed. The common scenario for this is when an atomic swap transfer is waiting for
+	// another agent to respond to finalize it, any other transfer involving any of the same
+	// addresses can't be processed because it needs to be able to know the settlement balance of
+	// that address which requires knowing the final result of the atomic swap. This is a two way
+	// link so the other tx should contain this txid in its DependsOnActions.
+	DependentActions ActionList `bsor:"8" json:"waiting_txids"`
+
+	// DependsOnActions lists the request actions that this tx requires to be complete before this
+	// tx can be processed. This is a two way link so the other tx should contain this txid in its
+	// DependentActions.
+	DependsOnActions ActionList `bsor:"9" json:"waiting_txids"`
 
 	Ancestors expanded_tx.AncestorTxs `bsor:"-" json:"ancestors,omitempty"`
 
@@ -495,6 +515,68 @@ func (tx *Transaction) GetContractProcessed(contract state.ContractHash,
 	return tx.ContractProcessed(contract, actionIndex)
 }
 
+func (tx *Transaction) GetDependentActions() ActionList {
+	tx.Lock()
+	result := tx.DependentActions.Copy()
+	tx.Unlock()
+	return result
+}
+
+func (tx *Transaction) AddDependentAction(action Action) bool {
+	for _, dependentAction := range tx.DependentActions {
+		if dependentAction.Equal(action) {
+			return false // already have this action
+		}
+	}
+
+	tx.DependentActions = append(tx.DependentActions, action)
+	tx.MarkModified()
+	return true
+}
+
+func (tx *Transaction) RemoveDependentAction(action Action) bool {
+	for i, dependentAction := range tx.DependentActions {
+		if dependentAction.Equal(action) {
+			tx.DependentActions = append(tx.DependentActions[:i], tx.DependentActions[i+1:]...)
+			tx.MarkModified()
+			return true
+		}
+	}
+
+	return false
+}
+
+func (tx *Transaction) GetDependsOnActions() ActionList {
+	tx.Lock()
+	result := tx.DependsOnActions.Copy()
+	tx.Unlock()
+	return result
+}
+
+func (tx *Transaction) AddDependsOnAction(action Action) bool {
+	for _, dependsOnAction := range tx.DependsOnActions {
+		if dependsOnAction.Equal(action) {
+			return false // already have this action
+		}
+	}
+
+	tx.DependsOnActions = append(tx.DependsOnActions, action)
+	tx.MarkModified()
+	return true
+}
+
+func (tx *Transaction) RemoveDependsOnAction(action Action) bool {
+	for i, dependsOnAction := range tx.DependsOnActions {
+		if dependsOnAction.Equal(action) {
+			tx.DependsOnActions = append(tx.DependsOnActions[:i], tx.DependsOnActions[i+1:]...)
+			tx.MarkModified()
+			return true
+		}
+	}
+
+	return false
+}
+
 func TransactionPath(txid bitcoin.Hash32) string {
 	return fmt.Sprintf("%s/%s", txPath, txid)
 }
@@ -768,4 +850,23 @@ func (v TxState) String() string {
 	}
 
 	return strings.Join(values, "|")
+}
+
+func (a Action) Equal(o Action) bool {
+	return a.TxID.Equal(&o.TxID) && a.Index == o.Index
+}
+
+func (a Action) Copy() Action {
+	return Action{
+		TxID:  a.TxID.Copy(),
+		Index: a.Index,
+	}
+}
+
+func (l ActionList) Copy() ActionList {
+	result := make(ActionList, len(l))
+	for i, action := range l {
+		result[i] = action.Copy()
+	}
+	return result
 }

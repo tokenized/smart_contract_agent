@@ -418,6 +418,99 @@ func MockInstrumentWithTransferFee(ctx context.Context, caches *TestCaches, tran
 	return contractKey, contractLockingScript, adminKey, adminLockingScript, contract, instrument
 }
 
+func MockInstrumentWithTransferFeeUsingInstrument(ctx context.Context, caches *TestCaches,
+	transferFee uint64, transferFeeLockingScript bitcoin.Script) (bitcoin.Key, bitcoin.Script, bitcoin.Key, bitcoin.Script, *Contract, *Instrument) {
+
+	contractKey, contractLockingScript, adminKey, adminLockingScript, contract := MockContract(ctx,
+		caches)
+
+	currency := &instruments.Currency{
+		CurrencyCode: instruments.CurrenciesUnitedStatesDollar,
+		Precision:    2,
+	}
+
+	currencyBuf := &bytes.Buffer{}
+	if err := currency.Serialize(currencyBuf); err != nil {
+		panic(fmt.Sprintf("Failed to serialize instrument payload : %s", err))
+	}
+
+	authorizedQuantity := uint64(1000000)
+
+	contract.Lock()
+	contractAddress, err := bitcoin.RawAddressFromLockingScript(contractLockingScript)
+	if err != nil {
+		panic(fmt.Sprintf("Failed to create contract address : %s", err))
+	}
+	nextInstrumentCode := protocol.InstrumentCodeFromContract(contractAddress,
+		contract.InstrumentCount)
+	contract.InstrumentCount++
+	contract.Unlock()
+
+	transferFeeRawAddress, err := bitcoin.RawAddressFromLockingScript(transferFeeLockingScript)
+	if err != nil {
+		panic(fmt.Sprintf("Failed to convert transfer fee locking script : %s", err))
+	}
+
+	instrument := &Instrument{
+		InstrumentCode: InstrumentCode(nextInstrumentCode),
+		Creation: &actions.InstrumentCreation{
+			// InstrumentIndex                  uint64   `protobuf:"varint,2,opt,name=InstrumentIndex,proto3" json:"InstrumentIndex,omitempty"`
+			InstrumentCode: nextInstrumentCode[:],
+			// InstrumentPermissions            []byte   `protobuf:"bytes,3,opt,name=InstrumentPermissions,proto3" json:"InstrumentPermissions,omitempty"`
+			EnforcementOrdersPermitted: true,
+			// VotingRights                     bool     `protobuf:"varint,7,opt,name=VotingRights,proto3" json:"VotingRights,omitempty"`
+			// VoteMultiplier                   uint32   `protobuf:"varint,8,opt,name=VoteMultiplier,proto3" json:"VoteMultiplier,omitempty"`
+			// AdministrationProposal           bool     `protobuf:"varint,9,opt,name=AdministrationProposal,proto3" json:"AdministrationProposal,omitempty"`
+			// HolderProposal                   bool     `protobuf:"varint,10,opt,name=HolderProposal,proto3" json:"HolderProposal,omitempty"`
+			// InstrumentModificationGovernance uint32   `protobuf:"varint,11,opt,name=InstrumentModificationGovernance,proto3" json:"InstrumentModificationGovernance,omitempty"`
+			AuthorizedTokenQty: authorizedQuantity,
+			InstrumentType:     instruments.CodeCurrency,
+			InstrumentPayload:  currencyBuf.Bytes(),
+			// InstrumentRevision               uint32   `protobuf:"varint,15,opt,name=InstrumentRevision,proto3" json:"InstrumentRevision,omitempty"`
+			Timestamp: uint64(time.Now().UnixNano()),
+			// TradeRestrictions                []string `protobuf:"bytes,17,rep,name=TradeRestrictions,proto3" json:"TradeRestrictions,omitempty"`
+			TransferFee: &actions.FeeField{
+				Address:              transferFeeRawAddress.Bytes(),
+				Quantity:             transferFee,
+				UseCurrentInstrument: true,
+			},
+		},
+		CreationTxID: &bitcoin.Hash32{},
+	}
+	rand.Read(instrument.InstrumentCode[:])
+	instrument.Creation.InstrumentCode = instrument.InstrumentCode[:]
+	rand.Read(instrument.CreationTxID[:])
+	copy(instrument.InstrumentType[:], []byte(instruments.CodeCurrency))
+
+	addedInstrument, err := caches.Caches.Instruments.Add(ctx, contractLockingScript, instrument)
+	if err != nil {
+		panic(fmt.Sprintf("Failed to add instrument : %s", err))
+	}
+
+	if addedInstrument != instrument {
+		panic("Created instrument is not new")
+	}
+
+	balance := &Balance{
+		LockingScript: adminLockingScript,
+		Quantity:      authorizedQuantity,
+		Timestamp:     instrument.Creation.Timestamp,
+		TxID:          instrument.CreationTxID,
+	}
+	balance.Initialize()
+
+	adminBalance, err := caches.Caches.Balances.Add(ctx, contractLockingScript,
+		instrument.InstrumentCode, balance)
+	if err != nil {
+		panic(fmt.Sprintf("Failed to add admin balance : %s", err))
+	}
+
+	caches.Caches.Balances.Release(ctx, contractLockingScript, instrument.InstrumentCode,
+		adminBalance)
+
+	return contractKey, contractLockingScript, adminKey, adminLockingScript, contract, instrument
+}
+
 func MockInstrumentCreditNote(ctx context.Context,
 	caches *TestCaches) (bitcoin.Key, bitcoin.Script, bitcoin.Key, bitcoin.Script, *Contract, *Instrument) {
 

@@ -199,7 +199,8 @@ func (a *Agent) CancelPendingTransfer(ctx context.Context,
 		return nil, nil
 	}
 
-	if err := a.cancelTransfer(ctx, transferTransaction, transfer); err != nil {
+	if err := a.cancelTransfer(ctx, transferTransaction, transferOutputIndex,
+		transfer); err != nil {
 		return nil, errors.Wrap(err, "cancel transfer")
 	}
 

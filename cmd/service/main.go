@@ -122,13 +122,15 @@ func main() {
 
 	locker := locker.NewThreadedLocker(1000)
 
+	dependencyTrigger := agents.NewDependencyTrigger(1, cfg.ChannelTimeout.Duration, transactions)
+
 	service := service.NewService(cfg.AgentData, cfg.Agents, spyNode, caches, transactions,
 		services, locker, store, broadcaster, spyNode, headers.NewHeaders(spyNode), scheduler,
-		peerChannelsFactory, peerChannelResponses, statistics)
+		peerChannelsFactory, peerChannelResponses, statistics, dependencyTrigger.Trigger)
 	spyNode.RegisterHandler(service)
 
 	var spyNodeWait, lockerWait, peerChannelResponseWait, schedulerWait,
-		peerChannelWait, statisticsWait sync.WaitGroup
+		peerChannelWait, statisticsWait, dependencyTriggerWait sync.WaitGroup
 
 	schedulerThread, schedulerComplete := threads.NewInterruptableThreadComplete("Scheduler",
 		scheduler.Run, &schedulerWait)
@@ -154,6 +156,9 @@ func main() {
 				cfg.RequestPeerChannelReadToken)
 		}, &peerChannelWait)
 
+	dependencyTriggerThread, dependencyTriggerComplete := threads.NewInterruptableThreadComplete("Dependency Trigger",
+		dependencyTrigger.Run, &dependencyTriggerWait)
+
 	if err := service.Load(ctx); err != nil {
 		service.ReleaseAll(ctx)
 		logger.Fatal(ctx, "Failed to load service : %s", err)
@@ -162,6 +167,7 @@ func main() {
 	schedulerThread.Start(ctx)
 	lockerThread.Start(ctx)
 	peerChannelResponseThread.Start(ctx)
+	dependencyTriggerThread.Start(ctx)
 	spyNodeThread.Start(ctx)
 	statisticsThread.Start(ctx)
 	peerChannelThread.Start(ctx)
@@ -192,6 +198,9 @@ func main() {
 	case err := <-statisticsComplete:
 		logger.Error(ctx, "Statistics completed : %s", err)
 
+	case err := <-dependencyTriggerComplete:
+		logger.Error(ctx, "Dependency Trigger completed : %s", err)
+
 	case err := <-peerChannelComplete:
 		logger.Error(ctx, "Peer Channel Listen completed : %s", err)
 
@@ -204,6 +213,9 @@ func main() {
 
 	spyNodeThread.Stop(ctx)
 	spyNodeWait.Wait()
+
+	dependencyTriggerThread.Stop(ctx)
+	dependencyTriggerWait.Wait()
 
 	statisticsThread.Stop(ctx)
 	statisticsWait.Wait()

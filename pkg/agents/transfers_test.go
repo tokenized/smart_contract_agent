@@ -1442,7 +1442,8 @@ func Test_Transfers_Bitcoin_Refund(t *testing.T) {
 
 	agent, err := NewAgent(ctx, agentData, DefaultConfig(), test.Caches.Caches,
 		test.Caches.Transactions, test.Caches.Services, test.Locker, test.Store, broadcaster, nil,
-		nil, nil, nil, test.PeerChannelsFactory, test.PeerChannelResponses, test.Statistics.Add)
+		nil, nil, nil, test.PeerChannelsFactory, test.PeerChannelResponses, test.Statistics.Add,
+		test.DependencyTrigger.Trigger)
 	if err != nil {
 		t.Fatalf("Failed to create agent : %s", err)
 	}
@@ -1772,7 +1773,8 @@ func Test_Transfers_Bitcoin_Approve(t *testing.T) {
 
 	agent, err := NewAgent(ctx, agentData, DefaultConfig(), test.Caches.Caches,
 		test.Caches.Transactions, test.Caches.Services, test.Locker, test.Store, broadcaster, nil,
-		nil, nil, nil, test.PeerChannelsFactory, test.PeerChannelResponses, test.Statistics.Add)
+		nil, nil, nil, test.PeerChannelsFactory, test.PeerChannelResponses, test.Statistics.Add,
+		test.DependencyTrigger.Trigger)
 	if err != nil {
 		t.Fatalf("Failed to create agent : %s", err)
 	}
@@ -2172,4 +2174,1025 @@ func Test_AgentBitcoinTransfer_Script(t *testing.T) {
 	if !info.RefundMatches(recoverLockingScript, quantity) {
 		t.Errorf("Refund doesn't match")
 	}
+}
+
+// Test_Transfers_Dependent_Reprocess_FirstAgent performs a transfer that is delayed because it is
+// dependent on a multi-contract transfer that is pending. Then verifies that it is re-processed
+// after the multi-contract transfer is complete. This test is with a lock on a balance by the first
+// agent. This means it will execute the dependent settlement after it creates the settlement tx for
+// the multi-contract settlement, after having received a signature request from the other agent.
+func Test_Transfers_Dependent_Reprocess_FirstAgent(t *testing.T) {
+	ctx := logger.ContextWithLogger(context.Background(), true, true, "")
+	store := storage.NewMockStorage()
+	cache := cacher.NewSimpleCache(store)
+
+	test := StartTestDataWithCacher(ctx, t, store, cache)
+
+	broadcaster1 := state.NewMockTxBroadcaster()
+	broadcaster2 := state.NewMockTxBroadcaster()
+
+	contractKey1, contractLockingScript1, adminKey1, adminLockingScript1, contract1, instrument1 := state.MockInstrument(ctx,
+		&test.Caches.TestCaches)
+	_, feeLockingScript1, _ := state.MockKey()
+
+	agentData1 := AgentData{
+		Key:                contractKey1,
+		LockingScript:      contractLockingScript1,
+		MinimumContractFee: contract1.Formation.ContractFee,
+		FeeLockingScript:   feeLockingScript1,
+		IsActive:           true,
+	}
+
+	agent1, err := NewAgent(ctx, agentData1, DefaultConfig(), test.Caches.Caches,
+		test.Caches.Transactions, test.Caches.Services, test.Locker, test.Store, broadcaster1, nil,
+		nil, nil, nil, test.PeerChannelsFactory, test.PeerChannelResponses, test.Statistics.Add,
+		test.DependencyTrigger.Trigger)
+	if err != nil {
+		t.Fatalf("Failed to create agent : %s", err)
+	}
+	test.AddAgent(agent1)
+
+	agentTestData1 := &TestAgentData{
+		Agent:                 agent1,
+		Contract:              contract1,
+		Instrument:            instrument1,
+		ContractKey:           contractKey1,
+		ContractLockingScript: contractLockingScript1,
+		AdminKey:              adminKey1,
+		AdminLockingScript:    adminLockingScript1,
+		FeeLockingScript:      feeLockingScript1,
+		Broadcaster:           broadcaster1,
+		Caches:                test.Caches,
+	}
+
+	contractKey2, contractLockingScript2, adminKey2, adminLockingScript2, contract2, instrument2 := state.MockInstrument(ctx,
+		&test.Caches.TestCaches)
+	_, feeLockingScript2, _ := state.MockKey()
+
+	agentData2 := AgentData{
+		Key:                contractKey2,
+		LockingScript:      contractLockingScript2,
+		MinimumContractFee: contract2.Formation.ContractFee,
+		FeeLockingScript:   feeLockingScript2,
+		IsActive:           true,
+	}
+
+	agent2, err := NewAgent(ctx, agentData2, DefaultConfig(), test.Caches.Caches,
+		test.Caches.Transactions, test.Caches.Services, test.Locker, test.Store, broadcaster2, nil,
+		nil, nil, nil, test.PeerChannelsFactory, test.PeerChannelResponses, test.Statistics.Add,
+		test.DependencyTrigger.Trigger)
+	if err != nil {
+		t.Fatalf("Failed to create agent : %s", err)
+	}
+	test.AddAgent(agent2)
+
+	agentTestData2 := &TestAgentData{
+		Agent:                 agent2,
+		Contract:              contract2,
+		Instrument:            instrument2,
+		ContractKey:           contractKey2,
+		ContractLockingScript: contractLockingScript2,
+		AdminKey:              adminKey2,
+		AdminLockingScript:    adminLockingScript2,
+		FeeLockingScript:      feeLockingScript2,
+		Broadcaster:           broadcaster2,
+		Caches:                test.Caches,
+	}
+
+	receivers1, _, multiTransferTx := MockMultiContractTransferTx(ctx, t, test, contract1,
+		contract2, instrument1, instrument2)
+
+	responseTxs := TestProcessTxSingle(ctx, []*TestAgentData{agentTestData1, agentTestData2},
+		multiTransferTx)
+	if len(responseTxs) != 1 {
+		t.Fatalf("Wrong response tx count : got %d, want %d", len(responseTxs), 1)
+	}
+	settlementRequestTx := responseTxs[0]
+
+	t.Logf("Settlement request tx : %s", txbuilder.TxString(settlementRequestTx))
+
+	// The involved balances should be locked as pending in the first contract now as it is waiting
+	// on a response from the second contract.
+
+	_, transferTx := MockTransferTxWithReceivers(ctx, t, test, contract1, instrument1,
+		receivers1[:1])
+
+	responseTxs = TestProcessTxSingle(ctx, []*TestAgentData{agentTestData1}, transferTx)
+	// We should be waiting for the first settlement to complete so it will have set the dependency
+	// trigger and be waiting for the other settlement.
+	if len(responseTxs) != 0 {
+		t.Fatalf("Wrong response tx count : got %d, want %d", len(responseTxs), 0)
+	}
+
+	responseTxs = TestProcessTxSingle(ctx, []*TestAgentData{agentTestData1, agentTestData2},
+		settlementRequestTx)
+	if len(responseTxs) != 1 {
+		t.Fatalf("Wrong response tx count : got %d, want %d", len(responseTxs), 1)
+	}
+	signatureRequestTx := responseTxs[0]
+
+	t.Logf("Signature request tx : %s", txbuilder.TxString(signatureRequestTx))
+
+	responseTxs = TestProcessTx(ctx, []*TestAgentData{agentTestData1, agentTestData2},
+		signatureRequestTx)
+	if len(responseTxs) != 1 {
+		t.Fatalf("Wrong response tx count : got %d, want %d", len(responseTxs), 1)
+	}
+	multiSettlementTx := responseTxs[0]
+
+	t.Logf("Multi-contract settlement request tx : %s", txbuilder.TxString(multiSettlementTx))
+
+	time.Sleep(time.Millisecond * 100)
+
+	responseTxs = broadcaster1.GetAndClearTxs()
+	if len(responseTxs) != 1 {
+		t.Fatalf("Wrong response tx count : got %d, want %d", len(responseTxs), 1)
+	}
+	settlementTx := responseTxs[0]
+	t.Logf("Settlement tx : %s", txbuilder.TxString(settlementTx))
+
+	agent1.Release(ctx)
+	agent2.Release(ctx)
+	test.Caches.Caches.Instruments.Release(ctx, contractLockingScript1, instrument1.InstrumentCode)
+	test.Caches.Caches.Instruments.Release(ctx, contractLockingScript2, instrument2.InstrumentCode)
+	test.Caches.Caches.Contracts.Release(ctx, contractLockingScript1)
+	test.Caches.Caches.Contracts.Release(ctx, contractLockingScript2)
+	StopTestAgent(ctx, t, test)
+}
+
+// Test_Transfers_Dependent_Reprocess_SecondAgent performs a transfer that is delayed because it is
+// dependent on a multi-contract transfer that is pending. Then verifies that it is re-processed
+// after the multi-contract transfer is complete. This test is with a lock on a balance by the
+// second agent. This means it will execute the dependent settlement after it sees the settlement tx
+// for the multi-contract settlement, after having sent a signature request to the other agent.
+func Test_Transfers_Dependent_Reprocess_SecondAgent(t *testing.T) {
+	ctx := logger.ContextWithLogger(context.Background(), true, true, "")
+	store := storage.NewMockStorage()
+	cache := cacher.NewSimpleCache(store)
+
+	test := StartTestDataWithCacher(ctx, t, store, cache)
+
+	broadcaster1 := state.NewMockTxBroadcaster()
+	broadcaster2 := state.NewMockTxBroadcaster()
+
+	contractKey1, contractLockingScript1, adminKey1, adminLockingScript1, contract1, instrument1 := state.MockInstrument(ctx,
+		&test.Caches.TestCaches)
+	_, feeLockingScript1, _ := state.MockKey()
+
+	agentData1 := AgentData{
+		Key:                contractKey1,
+		LockingScript:      contractLockingScript1,
+		MinimumContractFee: contract1.Formation.ContractFee,
+		FeeLockingScript:   feeLockingScript1,
+		IsActive:           true,
+	}
+
+	agent1, err := NewAgent(ctx, agentData1, DefaultConfig(), test.Caches.Caches,
+		test.Caches.Transactions, test.Caches.Services, test.Locker, test.Store, broadcaster1, nil,
+		nil, nil, nil, test.PeerChannelsFactory, test.PeerChannelResponses, test.Statistics.Add,
+		test.DependencyTrigger.Trigger)
+	if err != nil {
+		t.Fatalf("Failed to create agent : %s", err)
+	}
+	test.AddAgent(agent1)
+
+	agentTestData1 := &TestAgentData{
+		Agent:                 agent1,
+		Contract:              contract1,
+		Instrument:            instrument1,
+		ContractKey:           contractKey1,
+		ContractLockingScript: contractLockingScript1,
+		AdminKey:              adminKey1,
+		AdminLockingScript:    adminLockingScript1,
+		FeeLockingScript:      feeLockingScript1,
+		Broadcaster:           broadcaster1,
+		Caches:                test.Caches,
+	}
+
+	contractKey2, contractLockingScript2, adminKey2, adminLockingScript2, contract2, instrument2 := state.MockInstrument(ctx,
+		&test.Caches.TestCaches)
+	_, feeLockingScript2, _ := state.MockKey()
+
+	agentData2 := AgentData{
+		Key:                contractKey2,
+		LockingScript:      contractLockingScript2,
+		MinimumContractFee: contract2.Formation.ContractFee,
+		FeeLockingScript:   feeLockingScript2,
+		IsActive:           true,
+	}
+
+	agent2, err := NewAgent(ctx, agentData2, DefaultConfig(), test.Caches.Caches,
+		test.Caches.Transactions, test.Caches.Services, test.Locker, test.Store, broadcaster2, nil,
+		nil, nil, nil, test.PeerChannelsFactory, test.PeerChannelResponses, test.Statistics.Add,
+		test.DependencyTrigger.Trigger)
+	if err != nil {
+		t.Fatalf("Failed to create agent : %s", err)
+	}
+	test.AddAgent(agent2)
+
+	agentTestData2 := &TestAgentData{
+		Agent:                 agent2,
+		Contract:              contract2,
+		Instrument:            instrument2,
+		ContractKey:           contractKey2,
+		ContractLockingScript: contractLockingScript2,
+		AdminKey:              adminKey2,
+		AdminLockingScript:    adminLockingScript2,
+		FeeLockingScript:      feeLockingScript2,
+		Broadcaster:           broadcaster2,
+		Caches:                test.Caches,
+	}
+
+	_, receivers2, multiTransferTx := MockMultiContractTransferTx(ctx, t, test, contract1,
+		contract2, instrument1, instrument2)
+
+	responseTxs := TestProcessTxSingle(ctx, []*TestAgentData{agentTestData1, agentTestData2},
+		multiTransferTx)
+	if len(responseTxs) != 1 {
+		t.Fatalf("Wrong response tx count : got %d, want %d", len(responseTxs), 1)
+	}
+	settlementRequestTx := responseTxs[0]
+
+	t.Logf("Settlement request tx : %s", txbuilder.TxString(settlementRequestTx))
+
+	responseTxs = TestProcessTxSingle(ctx, []*TestAgentData{agentTestData1, agentTestData2},
+		settlementRequestTx)
+	if len(responseTxs) != 1 {
+		t.Fatalf("Wrong response tx count : got %d, want %d", len(responseTxs), 1)
+	}
+	signatureRequestTx := responseTxs[0]
+
+	t.Logf("Signature request tx : %s", txbuilder.TxString(signatureRequestTx))
+
+	// The involved balances should be locked as pending in the first contract now as it is waiting
+	// on a response from the second contract.
+
+	_, transferTx := MockTransferTxWithReceivers(ctx, t, test, contract2, instrument2,
+		receivers2[:1])
+
+	responseTxs = TestProcessTxSingle(ctx, []*TestAgentData{agentTestData2}, transferTx)
+	// We should be waiting for the first settlement to complete so it will have set the dependency
+	// trigger and be waiting for the other settlement.
+	if len(responseTxs) != 0 {
+		t.Fatalf("Wrong response tx count : got %d, want %d", len(responseTxs), 0)
+	}
+
+	responseTxs = TestProcessTx(ctx, []*TestAgentData{agentTestData1, agentTestData2},
+		signatureRequestTx)
+	if len(responseTxs) != 1 {
+		t.Fatalf("Wrong response tx count : got %d, want %d", len(responseTxs), 1)
+	}
+	multiSettlementTx := responseTxs[0]
+
+	t.Logf("Multi-contract settlement request tx : %s", txbuilder.TxString(multiSettlementTx))
+
+	time.Sleep(time.Millisecond * 100)
+
+	responseTxs = broadcaster2.GetAndClearTxs()
+	if len(responseTxs) != 1 {
+		t.Fatalf("Wrong response tx count : got %d, want %d", len(responseTxs), 1)
+	}
+	settlementTx := responseTxs[0]
+	t.Logf("Settlement tx : %s", txbuilder.TxString(settlementTx))
+
+	agent1.Release(ctx)
+	agent2.Release(ctx)
+	test.Caches.Caches.Instruments.Release(ctx, contractLockingScript1, instrument1.InstrumentCode)
+	test.Caches.Caches.Instruments.Release(ctx, contractLockingScript2, instrument2.InstrumentCode)
+	test.Caches.Caches.Contracts.Release(ctx, contractLockingScript1)
+	test.Caches.Caches.Contracts.Release(ctx, contractLockingScript2)
+	StopTestAgent(ctx, t, test)
+}
+
+func Test_Transfers_Dependent_Expire(t *testing.T) {
+	ctx := logger.ContextWithLogger(context.Background(), true, true, "")
+	store := storage.NewMockStorage()
+	cache := cacher.NewSimpleCache(store)
+
+	test := StartTestDataWithCacher(ctx, t, store, cache)
+
+	broadcaster1 := state.NewMockTxBroadcaster()
+	broadcaster2 := state.NewMockTxBroadcaster()
+
+	contractKey1, contractLockingScript1, adminKey1, adminLockingScript1, contract1, instrument1 := state.MockInstrument(ctx,
+		&test.Caches.TestCaches)
+	_, feeLockingScript1, _ := state.MockKey()
+
+	agentData1 := AgentData{
+		Key:                contractKey1,
+		LockingScript:      contractLockingScript1,
+		MinimumContractFee: contract1.Formation.ContractFee,
+		FeeLockingScript:   feeLockingScript1,
+		IsActive:           true,
+	}
+
+	agentConfig := DefaultConfig()
+	agentConfig.DependentExpiration.Duration = time.Millisecond * 100
+
+	agent1, err := NewAgent(ctx, agentData1, agentConfig, test.Caches.Caches,
+		test.Caches.Transactions, test.Caches.Services, test.Locker, test.Store, broadcaster1, nil,
+		nil, test.scheduler, test.mockStore, test.PeerChannelsFactory, test.PeerChannelResponses,
+		test.Statistics.Add, test.DependencyTrigger.Trigger)
+	if err != nil {
+		t.Fatalf("Failed to create agent : %s", err)
+	}
+	test.AddAgent(agent1)
+
+	agentTestData1 := &TestAgentData{
+		Agent:                 agent1,
+		Contract:              contract1,
+		Instrument:            instrument1,
+		ContractKey:           contractKey1,
+		ContractLockingScript: contractLockingScript1,
+		AdminKey:              adminKey1,
+		AdminLockingScript:    adminLockingScript1,
+		FeeLockingScript:      feeLockingScript1,
+		Broadcaster:           broadcaster1,
+		Caches:                test.Caches,
+	}
+
+	contractKey2, contractLockingScript2, adminKey2, adminLockingScript2, contract2, instrument2 := state.MockInstrument(ctx,
+		&test.Caches.TestCaches)
+	_, feeLockingScript2, _ := state.MockKey()
+
+	agentData2 := AgentData{
+		Key:                contractKey2,
+		LockingScript:      contractLockingScript2,
+		MinimumContractFee: contract2.Formation.ContractFee,
+		FeeLockingScript:   feeLockingScript2,
+		IsActive:           true,
+	}
+
+	agent2, err := NewAgent(ctx, agentData2, agentConfig, test.Caches.Caches,
+		test.Caches.Transactions, test.Caches.Services, test.Locker, test.Store, broadcaster2, nil,
+		nil, test.scheduler, test.mockStore, test.PeerChannelsFactory, test.PeerChannelResponses,
+		test.Statistics.Add, test.DependencyTrigger.Trigger)
+	if err != nil {
+		t.Fatalf("Failed to create agent : %s", err)
+	}
+	test.AddAgent(agent2)
+
+	agentTestData2 := &TestAgentData{
+		Agent:                 agent2,
+		Contract:              contract2,
+		Instrument:            instrument2,
+		ContractKey:           contractKey2,
+		ContractLockingScript: contractLockingScript2,
+		AdminKey:              adminKey2,
+		AdminLockingScript:    adminLockingScript2,
+		FeeLockingScript:      feeLockingScript2,
+		Broadcaster:           broadcaster2,
+		Caches:                test.Caches,
+	}
+
+	receivers1, _, multiTransferTx := MockMultiContractTransferTx(ctx, t, test, contract1,
+		contract2, instrument1, instrument2)
+
+	responseTxs := TestProcessTxSingle(ctx, []*TestAgentData{agentTestData1, agentTestData2},
+		multiTransferTx)
+	if len(responseTxs) != 1 {
+		t.Fatalf("Wrong response tx count : got %d, want %d", len(responseTxs), 1)
+	}
+	settlementRequestTx := responseTxs[0]
+
+	t.Logf("Settlement request tx : %s", txbuilder.TxString(settlementRequestTx))
+
+	// The involved balances should be locked as pending in the first contract now as it is waiting
+	// on a response from the second contract.
+
+	_, transferTx := MockTransferTxWithReceivers(ctx, t, test, contract1, instrument1,
+		receivers1[:1])
+
+	responseTxs = TestProcessTxSingle(ctx, []*TestAgentData{agentTestData1}, transferTx)
+	// We should be waiting for the first settlement to complete so it will have set the dependency
+	// trigger and be waiting for the other settlement.
+	if len(responseTxs) != 0 {
+		t.Fatalf("Wrong response tx count : got %d, want %d", len(responseTxs), 0)
+	}
+
+	// Wait for cancel
+	time.Sleep(time.Millisecond * 200)
+
+	responseTxs = test.Broadcaster.GetAndClearTxs()
+	if len(responseTxs) != 1 {
+		t.Fatalf("Wrong response tx count : got %d, want %d", len(responseTxs), 1)
+	}
+	rejectionTx := responseTxs[0]
+	t.Logf("Rejection tx : %s", txbuilder.TxString(rejectionTx))
+
+	// Verify rejection
+	var rejection *actions.Rejection
+	for _, txout := range rejectionTx.Tx.TxOut {
+		action, err := protocol.Deserialize(txout.LockingScript, true)
+		if err != nil {
+			continue
+		}
+
+		if a, ok := action.(*actions.Rejection); ok {
+			js, _ := json.MarshalIndent(action, "", "  ")
+			t.Logf("Rejection : %s", js)
+			rejection = a
+		}
+	}
+
+	if rejection == nil {
+		t.Fatalf("Missing rejection action")
+	}
+
+	responseTxs = TestProcessTxSingle(ctx, []*TestAgentData{agentTestData1, agentTestData2},
+		settlementRequestTx)
+	if len(responseTxs) != 1 {
+		t.Fatalf("Wrong response tx count : got %d, want %d", len(responseTxs), 1)
+	}
+	signatureRequestTx := responseTxs[0]
+
+	t.Logf("Signature request tx : %s", txbuilder.TxString(signatureRequestTx))
+
+	responseTxs = TestProcessTx(ctx, []*TestAgentData{agentTestData1, agentTestData2},
+		signatureRequestTx)
+	if len(responseTxs) != 1 {
+		t.Fatalf("Wrong response tx count : got %d, want %d", len(responseTxs), 1)
+	}
+	multiSettlementTx := responseTxs[0]
+
+	t.Logf("Multi-contract settlement request tx : %s", txbuilder.TxString(multiSettlementTx))
+
+	agent1.Release(ctx)
+	agent2.Release(ctx)
+	test.Caches.Caches.Instruments.Release(ctx, contractLockingScript1, instrument1.InstrumentCode)
+	test.Caches.Caches.Instruments.Release(ctx, contractLockingScript2, instrument2.InstrumentCode)
+	test.Caches.Caches.Contracts.Release(ctx, contractLockingScript1)
+	test.Caches.Caches.Contracts.Release(ctx, contractLockingScript2)
+	StopTestAgent(ctx, t, test)
+}
+
+func Test_Transfers_TransferFeeInCurrentContract_SingleContract(t *testing.T) {
+	ctx := logger.ContextWithLogger(context.Background(), true, true, "")
+	store := storage.NewMockStorage()
+	cache := cacher.NewSimpleCache(store)
+
+	test := StartTestDataWithCacher(ctx, t, store, cache)
+
+	broadcaster := state.NewMockTxBroadcaster()
+
+	transferFeeQuantity := uint64(5000)
+	_, transferFeeLockingScript, _ := state.MockKey()
+	t.Logf("Tranfer fee locking script : %s", transferFeeLockingScript)
+
+	contractKey, contractLockingScript, adminKey, adminLockingScript, contract, instrument := state.MockInstrumentWithTransferFeeUsingInstrument(ctx,
+		&test.Caches.TestCaches, transferFeeQuantity, transferFeeLockingScript)
+	_, feeLockingScript, _ := state.MockKey()
+
+	agentData := AgentData{
+		Key:                contractKey,
+		LockingScript:      contractLockingScript,
+		MinimumContractFee: contract.Formation.ContractFee,
+		FeeLockingScript:   feeLockingScript,
+		IsActive:           true,
+	}
+
+	agent, err := NewAgent(ctx, agentData, DefaultConfig(), test.Caches.Caches,
+		test.Caches.Transactions, test.Caches.Services, test.Locker, test.Store, broadcaster, nil,
+		nil, nil, nil, test.PeerChannelsFactory, test.PeerChannelResponses, test.Statistics.Add,
+		test.DependencyTrigger.Trigger)
+	if err != nil {
+		t.Fatalf("Failed to create agent : %s", err)
+	}
+	test.AddAgent(agent)
+
+	agentTestData := &TestAgentData{
+		Agent:                 agent,
+		Contract:              contract,
+		Instrument:            instrument,
+		ContractKey:           contractKey,
+		ContractLockingScript: contractLockingScript,
+		AdminKey:              adminKey,
+		AdminLockingScript:    adminLockingScript,
+		FeeLockingScript:      feeLockingScript,
+		Broadcaster:           broadcaster,
+		Caches:                test.Caches,
+	}
+
+	_, transferTx := MockTransferTx(ctx, t, test, contract, instrument)
+
+	responseTxs := TestProcessTxSingle(ctx, []*TestAgentData{agentTestData}, transferTx)
+	// We should be waiting for the first settlement to complete so it will have set the dependency
+	// trigger and be waiting for the other settlement.
+	if len(responseTxs) != 1 {
+		t.Fatalf("Wrong response tx count : got %d, want %d", len(responseTxs), 1)
+	}
+	settlementTx := responseTxs[0]
+	t.Logf("Settlement tx : %s", txbuilder.TxString(settlementTx))
+
+	// Verify settlement
+	var settlement *actions.Settlement
+	for _, txout := range settlementTx.Tx.TxOut {
+		action, err := protocol.Deserialize(txout.LockingScript, true)
+		if err != nil {
+			continue
+		}
+
+		if a, ok := action.(*actions.Settlement); ok {
+			js, _ := json.MarshalIndent(action, "", "  ")
+			t.Logf("Settlement : %s", js)
+			settlement = a
+		}
+	}
+
+	if settlement == nil {
+		t.Fatalf("Missing settlment action")
+	}
+
+	if len(settlement.Instruments) != 1 {
+		t.Fatalf("Wrong settlement instrument count : got %d, want %d", len(settlement.Instruments),
+			1)
+	}
+
+	transferFeeFound := false
+	for _, s := range settlement.Instruments[0].Settlements {
+		ls := settlementTx.Tx.TxOut[s.Index].LockingScript
+		if ls.Equal(transferFeeLockingScript) {
+			transferFeeFound = true
+
+			if s.Quantity != transferFeeQuantity {
+				t.Fatalf("Wrong transfer fee quantity : got %d, want %d", s.Quantity,
+					transferFeeQuantity)
+			}
+		}
+	}
+
+	if !transferFeeFound {
+		t.Fatalf("Missing transfer fee")
+	}
+
+	agent.Release(ctx)
+	test.Caches.Caches.Instruments.Release(ctx, contractLockingScript, instrument.InstrumentCode)
+	test.Caches.Caches.Contracts.Release(ctx, contractLockingScript)
+	StopTestAgent(ctx, t, test)
+}
+
+func Test_Transfers_TransferFeeInCurrentContract_FirstContract(t *testing.T) {
+	ctx := logger.ContextWithLogger(context.Background(), true, true, "")
+	store := storage.NewMockStorage()
+	cache := cacher.NewSimpleCache(store)
+
+	test := StartTestDataWithCacher(ctx, t, store, cache)
+
+	broadcaster1 := state.NewMockTxBroadcaster()
+	broadcaster2 := state.NewMockTxBroadcaster()
+
+	transferFeeQuantity := uint64(5000)
+	_, transferFeeLockingScript, _ := state.MockKey()
+	t.Logf("Tranfer fee locking script : %s", transferFeeLockingScript)
+
+	contractKey1, contractLockingScript1, adminKey1, adminLockingScript1, contract1, instrument1 := state.MockInstrumentWithTransferFeeUsingInstrument(ctx,
+		&test.Caches.TestCaches, transferFeeQuantity, transferFeeLockingScript)
+	_, feeLockingScript1, _ := state.MockKey()
+
+	agentData1 := AgentData{
+		Key:                contractKey1,
+		LockingScript:      contractLockingScript1,
+		MinimumContractFee: contract1.Formation.ContractFee,
+		FeeLockingScript:   feeLockingScript1,
+		IsActive:           true,
+	}
+
+	agent1, err := NewAgent(ctx, agentData1, DefaultConfig(), test.Caches.Caches,
+		test.Caches.Transactions, test.Caches.Services, test.Locker, test.Store, broadcaster1, nil,
+		nil, nil, nil, test.PeerChannelsFactory, test.PeerChannelResponses, test.Statistics.Add,
+		test.DependencyTrigger.Trigger)
+	if err != nil {
+		t.Fatalf("Failed to create agent : %s", err)
+	}
+	test.AddAgent(agent1)
+
+	agentTestData1 := &TestAgentData{
+		Agent:                 agent1,
+		Contract:              contract1,
+		Instrument:            instrument1,
+		ContractKey:           contractKey1,
+		ContractLockingScript: contractLockingScript1,
+		AdminKey:              adminKey1,
+		AdminLockingScript:    adminLockingScript1,
+		FeeLockingScript:      feeLockingScript1,
+		Broadcaster:           broadcaster1,
+		Caches:                test.Caches,
+	}
+
+	contractKey2, contractLockingScript2, adminKey2, adminLockingScript2, contract2, instrument2 := state.MockInstrument(ctx,
+		&test.Caches.TestCaches)
+	_, feeLockingScript2, _ := state.MockKey()
+
+	agentData2 := AgentData{
+		Key:                contractKey2,
+		LockingScript:      contractLockingScript2,
+		MinimumContractFee: contract2.Formation.ContractFee,
+		FeeLockingScript:   feeLockingScript2,
+		IsActive:           true,
+	}
+
+	agent2, err := NewAgent(ctx, agentData2, DefaultConfig(), test.Caches.Caches,
+		test.Caches.Transactions, test.Caches.Services, test.Locker, test.Store, broadcaster2, nil,
+		nil, nil, nil, test.PeerChannelsFactory, test.PeerChannelResponses, test.Statistics.Add,
+		test.DependencyTrigger.Trigger)
+	if err != nil {
+		t.Fatalf("Failed to create agent : %s", err)
+	}
+	test.AddAgent(agent2)
+
+	agentTestData2 := &TestAgentData{
+		Agent:                 agent2,
+		Contract:              contract2,
+		Instrument:            instrument2,
+		ContractKey:           contractKey2,
+		ContractLockingScript: contractLockingScript2,
+		AdminKey:              adminKey2,
+		AdminLockingScript:    adminLockingScript2,
+		FeeLockingScript:      feeLockingScript2,
+		Broadcaster:           broadcaster2,
+		Caches:                test.Caches,
+	}
+
+	_, _, transferTx := MockMultiContractTransferTx(ctx, t, test, contract1, contract2, instrument1,
+		instrument2)
+
+	responseTxs := TestProcessTx(ctx, []*TestAgentData{agentTestData1, agentTestData2}, transferTx)
+
+	for _, tx := range responseTxs {
+		t.Logf("Response tx : %s", txbuilder.TxString(tx))
+	}
+
+	if len(responseTxs) != 3 {
+		t.Fatalf("Wrong response tx count : got %d, want %d", len(responseTxs), 3)
+	}
+	settlementTx := responseTxs[2]
+	t.Logf("Settlement tx : %s", txbuilder.TxString(settlementTx))
+
+	// Verify settlement
+	var settlement *actions.Settlement
+	for _, txout := range settlementTx.Tx.TxOut {
+		action, err := protocol.Deserialize(txout.LockingScript, true)
+		if err != nil {
+			continue
+		}
+
+		if a, ok := action.(*actions.Settlement); ok {
+			js, _ := json.MarshalIndent(action, "", "  ")
+			t.Logf("Settlement : %s", js)
+			settlement = a
+		}
+	}
+
+	if settlement == nil {
+		t.Fatalf("Missing settlment action")
+	}
+
+	if len(settlement.Instruments) != 2 {
+		t.Fatalf("Wrong settlement instrument count : got %d, want %d", len(settlement.Instruments),
+			2)
+	}
+
+	transferFeeFound := false
+	for _, s := range settlement.Instruments[0].Settlements {
+		ls := settlementTx.Tx.TxOut[s.Index].LockingScript
+		if ls.Equal(transferFeeLockingScript) {
+			transferFeeFound = true
+
+			if s.Quantity != transferFeeQuantity {
+				t.Fatalf("Wrong transfer fee quantity : got %d, want %d", s.Quantity,
+					transferFeeQuantity)
+			}
+		}
+	}
+
+	if !transferFeeFound {
+		t.Fatalf("Missing transfer fee")
+	}
+
+	agent1.Release(ctx)
+	test.Caches.Caches.Instruments.Release(ctx, contractLockingScript1, instrument1.InstrumentCode)
+	test.Caches.Caches.Contracts.Release(ctx, contractLockingScript1)
+	agent2.Release(ctx)
+	test.Caches.Caches.Instruments.Release(ctx, contractLockingScript2, instrument2.InstrumentCode)
+	test.Caches.Caches.Contracts.Release(ctx, contractLockingScript2)
+	StopTestAgent(ctx, t, test)
+}
+
+func Test_Transfers_TransferFeeInCurrentContract_SecondContract(t *testing.T) {
+	ctx := logger.ContextWithLogger(context.Background(), true, true, "")
+	store := storage.NewMockStorage()
+	cache := cacher.NewSimpleCache(store)
+
+	test := StartTestDataWithCacher(ctx, t, store, cache)
+
+	broadcaster1 := state.NewMockTxBroadcaster()
+	broadcaster2 := state.NewMockTxBroadcaster()
+
+	transferFeeQuantity := uint64(5000)
+	_, transferFeeLockingScript, _ := state.MockKey()
+	t.Logf("Tranfer fee locking script : %s", transferFeeLockingScript)
+
+	contractKey1, contractLockingScript1, adminKey1, adminLockingScript1, contract1, instrument1 := state.MockInstrumentWithTransferFeeUsingInstrument(ctx,
+		&test.Caches.TestCaches, transferFeeQuantity, transferFeeLockingScript)
+	_, feeLockingScript1, _ := state.MockKey()
+
+	agentData1 := AgentData{
+		Key:                contractKey1,
+		LockingScript:      contractLockingScript1,
+		MinimumContractFee: contract1.Formation.ContractFee,
+		FeeLockingScript:   feeLockingScript1,
+		IsActive:           true,
+	}
+
+	agent1, err := NewAgent(ctx, agentData1, DefaultConfig(), test.Caches.Caches,
+		test.Caches.Transactions, test.Caches.Services, test.Locker, test.Store, broadcaster1, nil,
+		nil, nil, nil, test.PeerChannelsFactory, test.PeerChannelResponses, test.Statistics.Add,
+		test.DependencyTrigger.Trigger)
+	if err != nil {
+		t.Fatalf("Failed to create agent : %s", err)
+	}
+	test.AddAgent(agent1)
+
+	agentTestData1 := &TestAgentData{
+		Agent:                 agent1,
+		Contract:              contract1,
+		Instrument:            instrument1,
+		ContractKey:           contractKey1,
+		ContractLockingScript: contractLockingScript1,
+		AdminKey:              adminKey1,
+		AdminLockingScript:    adminLockingScript1,
+		FeeLockingScript:      feeLockingScript1,
+		Broadcaster:           broadcaster1,
+		Caches:                test.Caches,
+	}
+
+	contractKey2, contractLockingScript2, adminKey2, adminLockingScript2, contract2, instrument2 := state.MockInstrument(ctx,
+		&test.Caches.TestCaches)
+	_, feeLockingScript2, _ := state.MockKey()
+
+	agentData2 := AgentData{
+		Key:                contractKey2,
+		LockingScript:      contractLockingScript2,
+		MinimumContractFee: contract2.Formation.ContractFee,
+		FeeLockingScript:   feeLockingScript2,
+		IsActive:           true,
+	}
+
+	agent2, err := NewAgent(ctx, agentData2, DefaultConfig(), test.Caches.Caches,
+		test.Caches.Transactions, test.Caches.Services, test.Locker, test.Store, broadcaster2, nil,
+		nil, nil, nil, test.PeerChannelsFactory, test.PeerChannelResponses, test.Statistics.Add,
+		test.DependencyTrigger.Trigger)
+	if err != nil {
+		t.Fatalf("Failed to create agent : %s", err)
+	}
+	test.AddAgent(agent2)
+
+	agentTestData2 := &TestAgentData{
+		Agent:                 agent2,
+		Contract:              contract2,
+		Instrument:            instrument2,
+		ContractKey:           contractKey2,
+		ContractLockingScript: contractLockingScript2,
+		AdminKey:              adminKey2,
+		AdminLockingScript:    adminLockingScript2,
+		FeeLockingScript:      feeLockingScript2,
+		Broadcaster:           broadcaster2,
+		Caches:                test.Caches,
+	}
+
+	_, _, transferTx := MockMultiContractTransferTx(ctx, t, test, contract2, contract1, instrument2,
+		instrument1)
+
+	responseTxs := TestProcessTx(ctx, []*TestAgentData{agentTestData1, agentTestData2}, transferTx)
+
+	for _, tx := range responseTxs {
+		t.Logf("Response tx : %s", txbuilder.TxString(tx))
+	}
+
+	if len(responseTxs) != 3 {
+		t.Fatalf("Wrong response tx count : got %d, want %d", len(responseTxs), 3)
+	}
+	settlementTx := responseTxs[2]
+	t.Logf("Settlement tx : %s", txbuilder.TxString(settlementTx))
+
+	// Verify settlement
+	var settlement *actions.Settlement
+	for _, txout := range settlementTx.Tx.TxOut {
+		action, err := protocol.Deserialize(txout.LockingScript, true)
+		if err != nil {
+			continue
+		}
+
+		if a, ok := action.(*actions.Settlement); ok {
+			js, _ := json.MarshalIndent(action, "", "  ")
+			t.Logf("Settlement : %s", js)
+			settlement = a
+		}
+	}
+
+	if settlement == nil {
+		t.Fatalf("Missing settlement action")
+	}
+
+	if len(settlement.Instruments) != 2 {
+		t.Fatalf("Wrong settlement instrument count : got %d, want %d", len(settlement.Instruments),
+			2)
+	}
+
+	transferFeeFound := false
+	for _, s := range settlement.Instruments[1].Settlements {
+		ls := settlementTx.Tx.TxOut[s.Index].LockingScript
+		if ls.Equal(transferFeeLockingScript) {
+			transferFeeFound = true
+
+			if s.Quantity != transferFeeQuantity {
+				t.Fatalf("Wrong transfer fee quantity : got %d, want %d", s.Quantity,
+					transferFeeQuantity)
+			}
+		}
+	}
+
+	if !transferFeeFound {
+		t.Fatalf("Missing transfer fee")
+	}
+
+	agent1.Release(ctx)
+	test.Caches.Caches.Instruments.Release(ctx, contractLockingScript1, instrument1.InstrumentCode)
+	test.Caches.Caches.Contracts.Release(ctx, contractLockingScript1)
+	agent2.Release(ctx)
+	test.Caches.Caches.Instruments.Release(ctx, contractLockingScript2, instrument2.InstrumentCode)
+	test.Caches.Caches.Contracts.Release(ctx, contractLockingScript2)
+	StopTestAgent(ctx, t, test)
+}
+
+func Test_Transfers_TransferFeeInCurrentContract_Both(t *testing.T) {
+	ctx := logger.ContextWithLogger(context.Background(), true, true, "")
+	store := storage.NewMockStorage()
+	cache := cacher.NewSimpleCache(store)
+
+	test := StartTestDataWithCacher(ctx, t, store, cache)
+
+	broadcaster1 := state.NewMockTxBroadcaster()
+	broadcaster2 := state.NewMockTxBroadcaster()
+
+	transferFeeQuantity1 := uint64(5000)
+	_, transferFeeLockingScript1, _ := state.MockKey()
+	t.Logf("Tranfer fee 1 locking script : %s", transferFeeLockingScript1)
+
+	contractKey1, contractLockingScript1, adminKey1, adminLockingScript1, contract1, instrument1 := state.MockInstrumentWithTransferFeeUsingInstrument(ctx,
+		&test.Caches.TestCaches, transferFeeQuantity1, transferFeeLockingScript1)
+	_, feeLockingScript1, _ := state.MockKey()
+
+	agentData1 := AgentData{
+		Key:                contractKey1,
+		LockingScript:      contractLockingScript1,
+		MinimumContractFee: contract1.Formation.ContractFee,
+		FeeLockingScript:   feeLockingScript1,
+		IsActive:           true,
+	}
+
+	agent1, err := NewAgent(ctx, agentData1, DefaultConfig(), test.Caches.Caches,
+		test.Caches.Transactions, test.Caches.Services, test.Locker, test.Store, broadcaster1, nil,
+		nil, nil, nil, test.PeerChannelsFactory, test.PeerChannelResponses, test.Statistics.Add,
+		test.DependencyTrigger.Trigger)
+	if err != nil {
+		t.Fatalf("Failed to create agent : %s", err)
+	}
+	test.AddAgent(agent1)
+
+	agentTestData1 := &TestAgentData{
+		Agent:                 agent1,
+		Contract:              contract1,
+		Instrument:            instrument1,
+		ContractKey:           contractKey1,
+		ContractLockingScript: contractLockingScript1,
+		AdminKey:              adminKey1,
+		AdminLockingScript:    adminLockingScript1,
+		FeeLockingScript:      feeLockingScript1,
+		Broadcaster:           broadcaster1,
+		Caches:                test.Caches,
+	}
+
+	transferFeeQuantity2 := uint64(6000)
+	_, transferFeeLockingScript2, _ := state.MockKey()
+	t.Logf("Tranfer fee 2 locking script : %s", transferFeeLockingScript2)
+
+	contractKey2, contractLockingScript2, adminKey2, adminLockingScript2, contract2, instrument2 := state.MockInstrumentWithTransferFeeUsingInstrument(ctx,
+		&test.Caches.TestCaches, transferFeeQuantity2, transferFeeLockingScript2)
+	_, feeLockingScript2, _ := state.MockKey()
+
+	agentData2 := AgentData{
+		Key:                contractKey2,
+		LockingScript:      contractLockingScript2,
+		MinimumContractFee: contract2.Formation.ContractFee,
+		FeeLockingScript:   feeLockingScript2,
+		IsActive:           true,
+	}
+
+	agent2, err := NewAgent(ctx, agentData2, DefaultConfig(), test.Caches.Caches,
+		test.Caches.Transactions, test.Caches.Services, test.Locker, test.Store, broadcaster2, nil,
+		nil, nil, nil, test.PeerChannelsFactory, test.PeerChannelResponses, test.Statistics.Add,
+		test.DependencyTrigger.Trigger)
+	if err != nil {
+		t.Fatalf("Failed to create agent : %s", err)
+	}
+	test.AddAgent(agent2)
+
+	agentTestData2 := &TestAgentData{
+		Agent:                 agent2,
+		Contract:              contract2,
+		Instrument:            instrument2,
+		ContractKey:           contractKey2,
+		ContractLockingScript: contractLockingScript2,
+		AdminKey:              adminKey2,
+		AdminLockingScript:    adminLockingScript2,
+		FeeLockingScript:      feeLockingScript2,
+		Broadcaster:           broadcaster2,
+		Caches:                test.Caches,
+	}
+
+	_, _, transferTx := MockMultiContractTransferTx(ctx, t, test, contract1, contract2, instrument1,
+		instrument2)
+
+	responseTxs := TestProcessTx(ctx, []*TestAgentData{agentTestData1, agentTestData2}, transferTx)
+
+	for _, tx := range responseTxs {
+		t.Logf("Response tx : %s", txbuilder.TxString(tx))
+	}
+
+	if len(responseTxs) != 3 {
+		t.Fatalf("Wrong response tx count : got %d, want %d", len(responseTxs), 3)
+	}
+	settlementTx := responseTxs[2]
+	t.Logf("Settlement tx : %s", txbuilder.TxString(settlementTx))
+
+	// Verify settlement
+	var settlement *actions.Settlement
+	for _, txout := range settlementTx.Tx.TxOut {
+		action, err := protocol.Deserialize(txout.LockingScript, true)
+		if err != nil {
+			continue
+		}
+
+		if a, ok := action.(*actions.Settlement); ok {
+			js, _ := json.MarshalIndent(action, "", "  ")
+			t.Logf("Settlement : %s", js)
+			settlement = a
+		}
+	}
+
+	if settlement == nil {
+		t.Fatalf("Missing settlement action")
+	}
+
+	if len(settlement.Instruments) != 2 {
+		t.Fatalf("Wrong settlement instrument count : got %d, want %d", len(settlement.Instruments),
+			2)
+	}
+
+	transferFee1Found := false
+	for _, s := range settlement.Instruments[0].Settlements {
+		ls := settlementTx.Tx.TxOut[s.Index].LockingScript
+		if ls.Equal(transferFeeLockingScript1) {
+			transferFee1Found = true
+
+			if s.Quantity != transferFeeQuantity1 {
+				t.Fatalf("Wrong transfer fee 1 quantity : got %d, want %d", s.Quantity,
+					transferFeeQuantity1)
+			}
+
+			break
+		}
+	}
+
+	if !transferFee1Found {
+		t.Fatalf("Missing transfer fee 1")
+	}
+
+	transferFee2Found := false
+	for _, s := range settlement.Instruments[1].Settlements {
+		ls := settlementTx.Tx.TxOut[s.Index].LockingScript
+		if ls.Equal(transferFeeLockingScript2) {
+			transferFee2Found = true
+
+			if s.Quantity != transferFeeQuantity2 {
+				t.Fatalf("Wrong transfer fee 2 quantity : got %d, want %d", s.Quantity,
+					transferFeeQuantity2)
+			}
+
+			break
+		}
+	}
+
+	if !transferFee2Found {
+		t.Fatalf("Missing transfer fee 2")
+	}
+
+	agent1.Release(ctx)
+	test.Caches.Caches.Instruments.Release(ctx, contractLockingScript1, instrument1.InstrumentCode)
+	test.Caches.Caches.Contracts.Release(ctx, contractLockingScript1)
+	agent2.Release(ctx)
+	test.Caches.Caches.Instruments.Release(ctx, contractLockingScript2, instrument2.InstrumentCode)
+	test.Caches.Caches.Contracts.Release(ctx, contractLockingScript2)
+	StopTestAgent(ctx, t, test)
 }

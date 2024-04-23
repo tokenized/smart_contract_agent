@@ -134,9 +134,13 @@ func (a *Agent) processTransfer(ctx context.Context, transaction *transactions.T
 			if err == nil {
 				ls, err := ra.LockingScript()
 				if err == nil {
+					quantity := instrument.Creation.TransferFee.Quantity
+					if instrument.Creation.TransferFee.UseCurrentInstrument {
+						quantity = 0
+					}
 					transferFees[index] = &wire.TxOut{
 						LockingScript: ls,
-						Value:         instrument.Creation.TransferFee.Quantity,
+						Value:         quantity,
 					}
 				}
 			}
@@ -200,7 +204,7 @@ func (a *Agent) processTransfer(ctx context.Context, transaction *transactions.T
 		}
 
 		if len(instrumentTransfer.InstrumentCode) != 0 {
-			allBalances.Revert(txid)
+			allBalances.Revert(txid, actionIndex)
 			logger.Warn(instrumentCtx, "Bitcoin instrument with instrument code")
 			return nil, platform.NewRejectErrorWithOutputIndex(actions.RejectionsMsgMalformed,
 				"bitcoin transfer with instrument code",
@@ -210,7 +214,7 @@ func (a *Agent) processTransfer(ctx context.Context, transaction *transactions.T
 		if err := a.buildBitcoinTransfer(instrumentCtx, transaction, settlementTx,
 			instrumentTransfer, agentBitcoinTransferUnlocker,
 			config.MinimumAgentBitcoinTransferRecover.Duration); err != nil {
-			allBalances.Revert(txid)
+			allBalances.Revert(txid, actionIndex)
 			return nil, errors.Wrap(err, "build bitcoin transfer")
 		}
 	}
@@ -231,11 +235,25 @@ func (a *Agent) processTransfer(ctx context.Context, transaction *transactions.T
 
 		instrumentSettlement, err := a.buildInstrumentSettlement(instrumentCtx, allBalances[index],
 			allSenderLockingScripts[index], allReceiverLockingScripts[index], settlementTx, txid,
-			instruments[index], instrumentCodes[index], instrumentTransfer,
+			actionIndex, instruments[index], instrumentCodes[index], instrumentTransfer,
 			transferContracts.Outputs[index], transferContracts.IsMultiContract(),
 			requiresIdentityOracles, headers, now)
 		if err != nil {
-			allBalances.Revert(txid)
+			allBalances.Revert(txid, actionIndex)
+
+			if dotErr, ok := errors.Cause(err).(platform.DependsOnTxError); ok {
+				logger.InfoWithFields(ctx, []logger.Field{
+					logger.Stringer("depends_on_txid", dotErr.TxID),
+				}, "Waiting for settlement on which this depends")
+
+				if err := a.addSettlementDependency(ctx, transaction, txid, actionIndex,
+					dotErr.TxID, int(dotErr.Index)); err != nil {
+					return nil, errors.Wrap(err, "handle settlement dependency")
+				}
+
+				return nil, nil
+			}
+
 			return nil, errors.Wrapf(err, "build settlement: %s", instrumentID)
 		}
 
@@ -243,19 +261,19 @@ func (a *Agent) processTransfer(ctx context.Context, transaction *transactions.T
 	}
 
 	if err := settlement.Validate(); err != nil {
-		allBalances.Revert(txid)
+		allBalances.Revert(txid, actionIndex)
 		return nil, platform.NewRejectError(actions.RejectionsMsgMalformed, err.Error())
 	}
 
 	settlementScript, err := protocol.Serialize(settlement, config.IsTest)
 	if err != nil {
-		allBalances.Revert(txid)
+		allBalances.Revert(txid, actionIndex)
 		return nil, errors.Wrap(err, "serialize settlement")
 	}
 
 	settlementScriptOutputIndex := len(settlementTx.Outputs)
 	if err := settlementTx.AddOutput(settlementScript, 0, false, false); err != nil {
-		allBalances.Revert(txid)
+		allBalances.Revert(txid, actionIndex)
 		return nil, errors.Wrap(err, "add settlement output")
 	}
 
@@ -263,7 +281,7 @@ func (a *Agent) processTransfer(ctx context.Context, transaction *transactions.T
 	if transfer.ExchangeFee > 0 {
 		ra, err := bitcoin.DecodeRawAddress(transfer.ExchangeFeeAddress)
 		if err != nil {
-			allBalances.Revert(txid)
+			allBalances.Revert(txid, actionIndex)
 			logger.Warn(ctx, "Invalid exchange fee address : %s", err)
 			return nil, platform.NewRejectErrorWithOutputIndex(actions.RejectionsMsgMalformed,
 				err.Error(), transferContracts.FirstContractOutputIndex)
@@ -271,7 +289,7 @@ func (a *Agent) processTransfer(ctx context.Context, transaction *transactions.T
 
 		lockingScript, err := ra.LockingScript()
 		if err != nil {
-			allBalances.Revert(txid)
+			allBalances.Revert(txid, actionIndex)
 			logger.Warn(ctx, "Invalid exchange fee locking script : %s", err)
 			return nil, platform.NewRejectErrorWithOutputIndex(actions.RejectionsMsgMalformed,
 				err.Error(), transferContracts.FirstContractOutputIndex)
@@ -279,19 +297,23 @@ func (a *Agent) processTransfer(ctx context.Context, transaction *transactions.T
 
 		if err := settlementTx.AddOutput(lockingScript, transfer.ExchangeFee, false,
 			false); err != nil {
-			allBalances.Revert(txid)
+			allBalances.Revert(txid, actionIndex)
 			return nil, errors.Wrap(err, "add exchange fee")
 		}
 	}
 
-	consolidatedTransferFees := consolidateOutputs(transferFees)
-	for _, transferFee := range consolidatedTransferFees {
-		if err := settlementTx.AddOutput(transferFee.LockingScript, transferFee.Value, false,
-			false); err != nil {
-			allBalances.Revert(txid)
-			return nil, errors.Wrap(err, "add transfer fee")
-		}
-	}
+	// consolidatedTransferFees := consolidateTransferFees(transferFees)
+	// for _, transferFee := range consolidatedTransferFees {
+	// 	if transferFee == nil || transferFee.Value == 0 {
+	// 		continue
+	// 	}
+
+	// 	if err := settlementTx.AddOutput(transferFee.LockingScript, transferFee.Value, false,
+	// 		false); err != nil {
+	// 		allBalances.Revert(txid)
+	// 		return nil, errors.Wrap(err, "add transfer fee")
+	// 	}
+	// }
 
 	// Add the contract fee
 	contractFeeOutputIndex := -1
@@ -299,18 +321,19 @@ func (a *Agent) processTransfer(ctx context.Context, transaction *transactions.T
 		contractFeeOutputIndex = len(settlementTx.MsgTx.TxOut)
 		if err := settlementTx.AddOutput(a.FeeLockingScript(), contractFee, true,
 			false); err != nil {
-			allBalances.Revert(txid)
+			allBalances.Revert(txid, actionIndex)
 			return nil, errors.Wrap(err, "add contract fee")
 		}
 	} else if err := settlementTx.SetChangeLockingScript(a.FeeLockingScript(), ""); err != nil {
-		allBalances.Revert(txid)
+		allBalances.Revert(txid, actionIndex)
 		return nil, errors.Wrap(err, "set change")
 	}
 
 	if transferContracts.IsMultiContract() {
 		// Send a settlement request to the next contract.
-		etx, err := a.createSettlementRequest(ctx, transaction, transaction, actionIndex, transfer,
-			transferContracts, allBalances, settlement, nil, transferFees, now)
+		etx, err := a.createSettlementRequest(ctx, transaction, transaction, actionIndex,
+			actionIndex, transfer, transferContracts, allBalances, settlement, nil, transferFees,
+			now)
 		if err != nil {
 			return etx, errors.Wrap(err, "send settlement request")
 		}
@@ -319,7 +342,7 @@ func (a *Agent) processTransfer(ctx context.Context, transaction *transactions.T
 	}
 
 	if err := a.Sign(ctx, settlementTx, a.FeeLockingScript(), additionalUnlockers...); err != nil {
-		allBalances.Revert(txid)
+		allBalances.Revert(txid, actionIndex)
 		if errors.Cause(err) == txbuilder.ErrInsufficientValue {
 			return nil, platform.NewRejectErrorWithOutputIndex(actions.RejectionsInsufficientTxFeeFunding,
 				err.Error(), transferContracts.FirstContractOutputIndex)
@@ -331,33 +354,95 @@ func (a *Agent) processTransfer(ctx context.Context, transaction *transactions.T
 	etx, err := a.completeSettlement(ctx, transaction, actionIndex, txid, settlementTx,
 		settlementScriptOutputIndex, allBalances, contractFeeOutputIndex, transferFees, now)
 	if err != nil {
-		allBalances.Revert(txid)
+		allBalances.Revert(txid, actionIndex)
 		return etx, errors.Wrap(err, "complete settlement")
 	}
 
 	return etx, nil
 }
 
-// consolidateOutputs consolidates the value of outputs with the same locking scripts.
-func consolidateOutputs(txouts []*wire.TxOut) []*wire.TxOut {
-	var result []*wire.TxOut
-	for _, txout := range txouts {
-		if txout == nil || txout.Value == 0 {
+func (a *Agent) addSettlementDependency(ctx context.Context,
+	transaction *transactions.Transaction, txid bitcoin.Hash32, actionIndex int,
+	dependsOnTxID bitcoin.Hash32, dependsOnActionIndex int) error {
+
+	// Add depends on txid to this tx.
+	transaction.Lock()
+	transaction.AddDependsOnAction(transactions.Action{
+		TxID:  dependsOnTxID,
+		Index: uint32(dependsOnActionIndex),
+	})
+	transaction.Unlock()
+
+	// Add dependent txid to other tx.
+	dependsOnTransaction, err := a.transactions.Get(ctx, dependsOnTxID)
+	if err != nil {
+		return errors.Wrap(err, "get tx")
+	}
+
+	if dependsOnTransaction == nil {
+		return fmt.Errorf("Missing depends on tx : %s", dependsOnTxID)
+	}
+
+	dependsOnTransaction.Lock()
+	dependsOnTransaction.AddDependentAction(transactions.Action{
+		TxID:  txid,
+		Index: uint32(actionIndex),
+	})
+	dependsOnTransaction.Unlock()
+	a.transactions.Release(ctx, dependsOnTxID)
+
+	if a.scheduler != nil {
+		expireTimeStamp := a.Now() +
+			uint64(a.Config().DependentExpiration.Nanoseconds())
+		expireTime := time.Unix(0, int64(expireTimeStamp))
+
+		logger.InfoWithFields(ctx, []logger.Field{
+			logger.Timestamp("task_start", int64(expireTimeStamp)),
+		}, "Scheduling cancel pending transfer")
+
+		task := NewCancelPendingTransferTask(expireTime, a.agentStore, a.LockingScript(), txid)
+		a.scheduler.Schedule(ctx, task)
+	}
+
+	return nil
+}
+
+// consolidateTransferFees consolidates the value of outputs with the same locking scripts, but
+// leaves empty values at the indexes that are zeroed out by a consolidation. Zero value represent a
+// transfer fee paid with a token instead of bitcoin.
+func consolidateTransferFees(txouts []*wire.TxOut) []*wire.TxOut {
+	result := make([]*wire.TxOut, len(txouts))
+	for i, txout := range txouts {
+		if txout == nil {
+			continue
+		}
+
+		if txout.Value == 0 { // transfer fee paid with an instrument
+			c := txout.Copy()
+			result[i] = &c
 			continue
 		}
 
 		found := false
 		for _, txo := range result {
-			if txo.LockingScript.Equal(txout.LockingScript) {
+			if txo == nil {
+				continue
+			}
+
+			// Don't merge with zero value outputs.
+			if txo.Value != 0 && txo.LockingScript.Equal(txout.LockingScript) {
 				found = true
 				txo.Value += txout.Value
 			}
 		}
 
 		if !found {
-			result = append(result, txout)
+			c := txout.Copy()
+			result[i] = &c
 		}
 	}
+
+	// Trim trailing zero/empty values
 
 	return result
 }
@@ -570,7 +655,8 @@ func (a *Agent) completeSettlement(ctx context.Context, transferTransaction *tra
 
 	// Settle balances regardless of tx acceptance by the network as the agent is the single source
 	// of truth.
-	balances.Settle(ctx, transferTxID, settlementTxID, now)
+	balances.Settle(ctx, transferTxID, transferOutputIndex, settlementTxID,
+		settlementScriptOutputIndex, now)
 
 	// Set settlement tx as processed since all the balances were just settled.
 	settlementTransaction.Lock()
@@ -606,7 +692,7 @@ func (a *Agent) completeSettlement(ctx context.Context, transferTransaction *tra
 func (a *Agent) processSettlement(ctx context.Context, transaction *transactions.Transaction,
 	settlement *actions.Settlement, actionIndex int) error {
 
-	transferTxID, lockingScripts, err := a.applySettlements(ctx, transaction,
+	transferTxID, lockingScripts, err := a.applySettlements(ctx, transaction, actionIndex,
 		settlement.Instruments, settlement.Timestamp)
 	if err != nil {
 		return errors.Wrap(err, "apply settlements")
@@ -641,7 +727,7 @@ func (a *Agent) processRectificationSettlement(ctx context.Context,
 	transaction *transactions.Transaction, settlement *actions.RectificationSettlement,
 	actionIndex int) error {
 
-	transferTxID, lockingScripts, err := a.applySettlements(ctx, transaction,
+	transferTxID, lockingScripts, err := a.applySettlements(ctx, transaction, actionIndex,
 		settlement.Instruments, settlement.Timestamp)
 	if err != nil {
 		return errors.Wrap(err, "apply settlements")
@@ -676,7 +762,7 @@ func (a *Agent) processRectificationSettlement(ctx context.Context,
 }
 
 func (a *Agent) applySettlements(ctx context.Context, transaction *transactions.Transaction,
-	settlements []*actions.InstrumentSettlementField,
+	actionIndex int, settlements []*actions.InstrumentSettlementField,
 	timestamp uint64) (*bitcoin.Hash32, []bitcoin.Script, error) {
 
 	agentLockingScript := a.LockingScript()
@@ -774,6 +860,33 @@ func (a *Agent) applySettlements(ctx context.Context, transaction *transactions.
 		allAddedBalances[index] = addedBalances
 	}
 
+	transferTransaction, err := a.transactions.Get(ctx, *transferTxID)
+	if err != nil {
+		return transferTxID, lockingScripts, errors.Wrapf(err, "get transfer tx: %s", *transferTxID)
+	}
+
+	if transferTransaction == nil {
+		return transferTxID, lockingScripts, errors.Wrapf(err, "missing transfer tx: %s",
+			*transferTxID)
+	}
+
+	isTest := a.Config().IsTest
+	transferOutputIndex := 0
+	transferTransaction.Lock()
+	for outputIndex, txout := range transferTransaction.Tx.TxOut {
+		action, err := protocol.Deserialize(txout.LockingScript, isTest)
+		if err != nil {
+			continue
+		}
+
+		if _, ok := action.(*actions.Transfer); ok {
+			transferOutputIndex = outputIndex
+			break
+		}
+	}
+	transferTransaction.Unlock()
+	a.transactions.Release(ctx, *transferTxID)
+
 	lockerResponseChannel := a.locker.AddRequest(allAddedBalances)
 	lockerResponse := <-lockerResponseChannel
 	switch v := lockerResponse.(type) {
@@ -821,7 +934,8 @@ func (a *Agent) applySettlements(ctx context.Context, transaction *transactions.
 			}
 
 			// Update balance
-			if addedBalance.Settle(ctx, *transferTxID, txid, timestamp) {
+			if addedBalance.Settle(ctx, *transferTxID, transferOutputIndex, txid, actionIndex,
+				timestamp) {
 				logger.InfoWithFields(instrumentCtx, []logger.Field{
 					logger.Timestamp("timestamp", int64(addedBalance.Timestamp)),
 					logger.Timestamp("existing_timestamp", int64(timestamp)),
@@ -851,7 +965,7 @@ func (a *Agent) applySettlements(ctx context.Context, transaction *transactions.
 }
 
 func (a *Agent) cancelTransfer(ctx context.Context, transaction *transactions.Transaction,
-	transfer *actions.Transfer) error {
+	transferOutputIndex int, transfer *actions.Transfer) error {
 
 	agentLockingScript := a.LockingScript()
 
@@ -952,19 +1066,30 @@ func (a *Agent) cancelTransfer(ctx context.Context, transaction *transactions.Tr
 	}
 	defer allBalances.Unlock()
 
-	allBalances.CancelPending(transferTxID)
+	allBalances.CancelPending(transferTxID, transferOutputIndex)
 
 	return nil
 }
 
 // populateTransferSettlement adds all the new balances to the transfer settlement.
 func populateTransferSettlement(ctx context.Context, tx *txbuilder.TxBuilder,
-	transferSettlement *actions.InstrumentSettlementField, balances state.Balances) error {
+	transferSettlement *actions.InstrumentSettlementField, balances state.Balances,
+	transferFeeLockingScript bitcoin.Script, transferFeeQuantityInBitcoin uint64) error {
 
+	transferFeePaid := false
 	for i, balance := range balances {
 		index, err := addDustLockingScript(tx, balance.LockingScript)
 		if err != nil {
 			return errors.Wrapf(err, "add locking script %d", i)
+		}
+
+		if transferFeeQuantityInBitcoin != 0 &&
+			balance.LockingScript.Equal(transferFeeLockingScript) {
+			transferFeePaid = true
+
+			if err := tx.AddValueToOutput(index, transferFeeQuantityInBitcoin); err != nil {
+				return errors.Wrap(err, "add transfer fee quantity")
+			}
 		}
 
 		quantity := balance.SettlePendingQuantity()
@@ -978,6 +1103,17 @@ func populateTransferSettlement(ctx context.Context, tx *txbuilder.TxBuilder,
 			logger.Stringer("locking_script", balance.LockingScript),
 			logger.Uint64("quantity", quantity),
 		}, "Settlement balance")
+	}
+
+	if !transferFeePaid && transferFeeQuantityInBitcoin != 0 {
+		index, err := addDustLockingScript(tx, transferFeeLockingScript)
+		if err != nil {
+			return errors.Wrapf(err, "add transfer fee locking script")
+		}
+
+		if err := tx.AddValueToOutput(index, transferFeeQuantityInBitcoin); err != nil {
+			return errors.Wrap(err, "add transfer fee quantity")
+		}
 	}
 
 	return nil
@@ -1214,6 +1350,37 @@ func (a *Agent) initiateInstrumentTransferBalances(ctx context.Context,
 	instrument.Lock()
 	instrumentType := string(instrument.InstrumentType[:])
 	transfersPermitted := instrument.TransfersPermitted()
+
+	transferFeeQuantityInInstrument := uint64(0)
+	var transferFeeLockingScript bitcoin.Script
+	if instrument.Creation.TransferFee != nil {
+		if len(instrument.Creation.TransferFee.Contract) > 0 ||
+			len(instrument.Creation.TransferFee.InstrumentCode) > 0 {
+			instrument.Unlock()
+			return nil, nil, nil, platform.NewRejectError(actions.RejectionsContractNotPermitted,
+				"transfer fee to other instrument")
+		}
+
+		if instrument.Creation.TransferFee.UseCurrentInstrument {
+			transferFeeQuantityInInstrument = instrument.Creation.TransferFee.Quantity
+
+			ra, err := bitcoin.DecodeRawAddress(instrument.Creation.TransferFee.Address)
+			if err != nil {
+				instrument.Unlock()
+				return nil, nil, nil, platform.NewRejectError(actions.RejectionsContractNotPermitted,
+					fmt.Sprintf("transfer fee address: %s", err))
+			}
+
+			ls, err := ra.LockingScript()
+			if err != nil {
+				instrument.Unlock()
+				return nil, nil, nil, platform.NewRejectError(actions.RejectionsContractNotPermitted,
+					fmt.Sprintf("transfer fee locking script: %s", err))
+			}
+
+			transferFeeLockingScript = ls
+		}
+	}
 	instrument.Unlock()
 
 	if instrumentTransfer.InstrumentType != instrumentType {
@@ -1331,6 +1498,16 @@ func (a *Agent) initiateInstrumentTransferBalances(ctx context.Context,
 		addBalances = state.AppendZeroBalance(addBalances, lockingScript)
 	}
 
+	if transferFeeQuantityInInstrument > 0 {
+		receiverQuantity += transferFeeQuantityInInstrument
+
+		hash := bitcoin.Hash32(sha256.Sum256(transferFeeLockingScript))
+		if _, alreadyExists := exists[hash]; !alreadyExists {
+			receiverLockingScripts = append(receiverLockingScripts, transferFeeLockingScript)
+			addBalances = state.AppendZeroBalance(addBalances, transferFeeLockingScript)
+		}
+	}
+
 	if !transfersPermitted && !onlyFromAdmin && !onlyToAdmin {
 		logger.WarnWithFields(ctx, []logger.Field{
 			logger.Stringer("admin_locking_script", adminLockingScript),
@@ -1342,11 +1519,14 @@ func (a *Agent) initiateInstrumentTransferBalances(ctx context.Context,
 	}
 
 	if senderQuantity != receiverQuantity {
-		logger.Warn(ctx,
-			"Sender and receiver quantity do not match : sender %d, receiver %d",
-			senderQuantity, receiverQuantity)
+		logger.WarnWithFields(ctx, []logger.Field{
+			logger.Uint64("sender_quantity", senderQuantity),
+			logger.Uint64("receiver_quantity", receiverQuantity),
+			logger.Uint64("transfer_fee_quantity", transferFeeQuantityInInstrument),
+		}, "Sender and receiver quantity do not match")
 		return nil, nil, nil, platform.NewRejectErrorWithOutputIndex(actions.RejectionsMsgMalformed,
-			"sender quantity != receiver quantity", int(instrumentTransfer.ContractIndex))
+			"sender quantity != receiver quantity + transfer fee",
+			int(instrumentTransfer.ContractIndex))
 	}
 
 	balances, err := a.caches.Balances.AddMulti(ctx, agentLockingScript, instrumentCode,
@@ -1362,9 +1542,10 @@ func (a *Agent) initiateInstrumentTransferBalances(ctx context.Context,
 // one instrument.
 func (a *Agent) buildInstrumentSettlement(ctx context.Context, balances state.Balances,
 	senderLockingScripts, receiverLockingScripts []bitcoin.Script,
-	settlementTx *txbuilder.TxBuilder, transferTxID bitcoin.Hash32, instrument *state.Instrument,
-	instrumentCode state.InstrumentCode, instrumentTransfer *actions.InstrumentTransferField,
-	contractOutput *wire.TxOut, isMultiContract, requiresIdentityOracles bool, headers BlockHeaders,
+	settlementTx *txbuilder.TxBuilder, transferTxID bitcoin.Hash32, transferOutputIndex int,
+	instrument *state.Instrument, instrumentCode state.InstrumentCode,
+	instrumentTransfer *actions.InstrumentTransferField, contractOutput *wire.TxOut,
+	isMultiContract, requiresIdentityOracles bool, headers BlockHeaders,
 	now uint64) (*actions.InstrumentSettlementField, error) {
 
 	contractInputIndex, err := addResponseInput(settlementTx, transferTxID, contractOutput,
@@ -1376,6 +1557,40 @@ func (a *Agent) buildInstrumentSettlement(ctx context.Context, balances state.Ba
 	instrument.Lock()
 	isFrozen := instrument.IsFrozen(now)
 	isExpired := instrument.IsExpired(now)
+
+	transferFeeQuantityInInstrument := uint64(0)
+	transferFeeQuantityInBitcoin := uint64(0)
+	var transferFeeLockingScript bitcoin.Script
+	if instrument.Creation.TransferFee != nil {
+		if len(instrument.Creation.TransferFee.Contract) > 0 ||
+			len(instrument.Creation.TransferFee.InstrumentCode) > 0 {
+			instrument.Unlock()
+			return nil, platform.NewRejectError(actions.RejectionsContractNotPermitted,
+				"transfer fee to other instrument")
+		}
+
+		ra, err := bitcoin.DecodeRawAddress(instrument.Creation.TransferFee.Address)
+		if err != nil {
+			instrument.Unlock()
+			return nil, platform.NewRejectError(actions.RejectionsContractNotPermitted,
+				"transfer fee address")
+		}
+
+		ls, err := ra.LockingScript()
+		if err != nil {
+			instrument.Unlock()
+			return nil, platform.NewRejectError(actions.RejectionsContractNotPermitted,
+				"transfer fee locking script")
+		}
+
+		transferFeeLockingScript = ls
+
+		if instrument.Creation.TransferFee.UseCurrentInstrument {
+			transferFeeQuantityInInstrument = instrument.Creation.TransferFee.Quantity
+		} else {
+			transferFeeQuantityInBitcoin = instrument.Creation.TransferFee.Quantity
+		}
+	}
 	instrument.Unlock()
 
 	logger.Info(ctx, "Building transfer settlement")
@@ -1416,12 +1631,24 @@ func (a *Agent) buildInstrumentSettlement(ctx context.Context, balances state.Ba
 				rejectError.InputIndex = int(sender.Index)
 				rejectError.OutputIndex = int(instrumentTransfer.ContractIndex)
 				rejectError.Message = fmt.Sprintf("sender %d: %s", i, rejectError.Message)
+
+				return nil, errors.Wrap(rejectError, "add debit")
+			}
+
+			switch e := errors.Cause(err).(type) {
+			case platform.RejectError:
+				e.InputIndex = int(sender.Index)
+				e.OutputIndex = int(instrumentTransfer.ContractIndex)
+				e.Message = fmt.Sprintf("sender %d: %s", i, e.Message)
+
+				return nil, errors.Wrap(e, "add debit")
 			}
 
 			return nil, errors.Wrap(err, "add debit")
 		}
 	}
 
+	transferFeeLockingScriptAlreadyReceiving := false
 	for i, receiver := range instrumentTransfer.InstrumentReceivers {
 		if requiresIdentityOracles && receiver.OracleSigExpiry != 0 &&
 			now > receiver.OracleSigExpiry {
@@ -1435,15 +1662,50 @@ func (a *Agent) buildInstrumentSettlement(ctx context.Context, balances state.Ba
 			return nil, fmt.Errorf("Missing balance for receiver %d : %s", i, lockingScript)
 		}
 
-		if err := balance.AddPendingCredit(receiver.Quantity, now); err != nil {
+		receiverQuantity := receiver.Quantity
+		if lockingScript.Equal(transferFeeLockingScript) {
+			transferFeeLockingScriptAlreadyReceiving = true
+			receiverQuantity += transferFeeQuantityInInstrument
+		}
+
+		if err := balance.AddPendingCredit(receiverQuantity, now); err != nil {
 			logger.WarnWithFields(ctx, []logger.Field{
 				logger.Stringer("locking_script", lockingScript),
-				logger.Uint64("quantity", receiver.Quantity),
+				logger.Uint64("quantity", receiverQuantity),
 			}, "Failed to add credit : %s", err)
 
-			if rejectError, ok := errors.Cause(err).(platform.RejectError); ok {
-				rejectError.OutputIndex = int(instrumentTransfer.ContractIndex)
-				rejectError.Message = fmt.Sprintf("receiver %d: %s", i, rejectError.Message)
+			switch e := errors.Cause(err).(type) {
+			case platform.RejectError:
+				e.OutputIndex = int(instrumentTransfer.ContractIndex)
+				e.Message = fmt.Sprintf("receiver: %s", e.Message)
+
+				return nil, errors.Wrap(e, "add credit")
+			}
+
+			return nil, errors.Wrap(err, "add credit")
+		}
+	}
+
+	if transferFeeQuantityInInstrument != 0 && len(transferFeeLockingScript) != 0 &&
+		!transferFeeLockingScriptAlreadyReceiving {
+		balance := balances.Find(transferFeeLockingScript)
+		if balance == nil {
+			return nil, fmt.Errorf("Missing balance for transfer fee receiver : %s",
+				transferFeeLockingScript)
+		}
+
+		if err := balance.AddPendingCredit(transferFeeQuantityInInstrument, now); err != nil {
+			logger.WarnWithFields(ctx, []logger.Field{
+				logger.Stringer("locking_script", transferFeeLockingScript),
+				logger.Uint64("quantity", transferFeeQuantityInInstrument),
+			}, "Failed to add credit for transfer fee : %s", err)
+
+			switch e := errors.Cause(err).(type) {
+			case platform.RejectError:
+				e.OutputIndex = int(instrumentTransfer.ContractIndex)
+				e.Message = fmt.Sprintf("transfer fee receiver: %s", e.Message)
+
+				return nil, errors.Wrap(e, "add credit")
 			}
 
 			return nil, errors.Wrap(err, "add credit")
@@ -1457,11 +1719,11 @@ func (a *Agent) buildInstrumentSettlement(ctx context.Context, balances state.Ba
 	}
 
 	if err := populateTransferSettlement(ctx, settlementTx, instrumentSettlement,
-		balances); err != nil {
+		balances, transferFeeLockingScript, transferFeeQuantityInBitcoin); err != nil {
 		return nil, errors.Wrap(err, "populate settlement")
 	}
 
-	balances.SettlePending(transferTxID, isMultiContract)
+	balances.SettlePending(transferTxID, transferOutputIndex, isMultiContract)
 	return instrumentSettlement, nil
 }
 

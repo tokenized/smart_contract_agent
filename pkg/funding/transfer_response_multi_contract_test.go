@@ -39,7 +39,8 @@ func Test_Transfers_Random_Multi_Contract_P2PKH(t *testing.T) {
 
 	agent1, err := agents.NewAgent(ctx, agentData1, agentsConfig, test.Caches.Caches,
 		test.Caches.Transactions, test.Caches.Services, test.Locker, test.Store, broadcaster1, nil,
-		nil, nil, nil, test.PeerChannelsFactory, test.PeerChannelResponses, test.Statistics.Add)
+		nil, nil, nil, test.PeerChannelsFactory, test.PeerChannelResponses, test.Statistics.Add,
+		test.DependencyTrigger.Trigger)
 	if err != nil {
 		t.Fatalf("Failed to create agent : %s", err)
 	}
@@ -71,7 +72,8 @@ func Test_Transfers_Random_Multi_Contract_P2PKH(t *testing.T) {
 
 	agent2, err := agents.NewAgent(ctx, agentData2, agentsConfig, test.Caches.Caches,
 		test.Caches.Transactions, test.Caches.Services, test.Locker, test.Store, broadcaster2, nil,
-		nil, nil, nil, test.PeerChannelsFactory, test.PeerChannelResponses, test.Statistics.Add)
+		nil, nil, nil, test.PeerChannelsFactory, test.PeerChannelResponses, test.Statistics.Add,
+		test.DependencyTrigger.Trigger)
 	if err != nil {
 		t.Fatalf("Failed to create agent : %s", err)
 	}

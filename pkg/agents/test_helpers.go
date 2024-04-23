@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"encoding/json"
 	"fmt"
+	mathRand "math/rand"
 	"runtime/debug"
 	"sync"
 	"testing"
@@ -27,6 +29,7 @@ import (
 	"github.com/tokenized/specification/dist/golang/instruments"
 	"github.com/tokenized/specification/dist/golang/protocol"
 	"github.com/tokenized/threads"
+	"github.com/tokenized/txbuilder"
 
 	"github.com/pkg/errors"
 )
@@ -49,13 +52,19 @@ type TestData struct {
 	peerChannelResponsesComplete chan interface{}
 	PeerChannelResponses         chan PeerChannelResponse
 
-	schedulerInterrupt  chan interface{}
-	schedulerComplete   chan interface{}
-	scheduler           *scheduler.Scheduler
-	headers             *state.MockHeaders
+	schedulerInterrupt chan interface{}
+	schedulerComplete  chan interface{}
+	scheduler          *scheduler.Scheduler
+
+	headers *state.MockHeaders
+
 	statisticsInterrupt chan interface{}
 	statisticsComplete  chan interface{}
 	Statistics          *statistics.Processor
+
+	triggerDependencyInterrupt chan interface{}
+	triggerDependencyComplete  chan interface{}
+	DependencyTrigger          *DependencyTrigger
 
 	ContractKey           bitcoin.Key
 	ContractLockingScript bitcoin.Script
@@ -88,6 +97,10 @@ type TestAgentData struct {
 
 	Caches      *TestCaches
 	Broadcaster *state.MockTxBroadcaster
+}
+
+func (t *TestData) AddAgent(agent *Agent) {
+	t.mockStore.AddAgent(agent)
 }
 
 func (t *TestAgentData) ProcessTx(ctx context.Context,
@@ -262,6 +275,21 @@ func StartTestAgentWithCacherWithInstrumentTransferFee(ctx context.Context, t te
 	return test.agent, test
 }
 
+func StartTestAgentWithCacherWithInstrumentTransferFeeUsingInstrument(ctx context.Context, t testing.TB,
+	store *storage.MockStorage, cache cacher.Cacher, transferFee uint64,
+	transferFeeLockingScript bitcoin.Script) (*Agent, *TestData) {
+
+	test := prepareTestDataWithCacher(ctx, t, store, cache)
+
+	test.ContractKey, test.ContractLockingScript, test.AdminKey, test.AdminLockingScript, test.Contract, test.Instrument = state.MockInstrumentWithTransferFeeUsingInstrument(ctx,
+		&test.Caches.TestCaches, transferFee, transferFeeLockingScript)
+	_, test.FeeLockingScript, _ = state.MockKey()
+
+	finalizeTestAgent(ctx, t, test)
+
+	return test.agent, test
+}
+
 func StartTestAgentWithInstrumentCreditNote(ctx context.Context, t testing.TB) (*Agent, *TestData) {
 	test := prepareTestData(ctx, t)
 
@@ -311,6 +339,8 @@ func prepareTestData(ctx context.Context, t testing.TB) *TestData {
 		schedulerComplete:            make(chan interface{}),
 		statisticsInterrupt:          make(chan interface{}),
 		statisticsComplete:           make(chan interface{}),
+		triggerDependencyInterrupt:   make(chan interface{}),
+		triggerDependencyComplete:    make(chan interface{}),
 		headers:                      state.NewMockHeaders(),
 	}
 
@@ -328,10 +358,15 @@ func prepareTestData(ctx context.Context, t testing.TB) *TestData {
 		t.Fatalf("Transactions is nil")
 	}
 
+	test.DependencyTrigger = NewDependencyTrigger(2, time.Second, test.Caches.Transactions)
+
 	test.mockStore = NewMockStore(DefaultConfig(), test.FeeLockingScript, test.Caches.Caches,
 		test.Caches.Transactions, test.Caches.Services, test.Locker, test.Store, test.Broadcaster,
 		nil, nil, test.scheduler, test.PeerChannelsFactory, test.PeerChannelResponses,
-		test.Statistics)
+		test.Statistics, test.DependencyTrigger.Trigger)
+
+	txProcessor := NewTransactionProcessor(true, test.mockStore)
+	test.DependencyTrigger.SetTransactionProcessor(txProcessor.ProcessTransaction)
 
 	test.peerChannelResponder = NewPeerChannelResponder(test.Caches.Caches,
 		test.PeerChannelsFactory)
@@ -365,6 +400,20 @@ func prepareTestData(ctx context.Context, t testing.TB) *TestData {
 	}()
 
 	go func() {
+		defer func() {
+			if err := recover(); err != nil {
+				t.Errorf("Dependency Trigger panic : %s", err)
+			}
+		}()
+
+		if err := test.DependencyTrigger.Run(ctx, test.triggerDependencyInterrupt); err != nil &&
+			errors.Cause(err) != threads.Interrupted {
+			t.Errorf("Dependency Trigger returned an error : %s", err)
+		}
+		close(test.triggerDependencyComplete)
+	}()
+
+	go func() {
 		ProcessResponses(ctx, test.peerChannelResponder, test.PeerChannelResponses)
 		close(test.peerChannelResponsesComplete)
 	}()
@@ -391,6 +440,8 @@ func prepareTestDataWithCacher(ctx context.Context, t testing.TB, store *storage
 		schedulerComplete:            make(chan interface{}),
 		statisticsInterrupt:          make(chan interface{}),
 		statisticsComplete:           make(chan interface{}),
+		triggerDependencyInterrupt:   make(chan interface{}),
+		triggerDependencyComplete:    make(chan interface{}),
 		headers:                      state.NewMockHeaders(),
 		Statistics:                   statProcessor,
 	}
@@ -406,10 +457,15 @@ func prepareTestDataWithCacher(ctx context.Context, t testing.TB, store *storage
 	agentConfig := DefaultConfig()
 	agentConfig.MultiContractExpiration = config.NewDuration(time.Second)
 
+	test.DependencyTrigger = NewDependencyTrigger(2, time.Second, test.Caches.Transactions)
+
 	test.mockStore = NewMockStore(agentConfig, test.FeeLockingScript, test.Caches.Caches,
 		test.Caches.Transactions, test.Caches.Services, test.Locker, test.Store, test.Broadcaster,
 		nil, nil, test.scheduler, test.PeerChannelsFactory, test.PeerChannelResponses,
-		test.Statistics)
+		test.Statistics, test.DependencyTrigger.Trigger)
+
+	txProcessor := NewTransactionProcessor(true, test.mockStore)
+	test.DependencyTrigger.SetTransactionProcessor(txProcessor.ProcessTransaction)
 
 	test.peerChannelResponder = NewPeerChannelResponder(test.Caches.Caches,
 		test.PeerChannelsFactory)
@@ -443,6 +499,20 @@ func prepareTestDataWithCacher(ctx context.Context, t testing.TB, store *storage
 	}()
 
 	go func() {
+		defer func() {
+			if err := recover(); err != nil {
+				t.Errorf("Dependency Trigger panic : %s", err)
+			}
+		}()
+
+		if err := test.DependencyTrigger.Run(ctx, test.triggerDependencyInterrupt); err != nil &&
+			errors.Cause(err) != threads.Interrupted {
+			t.Errorf("Dependency Trigger returned an error : %s", err)
+		}
+		close(test.triggerDependencyComplete)
+	}()
+
+	go func() {
 		ProcessResponses(ctx, test.peerChannelResponder, test.PeerChannelResponses)
 		close(test.peerChannelResponsesComplete)
 	}()
@@ -463,7 +533,8 @@ func finalizeTestAgent(ctx context.Context, t testing.TB, test *TestData) {
 	test.agent, err = NewAgent(ctx, test.agentData, DefaultConfig(), test.Caches.Caches,
 		test.Caches.Transactions, test.Caches.Services, test.Locker, test.Store,
 		test.Broadcaster, nil, test.headers, test.scheduler, test.mockStore,
-		test.PeerChannelsFactory, test.PeerChannelResponses, test.Statistics.Add)
+		test.PeerChannelsFactory, test.PeerChannelResponses, test.Statistics.Add,
+		test.DependencyTrigger.Trigger)
 	if err != nil {
 		t.Fatalf("Failed to create agent : %s", err)
 	}
@@ -513,6 +584,13 @@ func StopTestAgent(ctx context.Context, t *testing.T, test *TestData) {
 	case <-test.statisticsComplete:
 	case <-time.After(time.Second):
 		t.Fatalf("Statistics shut down timed out")
+	}
+
+	close(test.triggerDependencyInterrupt)
+	select {
+	case <-test.triggerDependencyComplete:
+	case <-time.After(time.Second):
+		t.Fatalf("Dependency Trigger shut down timed out")
 	}
 
 	if test.agent != nil {
@@ -590,6 +668,7 @@ type MockStore struct {
 	peerChannelsFactory  *peer_channels.Factory
 	peerChannelResponses chan PeerChannelResponse
 	statistics           *statistics.Processor
+	triggerDependency    TriggerDependency
 
 	lock sync.Mutex
 }
@@ -599,7 +678,7 @@ func NewMockStore(config Config, feeLockingScript bitcoin.Script, caches *state.
 	locker locker.Locker, store storage.CopyList, broadcaster Broadcaster, fetcher Fetcher,
 	headers BlockHeaders, scheduler *scheduler.Scheduler,
 	peerChannelsFactory *peer_channels.Factory, peerChannelResponses chan PeerChannelResponse,
-	statistics *statistics.Processor) *MockStore {
+	statistics *statistics.Processor, triggerDependency TriggerDependency) *MockStore {
 
 	return &MockStore{
 		config:               config,
@@ -614,6 +693,7 @@ func NewMockStore(config Config, feeLockingScript bitcoin.Script, caches *state.
 		peerChannelResponses: peerChannelResponses,
 		peerChannelsFactory:  peerChannelsFactory,
 		statistics:           statistics,
+		triggerDependency:    triggerDependency,
 	}
 }
 
@@ -658,7 +738,7 @@ func (f *MockStore) GetAgent(ctx context.Context,
 
 	agent, err := NewAgent(ctx, *data, f.config, f.caches, f.transactions, f.services, f.locker,
 		f.store, f.broadcaster, f.fetcher, f.headers, f.scheduler, f, f.peerChannelsFactory,
-		f.peerChannelResponses, f.statistics.Add)
+		f.peerChannelResponses, f.statistics.Add, f.triggerDependency)
 	if err != nil {
 		return nil, errors.Wrap(err, "new agent")
 	}
@@ -1195,4 +1275,501 @@ func MockInstrumentWithOracle(ctx context.Context,
 
 	return contractKey, contractLockingScript, adminKey, adminLockingScript, contract, instrument,
 		identityKey
+}
+
+func MockTransferTxWithReceivers(ctx context.Context, t testing.TB, test *TestData,
+	contract *state.Contract, instrument *state.Instrument,
+	receivers []bitcoin.Key) ([]bitcoin.Key, *expanded_tx.ExpandedTx) {
+
+	balances := state.MockBalances(ctx, &test.Caches.TestCaches, contract, instrument,
+		mathRand.Intn(5)+1)
+
+	instrumentTransfer := &actions.InstrumentTransferField{
+		ContractIndex:  0,
+		InstrumentType: string(instrument.InstrumentType[:]),
+		InstrumentCode: instrument.InstrumentCode[:],
+	}
+
+	transfer := &actions.Transfer{
+		Instruments: []*actions.InstrumentTransferField{
+			instrumentTransfer,
+		},
+	}
+
+	tx := txbuilder.NewTxBuilder(0.05, 0.0)
+	var senderKeys []bitcoin.Key
+	var spentOutputs []*expanded_tx.Output
+	quantity := uint64(0)
+	for _, balance := range balances {
+		instrumentTransfer.InstrumentSenders = append(instrumentTransfer.InstrumentSenders,
+			&actions.QuantityIndexField{
+				Quantity: balance.Quantity,
+				Index:    uint32(len(tx.MsgTx.TxIn)),
+			})
+
+		quantity += balance.Quantity
+		senderKeys = append(senderKeys, balance.Keys...)
+		outpoint := state.MockOutPoint(balance.LockingScript, 1)
+		spentOutputs = append(spentOutputs, &expanded_tx.Output{
+			LockingScript: balance.LockingScript,
+			Value:         1,
+		})
+
+		if err := tx.AddInput(*outpoint, balance.LockingScript, 1); err != nil {
+			t.Fatalf("Failed to add input : %s", err)
+		}
+	}
+
+	// Add receivers
+	var receiverKeys []bitcoin.Key
+	remainingQuantity := quantity
+	breakQuantity := quantity / 5
+	for remainingQuantity > 0 {
+		receivingQuantity := uint64(mathRand.Intn(int(breakQuantity))) + 1
+		if receivingQuantity > remainingQuantity {
+			receivingQuantity = remainingQuantity
+		}
+		remainingQuantity -= receivingQuantity
+
+		key := receivers[0]
+		receivers = receivers[1:]
+		receiverKeys = append(receiverKeys, key)
+		ra, _ := key.RawAddress()
+
+		instrumentTransfer.InstrumentReceivers = append(instrumentTransfer.InstrumentReceivers,
+			&actions.InstrumentReceiverField{
+				Address:  ra.Bytes(),
+				Quantity: receivingQuantity,
+			})
+
+		if len(receivers) == 0 {
+			break
+		}
+	}
+
+	for remainingQuantity > 0 {
+		receivingQuantity := uint64(mathRand.Intn(int(breakQuantity))) + 1
+		if receivingQuantity > remainingQuantity {
+			receivingQuantity = remainingQuantity
+		}
+		remainingQuantity -= receivingQuantity
+
+		key, _, ra := state.MockKey()
+		receiverKeys = append(receiverKeys, key)
+
+		instrumentTransfer.InstrumentReceivers = append(instrumentTransfer.InstrumentReceivers,
+			&actions.InstrumentReceiverField{
+				Address:  ra.Bytes(),
+				Quantity: receivingQuantity,
+			})
+	}
+
+	// Add contract outputs
+	if err := tx.AddOutput(contract.LockingScript, 240, false, false); err != nil {
+		t.Fatalf("Failed to add contract output : %s", err)
+	}
+
+	// Add action output
+	transferScript, err := protocol.Serialize(transfer, true)
+	if err != nil {
+		t.Fatalf("Failed to serialize transfer action : %s", err)
+	}
+
+	if err := tx.AddOutput(transferScript, 0, false, false); err != nil {
+		t.Fatalf("Failed to add transfer action output : %s", err)
+	}
+
+	// Add funding
+	fundingKey, fundingLockingScript, _ := state.MockKey()
+	senderKeys = append(senderKeys, fundingKey)
+	fundingOutpoint := state.MockOutPoint(fundingLockingScript, 1000)
+	spentOutputs = append(spentOutputs, &expanded_tx.Output{
+		LockingScript: fundingLockingScript,
+		Value:         1000,
+	})
+
+	if err := tx.AddInput(*fundingOutpoint, fundingLockingScript, 1000); err != nil {
+		t.Fatalf("Failed to add input : %s", err)
+	}
+
+	_, changeLockingScript, _ := state.MockKey()
+	tx.SetChangeLockingScript(changeLockingScript, "")
+
+	if _, err := tx.Sign(senderKeys); err != nil {
+		t.Fatalf("Failed to sign tx : %s", err)
+	}
+
+	t.Logf("Created tx : %s", txbuilder.TxString(tx))
+
+	js, _ := json.MarshalIndent(transfer, "", "  ")
+	t.Logf("Transfer : %s", js)
+
+	transferTx := &expanded_tx.ExpandedTx{
+		Tx:           tx.MsgTx,
+		SpentOutputs: spentOutputs,
+	}
+
+	return receiverKeys, transferTx
+}
+
+func MockTransferTx(ctx context.Context, t testing.TB, test *TestData, contract *state.Contract,
+	instrument *state.Instrument) ([]bitcoin.Key, *expanded_tx.ExpandedTx) {
+
+	tokenTransferFee := uint64(0)
+	instrument.Lock()
+	if instrument.Creation.TransferFee != nil &&
+		instrument.Creation.TransferFee.UseCurrentInstrument {
+		tokenTransferFee = instrument.Creation.TransferFee.Quantity
+	}
+	instrument.Unlock()
+
+	minimumBalance := tokenTransferFee + 5000
+	balances := state.MockBalances(ctx, &test.Caches.TestCaches, contract, instrument,
+		mathRand.Intn(5)+1)
+
+	for {
+		totalBalance := uint64(0)
+		for _, balance := range balances {
+			totalBalance += balance.Quantity
+		}
+
+		if totalBalance > minimumBalance {
+			break
+		}
+
+		newBalances := state.MockBalances(ctx, &test.Caches.TestCaches, contract, instrument,
+			mathRand.Intn(5)+1)
+		balances = append(balances, newBalances...)
+	}
+
+	instrumentTransfer := &actions.InstrumentTransferField{
+		ContractIndex:  0,
+		InstrumentType: string(instrument.InstrumentType[:]),
+		InstrumentCode: instrument.InstrumentCode[:],
+	}
+
+	transfer := &actions.Transfer{
+		Instruments: []*actions.InstrumentTransferField{
+			instrumentTransfer,
+		},
+	}
+
+	tx := txbuilder.NewTxBuilder(0.05, 0.0)
+	var senderKeys []bitcoin.Key
+	var spentOutputs []*expanded_tx.Output
+	quantity := uint64(0)
+
+	for _, balance := range balances {
+		instrumentTransfer.InstrumentSenders = append(instrumentTransfer.InstrumentSenders,
+			&actions.QuantityIndexField{
+				Quantity: balance.Quantity,
+				Index:    uint32(len(tx.MsgTx.TxIn)),
+			})
+
+		quantity += balance.Quantity
+		senderKeys = append(senderKeys, balance.Keys...)
+		outpoint := state.MockOutPoint(balance.LockingScript, 1)
+		spentOutputs = append(spentOutputs, &expanded_tx.Output{
+			LockingScript: balance.LockingScript,
+			Value:         1,
+		})
+
+		if err := tx.AddInput(*outpoint, balance.LockingScript, 1); err != nil {
+			t.Fatalf("Failed to add input : %s", err)
+		}
+	}
+
+	quantity -= tokenTransferFee
+
+	// Add receivers
+	var receiverKeys []bitcoin.Key
+	remainingQuantity := quantity
+	breakQuantity := quantity / 5
+	for remainingQuantity > 0 {
+		receivingQuantity := uint64(mathRand.Intn(int(breakQuantity))) + 1
+		if receivingQuantity > remainingQuantity {
+			receivingQuantity = remainingQuantity
+		}
+		remainingQuantity -= receivingQuantity
+
+		key, _, ra := state.MockKey()
+		receiverKeys = append(receiverKeys, key)
+
+		instrumentTransfer.InstrumentReceivers = append(instrumentTransfer.InstrumentReceivers,
+			&actions.InstrumentReceiverField{
+				Address:  ra.Bytes(),
+				Quantity: receivingQuantity,
+			})
+	}
+
+	// Add contract outputs
+	if err := tx.AddOutput(contract.LockingScript, 240, false, false); err != nil {
+		t.Fatalf("Failed to add contract output : %s", err)
+	}
+
+	// Add action output
+	transferScript, err := protocol.Serialize(transfer, true)
+	if err != nil {
+		t.Fatalf("Failed to serialize transfer action : %s", err)
+	}
+
+	if err := tx.AddOutput(transferScript, 0, false, false); err != nil {
+		t.Fatalf("Failed to add transfer action output : %s", err)
+	}
+
+	// Add funding
+	fundingKey, fundingLockingScript, _ := state.MockKey()
+	senderKeys = append(senderKeys, fundingKey)
+	fundingOutpoint := state.MockOutPoint(fundingLockingScript, 1000)
+	spentOutputs = append(spentOutputs, &expanded_tx.Output{
+		LockingScript: fundingLockingScript,
+		Value:         1000,
+	})
+
+	if err := tx.AddInput(*fundingOutpoint, fundingLockingScript, 1000); err != nil {
+		t.Fatalf("Failed to add input : %s", err)
+	}
+
+	_, changeLockingScript, _ := state.MockKey()
+	tx.SetChangeLockingScript(changeLockingScript, "")
+
+	if _, err := tx.Sign(senderKeys); err != nil {
+		t.Fatalf("Failed to sign tx : %s", err)
+	}
+
+	t.Logf("Created tx : %s", txbuilder.TxString(tx))
+
+	js, _ := json.MarshalIndent(transfer, "", "  ")
+	t.Logf("Transfer : %s", js)
+
+	transferTx := &expanded_tx.ExpandedTx{
+		Tx:           tx.MsgTx,
+		SpentOutputs: spentOutputs,
+	}
+
+	return receiverKeys, transferTx
+}
+
+func MockMultiContractTransferTx(ctx context.Context, t testing.TB, test *TestData,
+	contract1, contract2 *state.Contract,
+	instrument1, instrument2 *state.Instrument) ([]bitcoin.Key, []bitcoin.Key, *expanded_tx.ExpandedTx) {
+
+	tokenTransferFee1 := uint64(0)
+	instrument1.Lock()
+	if instrument1.Creation.TransferFee != nil &&
+		instrument1.Creation.TransferFee.UseCurrentInstrument {
+		tokenTransferFee1 = instrument1.Creation.TransferFee.Quantity
+	}
+	instrument1.Unlock()
+	minimumBalance1 := tokenTransferFee1 + 5000
+
+	balances1 := state.MockBalances(ctx, &test.Caches.TestCaches, contract1, instrument1,
+		mathRand.Intn(5)+1)
+
+	for {
+		totalBalance := uint64(0)
+		for _, balance := range balances1 {
+			totalBalance += balance.Quantity
+		}
+
+		if totalBalance > minimumBalance1 {
+			break
+		}
+
+		newBalances := state.MockBalances(ctx, &test.Caches.TestCaches, contract1, instrument1,
+			mathRand.Intn(5)+1)
+		balances1 = append(balances1, newBalances...)
+	}
+
+	tokenTransferFee2 := uint64(0)
+	instrument2.Lock()
+	if instrument2.Creation.TransferFee != nil &&
+		instrument2.Creation.TransferFee.UseCurrentInstrument {
+		tokenTransferFee2 = instrument2.Creation.TransferFee.Quantity
+	}
+	instrument2.Unlock()
+	minimumBalance2 := tokenTransferFee2 + 5000
+
+	balances2 := state.MockBalances(ctx, &test.Caches.TestCaches, contract2, instrument2,
+		mathRand.Intn(5)+1)
+
+	for {
+		totalBalance := uint64(0)
+		for _, balance := range balances2 {
+			totalBalance += balance.Quantity
+		}
+
+		if totalBalance > minimumBalance2 {
+			break
+		}
+
+		newBalances := state.MockBalances(ctx, &test.Caches.TestCaches, contract2, instrument2,
+			mathRand.Intn(5)+1)
+		balances2 = append(balances2, newBalances...)
+	}
+
+	instrumentTransfer1 := &actions.InstrumentTransferField{
+		ContractIndex:  0,
+		InstrumentType: string(instrument1.InstrumentType[:]),
+		InstrumentCode: instrument1.InstrumentCode[:],
+	}
+
+	instrumentTransfer2 := &actions.InstrumentTransferField{
+		ContractIndex:  1,
+		InstrumentType: string(instrument2.InstrumentType[:]),
+		InstrumentCode: instrument2.InstrumentCode[:],
+	}
+
+	transfer := &actions.Transfer{
+		Instruments: []*actions.InstrumentTransferField{
+			instrumentTransfer1,
+			instrumentTransfer2,
+		},
+	}
+
+	tx := txbuilder.NewTxBuilder(0.05, 0.0)
+	var senderKeys []bitcoin.Key
+	var spentOutputs []*expanded_tx.Output
+	quantity1 := uint64(0)
+	quantity2 := uint64(0)
+
+	for _, balance := range balances1 {
+		instrumentTransfer1.InstrumentSenders = append(instrumentTransfer1.InstrumentSenders,
+			&actions.QuantityIndexField{
+				Quantity: balance.Quantity,
+				Index:    uint32(len(tx.MsgTx.TxIn)),
+			})
+
+		quantity1 += balance.Quantity
+		senderKeys = append(senderKeys, balance.Keys...)
+		outpoint := state.MockOutPoint(balance.LockingScript, 1)
+		spentOutputs = append(spentOutputs, &expanded_tx.Output{
+			LockingScript: balance.LockingScript,
+			Value:         1,
+		})
+
+		if err := tx.AddInput(*outpoint, balance.LockingScript, 1); err != nil {
+			t.Fatalf("Failed to add input : %s", err)
+		}
+	}
+
+	quantity1 -= tokenTransferFee1
+
+	for _, balance := range balances2 {
+		instrumentTransfer2.InstrumentSenders = append(instrumentTransfer2.InstrumentSenders,
+			&actions.QuantityIndexField{
+				Quantity: balance.Quantity,
+				Index:    uint32(len(tx.MsgTx.TxIn)),
+			})
+
+		quantity2 += balance.Quantity
+		senderKeys = append(senderKeys, balance.Keys...)
+		outpoint := state.MockOutPoint(balance.LockingScript, 1)
+		spentOutputs = append(spentOutputs, &expanded_tx.Output{
+			LockingScript: balance.LockingScript,
+			Value:         1,
+		})
+
+		if err := tx.AddInput(*outpoint, balance.LockingScript, 1); err != nil {
+			t.Fatalf("Failed to add input : %s", err)
+		}
+	}
+
+	quantity2 -= tokenTransferFee2
+
+	// Add receivers
+	var receiver1Keys []bitcoin.Key
+	remainingQuantity := quantity1
+	breakQuantity := quantity1 / 5
+	for remainingQuantity > 0 {
+		receivingQuantity := uint64(mathRand.Intn(int(breakQuantity))) + 1
+		if receivingQuantity > remainingQuantity {
+			receivingQuantity = remainingQuantity
+		}
+		remainingQuantity -= receivingQuantity
+
+		key, _, ra := state.MockKey()
+		receiver1Keys = append(receiver1Keys, key)
+
+		instrumentTransfer1.InstrumentReceivers = append(instrumentTransfer1.InstrumentReceivers,
+			&actions.InstrumentReceiverField{
+				Address:  ra.Bytes(),
+				Quantity: receivingQuantity,
+			})
+	}
+
+	var receiver2Keys []bitcoin.Key
+	remainingQuantity = quantity2
+	breakQuantity = quantity2 / 5
+	for remainingQuantity > 0 {
+		receivingQuantity := uint64(mathRand.Intn(int(breakQuantity))) + 1
+		if receivingQuantity > remainingQuantity {
+			receivingQuantity = remainingQuantity
+		}
+		remainingQuantity -= receivingQuantity
+
+		key, _, ra := state.MockKey()
+		receiver2Keys = append(receiver2Keys, key)
+
+		instrumentTransfer2.InstrumentReceivers = append(instrumentTransfer2.InstrumentReceivers,
+			&actions.InstrumentReceiverField{
+				Address:  ra.Bytes(),
+				Quantity: receivingQuantity,
+			})
+	}
+
+	// Add contract outputs
+	if err := tx.AddOutput(contract1.LockingScript, 240, false, false); err != nil {
+		t.Fatalf("Failed to add contract output : %s", err)
+	}
+	if err := tx.AddOutput(contract2.LockingScript, 200, false, false); err != nil {
+		t.Fatalf("Failed to add contract output : %s", err)
+	}
+
+	// Add boomerang output
+	if err := tx.AddOutput(contract1.LockingScript, 200, false, false); err != nil {
+		t.Fatalf("Failed to add boomerang output : %s", err)
+	}
+
+	// Add action output
+	transferScript, err := protocol.Serialize(transfer, true)
+	if err != nil {
+		t.Fatalf("Failed to serialize transfer action : %s", err)
+	}
+
+	if err := tx.AddOutput(transferScript, 0, false, false); err != nil {
+		t.Fatalf("Failed to add transfer action output : %s", err)
+	}
+
+	// Add funding
+	fundingKey, fundingLockingScript, _ := state.MockKey()
+	senderKeys = append(senderKeys, fundingKey)
+	fundingOutpoint := state.MockOutPoint(fundingLockingScript, 1000)
+	spentOutputs = append(spentOutputs, &expanded_tx.Output{
+		LockingScript: fundingLockingScript,
+		Value:         1000,
+	})
+
+	if err := tx.AddInput(*fundingOutpoint, fundingLockingScript, 1000); err != nil {
+		t.Fatalf("Failed to add input : %s", err)
+	}
+
+	_, changeLockingScript, _ := state.MockKey()
+	tx.SetChangeLockingScript(changeLockingScript, "")
+
+	if _, err := tx.Sign(senderKeys); err != nil {
+		t.Fatalf("Failed to sign tx : %s", err)
+	}
+
+	t.Logf("Created tx : %s", txbuilder.TxString(tx))
+
+	js, _ := json.MarshalIndent(transfer, "", "  ")
+	t.Logf("Transfer : %s", js)
+
+	transferTx := &expanded_tx.ExpandedTx{
+		Tx:           tx.MsgTx,
+		SpentOutputs: spentOutputs,
+	}
+
+	return receiver1Keys, receiver2Keys, transferTx
 }

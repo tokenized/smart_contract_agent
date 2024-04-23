@@ -325,6 +325,9 @@ func RunTest_Transfers_Basic(ctx context.Context, t *testing.T, store *storage.M
 			t.Fatalf("Failed to serialize transfer action : %s", err)
 		}
 
+		js, _ := json.MarshalIndent(transfer, "", "  ")
+		t.Logf("Transfer : %s", js)
+
 		transferScriptOutputIndex := len(tx.Outputs)
 		if err := tx.AddOutput(transferScript, 0, false, false); err != nil {
 			t.Fatalf("Failed to add transfer action output : %s", err)
@@ -400,7 +403,7 @@ func RunTest_Transfers_Basic(ctx context.Context, t *testing.T, store *storage.M
 			t.Fatalf("Missing settlement action")
 		}
 
-		js, _ := json.MarshalIndent(settlement, "", "  ")
+		js, _ = json.MarshalIndent(settlement, "", "  ")
 		t.Logf("Settlement : %s", js)
 
 		test.Caches.Transactions.Release(ctx, transaction.GetTxID())
@@ -527,7 +530,8 @@ func RunTest_Transfers_Multi_Basic(ctx context.Context, t *testing.T, store *sto
 
 	agent1, err := NewAgent(ctx, agentData1, DefaultConfig(), test.Caches.Caches,
 		test.Caches.Transactions, test.Caches.Services, test.Locker, test.Store, broadcaster1, nil,
-		nil, nil, nil, test.PeerChannelsFactory, test.PeerChannelResponses, test.Statistics.Add)
+		nil, nil, nil, test.PeerChannelsFactory, test.PeerChannelResponses, test.Statistics.Add,
+		test.DependencyTrigger.Trigger)
 	if err != nil {
 		t.Fatalf("Failed to create agent : %s", err)
 	}
@@ -559,7 +563,8 @@ func RunTest_Transfers_Multi_Basic(ctx context.Context, t *testing.T, store *sto
 
 	agent2, err := NewAgent(ctx, agentData2, DefaultConfig(), test.Caches.Caches,
 		test.Caches.Transactions, test.Caches.Services, test.Locker, test.Store, broadcaster2, nil,
-		nil, nil, nil, test.PeerChannelsFactory, test.PeerChannelResponses, test.Statistics.Add)
+		nil, nil, nil, test.PeerChannelsFactory, test.PeerChannelResponses, test.Statistics.Add,
+		test.DependencyTrigger.Trigger)
 	if err != nil {
 		t.Fatalf("Failed to create agent : %s", err)
 	}
@@ -1251,7 +1256,8 @@ func RunTest_Transfers_Multi_TransferFee_Success(ctx context.Context, t *testing
 
 	agent1, err := NewAgent(ctx, agentData1, DefaultConfig(), test.Caches.Caches,
 		test.Caches.Transactions, test.Caches.Services, test.Locker, test.Store, broadcaster1, nil,
-		nil, nil, nil, test.PeerChannelsFactory, test.PeerChannelResponses, test.Statistics.Add)
+		nil, nil, nil, test.PeerChannelsFactory, test.PeerChannelResponses, test.Statistics.Add,
+		test.DependencyTrigger.Trigger)
 	if err != nil {
 		t.Fatalf("Failed to create agent : %s", err)
 	}
@@ -1285,7 +1291,8 @@ func RunTest_Transfers_Multi_TransferFee_Success(ctx context.Context, t *testing
 
 	agent2, err := NewAgent(ctx, agentData2, DefaultConfig(), test.Caches.Caches,
 		test.Caches.Transactions, test.Caches.Services, test.Locker, test.Store, broadcaster2, nil,
-		nil, nil, nil, test.PeerChannelsFactory, test.PeerChannelResponses, test.Statistics.Add)
+		nil, nil, nil, test.PeerChannelsFactory, test.PeerChannelResponses, test.Statistics.Add,
+		test.DependencyTrigger.Trigger)
 	if err != nil {
 		t.Fatalf("Failed to create agent : %s", err)
 	}
@@ -2013,7 +2020,7 @@ func RunTest_Transfers_Multi_TransferFee_Reject_First(ctx context.Context, t *te
 	agent1, err := NewAgent(ctx, agentData1, test.mockStore.config, test.Caches.Caches,
 		test.Caches.Transactions, test.Caches.Services, test.Locker, test.Store, broadcaster1, nil,
 		nil, test.scheduler, test.mockStore, test.PeerChannelsFactory, test.PeerChannelResponses,
-		test.Statistics.Add)
+		test.Statistics.Add, test.DependencyTrigger.Trigger)
 	if err != nil {
 		t.Fatalf("Failed to create agent : %s", err)
 	}
@@ -2049,7 +2056,7 @@ func RunTest_Transfers_Multi_TransferFee_Reject_First(ctx context.Context, t *te
 	agent2, err := NewAgent(ctx, agentData2, test.mockStore.config, test.Caches.Caches,
 		test.Caches.Transactions, test.Caches.Services, test.Locker, test.Store, broadcaster2, nil,
 		nil, test.scheduler, test.mockStore, test.PeerChannelsFactory, test.PeerChannelResponses,
-		test.Statistics.Add)
+		test.Statistics.Add, test.DependencyTrigger.Trigger)
 	if err != nil {
 		t.Fatalf("Failed to create agent : %s", err)
 	}
@@ -2413,7 +2420,8 @@ func RunTest_Transfers_Multi_TransferFee_Reject_Second(ctx context.Context, t *t
 
 	agent1, err := NewAgent(ctx, agentData1, DefaultConfig(), test.Caches.Caches,
 		test.Caches.Transactions, test.Caches.Services, test.Locker, test.Store, broadcaster1, nil,
-		nil, nil, nil, test.PeerChannelsFactory, test.PeerChannelResponses, test.Statistics.Add)
+		nil, nil, nil, test.PeerChannelsFactory, test.PeerChannelResponses, test.Statistics.Add,
+		test.DependencyTrigger.Trigger)
 	if err != nil {
 		t.Fatalf("Failed to create agent : %s", err)
 	}
@@ -2447,7 +2455,8 @@ func RunTest_Transfers_Multi_TransferFee_Reject_Second(ctx context.Context, t *t
 
 	agent2, err := NewAgent(ctx, agentData2, DefaultConfig(), test.Caches.Caches,
 		test.Caches.Transactions, test.Caches.Services, test.Locker, test.Store, broadcaster2, nil,
-		nil, nil, nil, test.PeerChannelsFactory, test.PeerChannelResponses, test.Statistics.Add)
+		nil, nil, nil, test.PeerChannelsFactory, test.PeerChannelResponses, test.Statistics.Add,
+		test.DependencyTrigger.Trigger)
 	if err != nil {
 		t.Fatalf("Failed to create agent : %s", err)
 	}
@@ -2863,7 +2872,8 @@ func RunTest_Transfers_Multi_Expire(ctx context.Context, t *testing.T, store *st
 
 	agent1, err := NewAgent(ctx, agentData1, config, test.Caches.Caches, test.Caches.Transactions,
 		test.Caches.Services, test.Locker, test.Store, broadcaster1, nil, nil, scheduler,
-		test.mockStore, test.PeerChannelsFactory, test.PeerChannelResponses, test.Statistics.Add)
+		test.mockStore, test.PeerChannelsFactory, test.PeerChannelResponses, test.Statistics.Add,
+		test.DependencyTrigger.Trigger)
 	if err != nil {
 		t.Fatalf("Failed to create agent : %s", err)
 	}
@@ -2896,7 +2906,8 @@ func RunTest_Transfers_Multi_Expire(ctx context.Context, t *testing.T, store *st
 
 	agent2, err := NewAgent(ctx, agentData2, config, test.Caches.Caches, test.Caches.Transactions,
 		test.Caches.Services, test.Locker, test.Store, broadcaster2, nil, nil, scheduler,
-		test.mockStore, test.PeerChannelsFactory, test.PeerChannelResponses, test.Statistics.Add)
+		test.mockStore, test.PeerChannelsFactory, test.PeerChannelResponses, test.Statistics.Add,
+		test.DependencyTrigger.Trigger)
 	if err != nil {
 		t.Fatalf("Failed to create agent : %s", err)
 	}
@@ -3320,7 +3331,8 @@ func RunTest_Transfers_Multi_Reject_First(ctx context.Context, t *testing.T,
 
 	agent1, err := NewAgent(ctx, agentData1, DefaultConfig(), test.Caches.Caches,
 		test.Caches.Transactions, test.Caches.Services, test.Locker, test.Store, broadcaster1, nil,
-		nil, nil, nil, test.PeerChannelsFactory, test.PeerChannelResponses, test.Statistics.Add)
+		nil, nil, nil, test.PeerChannelsFactory, test.PeerChannelResponses, test.Statistics.Add,
+		test.DependencyTrigger.Trigger)
 	if err != nil {
 		t.Fatalf("Failed to create agent : %s", err)
 	}
@@ -3352,7 +3364,8 @@ func RunTest_Transfers_Multi_Reject_First(ctx context.Context, t *testing.T,
 
 	agent2, err := NewAgent(ctx, agentData2, DefaultConfig(), test.Caches.Caches,
 		test.Caches.Transactions, test.Caches.Services, test.Locker, test.Store, broadcaster2, nil,
-		nil, nil, nil, test.PeerChannelsFactory, test.PeerChannelResponses, test.Statistics.Add)
+		nil, nil, nil, test.PeerChannelsFactory, test.PeerChannelResponses, test.Statistics.Add,
+		test.DependencyTrigger.Trigger)
 	if err != nil {
 		t.Fatalf("Failed to create agent : %s", err)
 	}
@@ -3637,7 +3650,8 @@ func RunTest_Transfers_Multi_Reject_Second(ctx context.Context, t *testing.T,
 
 	agent1, err := NewAgent(ctx, agentData1, DefaultConfig(), test.Caches.Caches,
 		test.Caches.Transactions, test.Caches.Services, test.Locker, test.Store, broadcaster1, nil,
-		nil, nil, nil, test.PeerChannelsFactory, test.PeerChannelResponses, test.Statistics.Add)
+		nil, nil, nil, test.PeerChannelsFactory, test.PeerChannelResponses, test.Statistics.Add,
+		test.DependencyTrigger.Trigger)
 	if err != nil {
 		t.Fatalf("Failed to create agent : %s", err)
 	}
@@ -3669,7 +3683,8 @@ func RunTest_Transfers_Multi_Reject_Second(ctx context.Context, t *testing.T,
 
 	agent2, err := NewAgent(ctx, agentData2, DefaultConfig(), test.Caches.Caches,
 		test.Caches.Transactions, test.Caches.Services, test.Locker, test.Store, broadcaster2, nil,
-		nil, nil, nil, test.PeerChannelsFactory, test.PeerChannelResponses, test.Statistics.Add)
+		nil, nil, nil, test.PeerChannelsFactory, test.PeerChannelResponses, test.Statistics.Add,
+		test.DependencyTrigger.Trigger)
 	if err != nil {
 		t.Fatalf("Failed to create agent : %s", err)
 	}

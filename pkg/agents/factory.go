@@ -31,6 +31,7 @@ type Factory struct {
 	peerChannelsFactory  *peer_channels.Factory
 	peerChannelResponses chan PeerChannelResponse
 	updateStats          statistics.AddUpdate
+	triggerDependency    TriggerDependency
 }
 
 func NewFactory(config Config, store storage.CopyList, cache cacher.Cacher,
@@ -39,7 +40,7 @@ func NewFactory(config Config, store storage.CopyList, cache cacher.Cacher,
 	broadcaster Broadcaster, fetcher Fetcher, headers BlockHeaders, scheduler *scheduler.Scheduler,
 	agentStore Store, peerChannelsFactory *peer_channels.Factory,
 	peerChannelResponses chan PeerChannelResponse,
-	updateStats statistics.AddUpdate) (*Factory, error) {
+	updateStats statistics.AddUpdate, triggerDependency TriggerDependency) (*Factory, error) {
 
 	caches, err := state.NewCaches(cache)
 	if err != nil {
@@ -61,13 +62,14 @@ func NewFactory(config Config, store storage.CopyList, cache cacher.Cacher,
 		peerChannelsFactory:  peerChannelsFactory,
 		peerChannelResponses: peerChannelResponses,
 		updateStats:          updateStats,
+		triggerDependency:    triggerDependency,
 	}, nil
 }
 
 func (f *Factory) NewAgent(ctx context.Context, data AgentData) (*Agent, error) {
 	return NewAgent(ctx, data, f.config, f.caches, f.transactions, f.services, f.locker, f.store,
 		f.broadcaster, f.fetcher, f.headers, f.scheduler, f.agentStore, f.peerChannelsFactory,
-		f.peerChannelResponses, f.updateStats)
+		f.peerChannelResponses, f.updateStats, f.triggerDependency)
 }
 
 func (f *Factory) NewPeerChannelResponder() *PeerChannelResponder {

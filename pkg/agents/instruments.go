@@ -102,7 +102,7 @@ func (a *Agent) processInstrumentDefinition(ctx context.Context, transaction *tr
 		return nil, errors.Wrap(err, "agent address")
 	}
 
-	// Check if this value wasn't updated properly.
+	// Check if this value wasn't updated properly from a previous bug.
 	if contract.InstrumentCount == 0 {
 		found := false
 		for i := uint64(0); i < uint64(10); i++ {
@@ -127,6 +127,26 @@ func (a *Agent) processInstrumentDefinition(ctx context.Context, transaction *tr
 			logger.InfoWithFields(ctx, []logger.Field{
 				logger.Uint64("instrument_count", contract.InstrumentCount),
 			}, "Updated instrument count")
+		}
+	}
+
+	if definition.TransferFee != nil {
+		if len(definition.TransferFee.InstrumentCode) > 0 {
+			// Check if the administrator is trying to specify the current instrument for the
+			// transfer fee to be paid in without using the UseCurrentInstrument field.
+			nextInstrumentCode := protocol.InstrumentCodeFromContract(contractAddress,
+				contract.InstrumentCount)
+
+			if bytes.Equal(nextInstrumentCode[:], definition.TransferFee.InstrumentCode) {
+				return nil, platform.NewRejectError(actions.RejectionsMsgMalformed,
+					"UseCurrentInstrument field must be used")
+			}
+		}
+
+		if len(definition.TransferFee.Contract) > 0 ||
+			len(definition.TransferFee.InstrumentCode) > 0 {
+			return nil, platform.NewRejectError(actions.RejectionsContractNotPermitted,
+				"transfer fee to other instrument")
 		}
 	}
 
@@ -184,7 +204,7 @@ func (a *Agent) processInstrumentDefinition(ctx context.Context, transaction *tr
 	}
 
 	adminBalance, err := a.updateAdminBalance(ctx, agentLockingScript,
-		contract.Formation.AdminAddress, creation, txid, 0, &now)
+		contract.Formation.AdminAddress, creation, txid, actionIndex, 0, &now)
 	if err != nil {
 		return nil, errors.Wrap(err, "update admin balance")
 	}
@@ -202,14 +222,14 @@ func (a *Agent) processInstrumentDefinition(ctx context.Context, transaction *tr
 	if err := creationTx.AddInput(wire.OutPoint{Hash: txid, Index: 0}, agentLockingScript,
 		contractOutput.Value); err != nil {
 		if adminBalance != nil {
-			adminBalance.Revert(txid)
+			adminBalance.Revert(txid, actionIndex)
 		}
 		return nil, errors.Wrap(err, "add input")
 	}
 
 	if err := creationTx.AddOutput(agentLockingScript, 1, false, false); err != nil {
 		if adminBalance != nil {
-			adminBalance.Revert(txid)
+			adminBalance.Revert(txid, actionIndex)
 		}
 		return nil, errors.Wrap(err, "add contract output")
 	}
@@ -217,7 +237,7 @@ func (a *Agent) processInstrumentDefinition(ctx context.Context, transaction *tr
 	creationScript, err := protocol.Serialize(creation, config.IsTest)
 	if err != nil {
 		if adminBalance != nil {
-			adminBalance.Revert(txid)
+			adminBalance.Revert(txid, actionIndex)
 		}
 		return nil, errors.Wrap(err, "serialize creation")
 	}
@@ -225,7 +245,7 @@ func (a *Agent) processInstrumentDefinition(ctx context.Context, transaction *tr
 	creationScriptOutputIndex := len(creationTx.Outputs)
 	if err := creationTx.AddOutput(creationScript, 0, false, false); err != nil {
 		if adminBalance != nil {
-			adminBalance.Revert(txid)
+			adminBalance.Revert(txid, actionIndex)
 		}
 		return nil, errors.Wrap(err, "add creation output")
 	}
@@ -238,13 +258,13 @@ func (a *Agent) processInstrumentDefinition(ctx context.Context, transaction *tr
 		if err := creationTx.AddOutput(a.FeeLockingScript(), contractFee, true,
 			false); err != nil {
 			if adminBalance != nil {
-				adminBalance.Revert(txid)
+				adminBalance.Revert(txid, actionIndex)
 			}
 			return nil, errors.Wrap(err, "add contract fee")
 		}
 	} else if err := creationTx.SetChangeLockingScript(a.FeeLockingScript(), ""); err != nil {
 		if adminBalance != nil {
-			adminBalance.Revert(txid)
+			adminBalance.Revert(txid, actionIndex)
 		}
 		return nil, errors.Wrap(err, "set change")
 	}
@@ -252,7 +272,7 @@ func (a *Agent) processInstrumentDefinition(ctx context.Context, transaction *tr
 	// Sign creation tx.
 	if err := a.Sign(ctx, creationTx, a.FeeLockingScript()); err != nil {
 		if adminBalance != nil {
-			adminBalance.Revert(txid)
+			adminBalance.Revert(txid, actionIndex)
 		}
 		if errors.Cause(err) == txbuilder.ErrInsufficientValue {
 			return nil, platform.NewRejectError(actions.RejectionsInsufficientTxFeeFunding,
@@ -266,14 +286,14 @@ func (a *Agent) processInstrumentDefinition(ctx context.Context, transaction *tr
 	creationTransaction, err := a.transactions.AddRaw(ctx, creationTx.MsgTx, nil)
 	if err != nil {
 		if adminBalance != nil {
-			adminBalance.Revert(txid)
+			adminBalance.Revert(txid, actionIndex)
 		}
 		return nil, errors.Wrap(err, "add response tx")
 	}
 	defer a.transactions.Release(ctx, creationTxID)
 
 	if adminBalance != nil {
-		adminBalance.Settle(ctx, txid, creationTxID, now)
+		adminBalance.Settle(ctx, txid, actionIndex, creationTxID, creationScriptOutputIndex, now)
 	}
 
 	// Set creation tx as processed since the instrument is now created.
@@ -303,8 +323,8 @@ func (a *Agent) processInstrumentDefinition(ctx context.Context, transaction *tr
 	return etx, nil
 }
 
-func (a *Agent) processInstrumentModification(ctx context.Context, transaction *transactions.Transaction,
-	modification *actions.InstrumentModification,
+func (a *Agent) processInstrumentModification(ctx context.Context,
+	transaction *transactions.Transaction, modification *actions.InstrumentModification,
 	actionIndex int) (*expanded_tx.ExpandedTx, error) {
 
 	instrumentID, err := protocol.InstrumentIDForRaw(modification.InstrumentType,
@@ -472,6 +492,31 @@ func (a *Agent) processInstrumentModification(ctx context.Context, transaction *
 		return nil, errors.Wrap(err, "apply amendments")
 	}
 
+	contractAddress, err := bitcoin.RawAddressFromLockingScript(agentLockingScript)
+	if err != nil {
+		return nil, errors.Wrap(err, "agent address")
+	}
+
+	if creation.TransferFee != nil {
+		if len(creation.TransferFee.InstrumentCode) > 0 {
+			// Check if the administrator is trying to specify the current instrument for the
+			// transfer fee to be paid in without using the UseCurrentInstrument field.
+			nextInstrumentCode := protocol.InstrumentCodeFromContract(contractAddress,
+				contract.InstrumentCount)
+
+			if bytes.Equal(nextInstrumentCode[:], creation.TransferFee.InstrumentCode) {
+				return nil, platform.NewRejectError(actions.RejectionsMsgMalformed,
+					"UseCurrentInstrument field must be used")
+			}
+		}
+
+		if len(creation.TransferFee.Contract) > 0 ||
+			len(creation.TransferFee.InstrumentCode) > 0 {
+			return nil, platform.NewRejectError(actions.RejectionsContractNotPermitted,
+				"transfer fee to other instrument")
+		}
+	}
+
 	logger.Info(ctx, "Accepting instrument modification")
 
 	creation.InstrumentRevision = instrument.Creation.InstrumentRevision + 1 // Bump the revision
@@ -482,7 +527,7 @@ func (a *Agent) processInstrumentModification(ctx context.Context, transaction *
 	}
 
 	adminBalance, err := a.updateAdminBalance(ctx, agentLockingScript, adminAddressBytes,
-		creation, txid, previousAuthorizedTokenQty, &now)
+		creation, txid, actionIndex, previousAuthorizedTokenQty, &now)
 	if err != nil {
 		return nil, errors.Wrap(err, "update admin balance")
 	}
@@ -499,14 +544,14 @@ func (a *Agent) processInstrumentModification(ctx context.Context, transaction *
 	if err := creationTx.AddInput(wire.OutPoint{Hash: txid, Index: 0}, agentLockingScript,
 		contractOutput.Value); err != nil {
 		if adminBalance != nil {
-			adminBalance.Revert(txid)
+			adminBalance.Revert(txid, actionIndex)
 		}
 		return nil, errors.Wrap(err, "add input")
 	}
 
 	if err := creationTx.AddOutput(agentLockingScript, 1, false, false); err != nil {
 		if adminBalance != nil {
-			adminBalance.Revert(txid)
+			adminBalance.Revert(txid, actionIndex)
 		}
 		return nil, errors.Wrap(err, "add contract output")
 	}
@@ -514,7 +559,7 @@ func (a *Agent) processInstrumentModification(ctx context.Context, transaction *
 	creationScript, err := protocol.Serialize(creation, config.IsTest)
 	if err != nil {
 		if adminBalance != nil {
-			adminBalance.Revert(txid)
+			adminBalance.Revert(txid, actionIndex)
 		}
 		return nil, errors.Wrap(err, "serialize creation")
 	}
@@ -522,7 +567,7 @@ func (a *Agent) processInstrumentModification(ctx context.Context, transaction *
 	creationScriptOutputIndex := len(creationTx.Outputs)
 	if err := creationTx.AddOutput(creationScript, 0, false, false); err != nil {
 		if adminBalance != nil {
-			adminBalance.Revert(txid)
+			adminBalance.Revert(txid, actionIndex)
 		}
 		return nil, errors.Wrap(err, "add creation output")
 	}
@@ -535,13 +580,13 @@ func (a *Agent) processInstrumentModification(ctx context.Context, transaction *
 		if err := creationTx.AddOutput(a.FeeLockingScript(), contractFee, true,
 			false); err != nil {
 			if adminBalance != nil {
-				adminBalance.Revert(txid)
+				adminBalance.Revert(txid, actionIndex)
 			}
 			return nil, errors.Wrap(err, "add contract fee")
 		}
 	} else if err := creationTx.SetChangeLockingScript(a.FeeLockingScript(), ""); err != nil {
 		if adminBalance != nil {
-			adminBalance.Revert(txid)
+			adminBalance.Revert(txid, actionIndex)
 		}
 		return nil, errors.Wrap(err, "set change")
 	}
@@ -549,7 +594,7 @@ func (a *Agent) processInstrumentModification(ctx context.Context, transaction *
 	// Sign creation tx.
 	if err := a.Sign(ctx, creationTx, a.FeeLockingScript()); err != nil {
 		if adminBalance != nil {
-			adminBalance.Revert(txid)
+			adminBalance.Revert(txid, actionIndex)
 		}
 		if errors.Cause(err) == txbuilder.ErrInsufficientValue {
 			return nil, platform.NewRejectError(actions.RejectionsInsufficientTxFeeFunding,
@@ -569,14 +614,14 @@ func (a *Agent) processInstrumentModification(ctx context.Context, transaction *
 	creationTransaction, err := a.transactions.AddRaw(ctx, creationTx.MsgTx, nil)
 	if err != nil {
 		if adminBalance != nil {
-			adminBalance.Revert(txid)
+			adminBalance.Revert(txid, actionIndex)
 		}
 		return nil, errors.Wrap(err, "add response tx")
 	}
 	defer a.transactions.Release(ctx, creationTxID)
 
 	if adminBalance != nil {
-		adminBalance.Settle(ctx, txid, creationTxID, now)
+		adminBalance.Settle(ctx, txid, actionIndex, creationTxID, creationScriptOutputIndex, now)
 	}
 
 	// Set creation tx as processed since the instrument is now modified.
@@ -625,6 +670,32 @@ func (a *Agent) processInstrumentCreation(ctx context.Context,
 	if !agentLockingScript.Equal(inputOutput.LockingScript) {
 		return nil // Not for this agent's contract
 	}
+
+	requestTransaction, err := a.transactions.Get(ctx, requestTxID)
+	if err != nil {
+		return errors.Wrapf(err, "get request tx: %s", requestTxID)
+	}
+
+	if requestTransaction == nil {
+		return errors.Wrapf(err, "missing request tx: %s", requestTxID)
+	}
+
+	isTest := a.Config().IsTest
+	requestOutputIndex := 0
+	requestTransaction.Lock()
+	for outputIndex, txout := range requestTransaction.Tx.TxOut {
+		action, err := protocol.Deserialize(txout.LockingScript, isTest)
+		if err != nil {
+			continue
+		}
+
+		switch action.(type) {
+		case *actions.InstrumentDefinition, *actions.InstrumentModification:
+			requestOutputIndex = outputIndex
+		}
+	}
+	requestTransaction.Unlock()
+	a.transactions.Release(ctx, requestTxID)
 
 	if _, err := a.addResponseTxID(ctx, input.PreviousOutPoint.Hash, txid, creation,
 		actionIndex); err != nil {
@@ -732,7 +803,8 @@ func (a *Agent) processInstrumentCreation(ctx context.Context,
 	}
 
 	if err := a.applyAdminBalance(ctx, agentLockingScript, adminAddressBytes, creation, requestTxID,
-		txid, previousAuthorizedTokenQty, creation.Timestamp); err != nil {
+		requestOutputIndex, txid, actionIndex, previousAuthorizedTokenQty,
+		creation.Timestamp); err != nil {
 		return errors.Wrap(err, "admin balance")
 	}
 
@@ -745,7 +817,8 @@ func (a *Agent) processInstrumentCreation(ctx context.Context,
 
 func (a *Agent) updateAdminBalance(ctx context.Context, contractLockingScript bitcoin.Script,
 	adminAddress []byte, creation *actions.InstrumentCreation, requestTxID bitcoin.Hash32,
-	previousAuthorizedTokenQty uint64, timestamp *uint64) (*state.Balance, error) {
+	requestActionIndex int, previousAuthorizedTokenQty uint64,
+	timestamp *uint64) (*state.Balance, error) {
 
 	if previousAuthorizedTokenQty == creation.AuthorizedTokenQty {
 		logger.InfoWithFields(ctx, []logger.Field{
@@ -803,11 +876,13 @@ func (a *Agent) updateAdminBalance(ctx context.Context, contractLockingScript bi
 
 				if rejectError, ok := errors.Cause(err).(platform.RejectError); ok {
 					rejectError.Message = fmt.Sprintf("admin balance: %s", rejectError.Message)
+
+					return nil, errors.Wrap(rejectError, "add credit")
 				}
 
 				return nil, errors.Wrap(err, "add credit")
 			}
-			adminBalance.SettlePending(requestTxID, false)
+			adminBalance.SettlePending(requestTxID, requestActionIndex, false)
 		} else if previousAuthorizedTokenQty > creation.AuthorizedTokenQty {
 			reduction := previousAuthorizedTokenQty - creation.AuthorizedTokenQty
 
@@ -826,11 +901,13 @@ func (a *Agent) updateAdminBalance(ctx context.Context, contractLockingScript bi
 
 				if rejectError, ok := errors.Cause(err).(platform.RejectError); ok {
 					rejectError.Message = fmt.Sprintf("admin balance: %s", rejectError.Message)
+
+					return nil, errors.Wrap(rejectError, "add debit")
 				}
 
 				return nil, errors.Wrap(err, "add debit")
 			}
-			adminBalance.SettlePending(requestTxID, false)
+			adminBalance.SettlePending(requestTxID, requestActionIndex, false)
 		} else {
 			return nil, errors.New("Can't get here because of check at top of function")
 		}
@@ -854,11 +931,13 @@ func (a *Agent) updateAdminBalance(ctx context.Context, contractLockingScript bi
 
 			if rejectError, ok := errors.Cause(err).(platform.RejectError); ok {
 				rejectError.Message = fmt.Sprintf("admin balance: %s", rejectError.Message)
+
+				return nil, errors.Wrap(rejectError, "add credit")
 			}
 
 			return nil, errors.Wrap(err, "add credit")
 		}
-		adminBalance.SettlePending(requestTxID, false)
+		adminBalance.SettlePending(requestTxID, requestActionIndex, false)
 	}
 
 	logger.InfoWithFields(ctx, []logger.Field{
@@ -870,7 +949,8 @@ func (a *Agent) updateAdminBalance(ctx context.Context, contractLockingScript bi
 }
 
 func (a *Agent) applyAdminBalance(ctx context.Context, contractLockingScript bitcoin.Script,
-	adminAddress []byte, creation *actions.InstrumentCreation, requestTxID, responseTxID bitcoin.Hash32,
+	adminAddress []byte, creation *actions.InstrumentCreation, requestTxID bitcoin.Hash32,
+	requestOutputIndex int, responseTxID bitcoin.Hash32, responseOutputIndex int,
 	previousAuthorizedTokenQty uint64, timestamp uint64) error {
 
 	if previousAuthorizedTokenQty == creation.AuthorizedTokenQty {
@@ -927,7 +1007,8 @@ func (a *Agent) applyAdminBalance(ctx context.Context, contractLockingScript bit
 			newBalance += creation.AuthorizedTokenQty - previousAuthorizedTokenQty
 		}
 
-		adminBalance.HardSettle(ctx, requestTxID, responseTxID, newBalance, timestamp)
+		adminBalance.HardSettle(ctx, requestTxID, requestOutputIndex, responseTxID,
+			responseOutputIndex, newBalance, timestamp)
 	}
 
 	logger.InfoWithFields(ctx, []logger.Field{

@@ -236,8 +236,8 @@ func settlePendingBalanceAdjustment(ctx context.Context, caches *state.Caches,
 	defer transferTx.Unlock()
 
 	var transfer *actions.Transfer
-	var transferIndex int
-	for i, txout := range transferTx.Tx.TxOut {
+	var transferOutputIndex int
+	for outputIndex, txout := range transferTx.Tx.TxOut {
 		action, err := protocol.Deserialize(txout.LockingScript, isTest)
 		if err != nil {
 			continue
@@ -245,7 +245,7 @@ func settlePendingBalanceAdjustment(ctx context.Context, caches *state.Caches,
 
 		if t, ok := action.(*actions.Transfer); ok {
 			transfer = t
-			transferIndex = i
+			transferOutputIndex = outputIndex
 			break
 		}
 	}
@@ -258,8 +258,9 @@ func settlePendingBalanceAdjustment(ctx context.Context, caches *state.Caches,
 	}
 
 	processeds := transferTx.ContractProcessed(state.CalculateContractHash(contractLockingScript),
-		transferIndex)
+		transferOutputIndex)
 	var settlementTxID, rejectionTxID *bitcoin.Hash32
+	var settlementIndex int
 	var settlementTimestamp uint64
 	for _, processed := range processeds {
 		if processed.ResponseTxID == nil {
@@ -278,7 +279,7 @@ func settlePendingBalanceAdjustment(ctx context.Context, caches *state.Caches,
 
 		responseTx.Lock()
 
-		for _, txout := range responseTx.Tx.TxOut {
+		for outputIndex, txout := range responseTx.Tx.TxOut {
 			action, err := protocol.Deserialize(txout.LockingScript, isTest)
 			if err != nil {
 				continue
@@ -287,6 +288,7 @@ func settlePendingBalanceAdjustment(ctx context.Context, caches *state.Caches,
 
 			if s, ok := action.(*actions.Settlement); ok {
 				settlementTxID = processed.ResponseTxID
+				settlementIndex = outputIndex
 				settlementTimestamp = s.Timestamp
 				break
 			}
@@ -306,7 +308,8 @@ func settlePendingBalanceAdjustment(ctx context.Context, caches *state.Caches,
 	}
 
 	if settlementTxID != nil {
-		if balance.Settle(ctx, transferTxID, *settlementTxID, settlementTimestamp) {
+		if balance.Settle(ctx, transferTxID, transferOutputIndex, *settlementTxID, settlementIndex,
+			settlementTimestamp) {
 			fmt.Printf("Transfer TxID : %s\n", transferTxID)
 			fmt.Printf("Settlement TxID : %s\n", *settlementTxID)
 			js, _ := json.MarshalIndent(adjustment, "", "  ")
@@ -319,7 +322,7 @@ func settlePendingBalanceAdjustment(ctx context.Context, caches *state.Caches,
 				[]byte(balance.LockingScript), js)
 		}
 	} else if rejectionTxID != nil {
-		balance.CancelPending(transferTxID)
+		balance.CancelPending(transferTxID, transferOutputIndex)
 		fmt.Printf("Transfer TxID : %s\n", transferTxID)
 		fmt.Printf("Rejection TxID : %s\n", *rejectionTxID)
 		js, _ := json.MarshalIndent(adjustment, "", "  ")
