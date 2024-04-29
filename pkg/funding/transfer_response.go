@@ -53,7 +53,7 @@ type InstrumentData struct {
 	Code                         []byte
 	TransferFee                  uint64
 	TransferFeeLockingScriptSize int
-	TransferFeeInCurrentToken    bool
+	TransferFeeInCurrentToken    bool // The transfer fee is paid in the token being transferred.
 }
 
 type Contracts []*ContractData

@@ -170,10 +170,8 @@ func (a *Agent) Sign(ctx context.Context, tx *txbuilder.TxBuilder,
 			}
 
 			if !found {
-				outputFee, dust := fees.OutputFeeAndDustForLockingScript(changeLockingScript,
-					config.DustFeeRate, config.FeeRate)
-
-				if change > outputFee+dust {
+				outputFee, spendFee, _ := fees.OutputTotalCost(changeLockingScript, config.FeeRate)
+				if change > outputFee+spendFee {
 					logger.InfoWithFields(ctx, []logger.Field{
 						logger.Uint64("change", change),
 					}, "Adding new output for change")
@@ -185,9 +183,9 @@ func (a *Agent) Sign(ctx context.Context, tx *txbuilder.TxBuilder,
 				} else {
 					logger.InfoWithFields(ctx, []logger.Field{
 						logger.Uint64("output_fee", outputFee),
-						logger.Uint64("dust", dust),
+						logger.Uint64("spend_fee", spendFee),
 						logger.Uint64("change", change),
-					}, "Change below cost of new output and dust")
+					}, "Change below cost of new output and spending input fee")
 				}
 			}
 		}

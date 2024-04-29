@@ -11,11 +11,11 @@ require (
 	github.com/tokenized/config v0.2.2
 	github.com/tokenized/envelope v1.1.0
 	github.com/tokenized/logger v0.1.4-0.20230915152315-06e93587a3c5
-	github.com/tokenized/pkg v0.7.1-0.20240322160211-478383da3ef4
+	github.com/tokenized/pkg v0.7.1-0.20240419135100-97e7439893ef
 	github.com/tokenized/specification v1.3.2-0.20240423192016-a7de8d9a8fe7
-	github.com/tokenized/spynode v0.4.3-0.20240302141440-e79e62276595
+	github.com/tokenized/spynode v0.4.3-0.20240429200408-ca85020eff0a
 	github.com/tokenized/threads v0.1.2
-	github.com/tokenized/txbuilder v1.1.1-0.20240326130416-af1f84c4e418
+	github.com/tokenized/txbuilder v1.1.1-0.20240429200508-25122a528d7d
 )
 
 require (
