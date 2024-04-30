@@ -93,7 +93,7 @@ func listenPeerChannel(ctx context.Context, client peer_channels.Client,
 			logger.String("peer_channel", peerChannel.MaskedString()),
 		}, "Connecting to peer channel service to listen for messages")
 
-		if err := client.Listen(ctx, token, true, incoming, interrupt); err != nil {
+		if err := client.Listen(ctx, token, true, time.Second, incoming, interrupt); err != nil {
 			if errors.Cause(err) == threads.Interrupted {
 				return nil
 			}

@@ -77,7 +77,8 @@ func Test_RequestNewAgent(t *testing.T) {
 
 	responseHandler := uuid_response_handler.NewHandler()
 	responseListener := peer_channels_listener.NewPeerChannelsListener(peerChannelsClient,
-		responseAccount.Token, 100, responseHandler.HandleMessage, responseHandler.HandleUpdate)
+		responseAccount.Token, 100, 1, time.Second, responseHandler.HandleMessage,
+		responseHandler.HandleUpdate)
 	responseHandler.SetAddUpdate(responseListener.AddUpdate)
 
 	client, err := NewClient(peerChannelFactory, operatorKey.PublicKey(), *requestPeerChannel,
@@ -90,7 +91,7 @@ func Test_RequestNewAgent(t *testing.T) {
 		requestPeerChannelFull.ID, 1000)
 
 	operatorListener := peer_channels_listener.NewPeerChannelsListener(peerChannelsClient,
-		requestAccount.Token, 100, mockOperator.HandleMessage, nil)
+		requestAccount.Token, 100, 1, time.Second, mockOperator.HandleMessage, nil)
 
 	operatorListenerInterrupt := make(chan interface{})
 	operatorListenerComplete := make(chan interface{})
@@ -166,7 +167,8 @@ func Test_RequestSignedInput(t *testing.T) {
 
 	responseHandler := uuid_response_handler.NewHandler()
 	responseListener := peer_channels_listener.NewPeerChannelsListener(peerChannelsClient,
-		responseAccount.Token, 100, responseHandler.HandleMessage, responseHandler.HandleUpdate)
+		responseAccount.Token, 100, 1, time.Second, responseHandler.HandleMessage,
+		responseHandler.HandleUpdate)
 	responseHandler.SetAddUpdate(responseListener.AddUpdate)
 
 	client, err := NewClient(peerChannelFactory, operatorKey.PublicKey(), *requestPeerChannel,
@@ -179,7 +181,7 @@ func Test_RequestSignedInput(t *testing.T) {
 		requestPeerChannelFull.ID, 1000)
 
 	operatorListener := peer_channels_listener.NewPeerChannelsListener(peerChannelsClient,
-		requestAccount.Token, 100, mockOperator.HandleMessage, nil)
+		requestAccount.Token, 100, 1, time.Second, mockOperator.HandleMessage, nil)
 
 	operatorListenerInterrupt := make(chan interface{})
 	operatorListenerComplete := make(chan interface{})

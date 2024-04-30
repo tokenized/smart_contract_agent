@@ -8,6 +8,7 @@ import (
 	"os/signal"
 	"sync"
 	"syscall"
+	"time"
 
 	"github.com/tokenized/channels"
 	channelsExpandedTx "github.com/tokenized/channels/expanded_tx"
@@ -135,7 +136,7 @@ func waitForAgentResponse(ctx context.Context, peerChannelsFactory *peer_channel
 
 	peerChannelThread, peerChannelComplete := threads.NewInterruptableThreadComplete("Peer Channel Listen",
 		func(ctx context.Context, interrupt <-chan interface{}) error {
-			return peerChannelsClient.Listen(ctx, readToken, true, incoming, interrupt)
+			return peerChannelsClient.Listen(ctx, readToken, true, time.Second, incoming, interrupt)
 		}, &wait)
 
 	handleMessagesThread, handleMessagesComplete := threads.NewUninterruptableThreadComplete("Handle Messages",

@@ -9,6 +9,7 @@ import (
 	"os/signal"
 	"sync"
 	"syscall"
+	"time"
 
 	"github.com/tokenized/channels"
 	"github.com/tokenized/channels/contract_operator"
@@ -116,7 +117,7 @@ func waitForOperatorResponse(ctx context.Context, peerChannelsFactory *peer_chan
 
 	peerChannelThread, peerChannelComplete := threads.NewInterruptableThreadComplete("Peer Channel Listen",
 		func(ctx context.Context, interrupt <-chan interface{}) error {
-			return peerChannelsClient.Listen(ctx, readToken, true, incoming, interrupt)
+			return peerChannelsClient.Listen(ctx, readToken, true, time.Second, incoming, interrupt)
 		}, &wait)
 
 	var response *operator_client.Response

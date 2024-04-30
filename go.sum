@@ -97,8 +97,8 @@ github.com/stretchr/testify v1.5.1 h1:nOGnQDM7FYENwehXlg/kFVnos3rEvtKTjRvOWSzb6H
 github.com/stretchr/testify v1.5.1/go.mod h1:5W2xD1RspED5o8YsWQXVCued0rvSQ+mT+I5cxcmMvtA=
 github.com/tokenized/bitcoin_interpreter v0.1.2-0.20231122211758-38562b0f6929 h1:aACADn/p6BlrlnJxf4IsBzd0lDmnUgs8sOq/Ic6WR94=
 github.com/tokenized/bitcoin_interpreter v0.1.2-0.20231122211758-38562b0f6929/go.mod h1:bSMGbxCxf/NrBmq+VYQS94P/ctOAhFis/nO4y6RwI/c=
-github.com/tokenized/channels v0.1.2-0.20240321200422-4527d5b6cda9 h1:WVY8EEuMMiQL8SXQ5ue7By7kiFDfIQmAKRjzBXq1Cuw=
-github.com/tokenized/channels v0.1.2-0.20240321200422-4527d5b6cda9/go.mod h1:SYgXK1iV++vSQCdSWbV6mbVh66IyaJMnkzGEwI9KvXc=
+github.com/tokenized/channels v0.1.2-0.20240430144045-da6531056455 h1:XkaWtK6JxcB0HMwRG3euML0pZBAuP7cdGjZGjEGJ9es=
+github.com/tokenized/channels v0.1.2-0.20240430144045-da6531056455/go.mod h1:eanKF1Orv+SPmNeP20M6xLJUsVR6tSlXkF7CQ7WSVbo=
 github.com/tokenized/config v0.2.2 h1:dGfFdv3P6JK9TcHvud34vozocm3Qq2Wxbc9PRctgDL8=
 github.com/tokenized/config v0.2.2/go.mod h1:CfxdNBZh5W1CCmE4bKHrSq7dgKQiNUxdrDtmvhemq2w=
 github.com/tokenized/envelope v1.1.0 h1:D30lQzMwtV5wj1YXBHxycSaBJ1MFINL/HuT0kAmznd4=
@@ -110,8 +110,8 @@ github.com/tokenized/logger v0.1.4-0.20230915152315-06e93587a3c5/go.mod h1:bA5Pf
 github.com/tokenized/metrics v0.1.0 h1:iOn8Eax2WsYas0AZj4F0KXAw5aD86B9B4Ojn6kwgKsA=
 github.com/tokenized/metrics v0.1.0/go.mod h1:mL3Vm5rNdp90hZrfY5oVk9b8GpM89YqYGyBaLVIo2wE=
 github.com/tokenized/pkg v0.6.0/go.mod h1:reIXdZflcfFbuX1RvX90yAjlYVJaUiYDc5CWJ6qCQww=
-github.com/tokenized/pkg v0.7.1-0.20240419135100-97e7439893ef h1:kzcsVIILrWdcO0uFfueJU2v554+UjNai3bF/FbouTbY=
-github.com/tokenized/pkg v0.7.1-0.20240419135100-97e7439893ef/go.mod h1:c1xkP+9ON6kwoMQB9LMpy34YcqUwqNXjPMlltYTYZIc=
+github.com/tokenized/pkg v0.7.1-0.20240430143333-d07a56355119 h1:c8WkqmaRJhb4WysA32J/aHCPDZR3SM4oj7ABDfTp0Qg=
+github.com/tokenized/pkg v0.7.1-0.20240430143333-d07a56355119/go.mod h1:c1xkP+9ON6kwoMQB9LMpy34YcqUwqNXjPMlltYTYZIc=
 github.com/tokenized/specification v1.3.2-0.20240423192016-a7de8d9a8fe7 h1:5yHdsLJG6whfu7/BfUzzMgOi8zG+3F9FkEbEQZ2Xskc=
 github.com/tokenized/specification v1.3.2-0.20240423192016-a7de8d9a8fe7/go.mod h1:WccmJEJTH69f71hY+oamzwFPXLnqKf7ocHEuVmcHIgU=
 github.com/tokenized/spynode v0.4.3-0.20240429200408-ca85020eff0a h1:W36jO4g6jSuFp0/yOmMHaJZKAeYJI6SK7jz35Tj8uDo=
