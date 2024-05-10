@@ -290,6 +290,7 @@ func (a *Agent) UpdateTransaction(ctx context.Context, transaction *transactions
 	contractHash := a.ContractHash()
 
 	transaction.Lock()
+	txid := transaction.TxID()
 	txState := transaction.State
 	transaction.Unlock()
 
@@ -297,6 +298,12 @@ func (a *Agent) UpdateTransaction(ctx context.Context, transaction *transactions
 		transaction.Lock()
 		if !transaction.SetIsProcessing(contractHash) {
 			transaction.Unlock()
+
+			logger.InfoWithFields(ctx, []logger.Field{
+				logger.Stringer("txid", txid),
+				logger.Stringer("state", txState),
+			}, "Transaction already processing")
+
 			return nil
 		}
 		transaction.Unlock()
@@ -313,6 +320,12 @@ func (a *Agent) UpdateTransaction(ctx context.Context, transaction *transactions
 		transaction.Lock()
 		if !transaction.SetIsProcessing(contractHash) {
 			transaction.Unlock()
+
+			logger.InfoWithFields(ctx, []logger.Field{
+				logger.Stringer("txid", txid),
+				logger.Stringer("state", txState),
+			}, "Transaction already processing")
+
 			return nil
 		}
 		transaction.Unlock()
@@ -324,6 +337,11 @@ func (a *Agent) UpdateTransaction(ctx context.Context, transaction *transactions
 
 		return nil
 	}
+
+	logger.InfoWithFields(ctx, []logger.Field{
+		logger.Stringer("txid", txid),
+		logger.Stringer("state", txState),
+	}, "No updates needed for transaction")
 
 	return nil
 }
