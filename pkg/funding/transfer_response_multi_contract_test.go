@@ -24,6 +24,8 @@ func Test_Transfers_Random_Multi_Contract_P2PKH(t *testing.T) {
 	broadcaster1 := state.NewMockTxBroadcaster()
 	broadcaster2 := state.NewMockTxBroadcaster()
 	agentsConfig := agents.DefaultConfig()
+	agentsConfig.FeeRate = 0.002
+	agentsConfig.MinFeeRate = 0.002
 
 	contractKey1, contractLockingScript1, adminKey1, adminLockingScript1, contract1, instrument1 := state.MockInstrument(ctx,
 		&test.Caches.TestCaches)
@@ -91,10 +93,10 @@ func Test_Transfers_Random_Multi_Contract_P2PKH(t *testing.T) {
 		Caches:                test.Caches,
 	}
 
-	for i := 0; i < 1; i++ {
+	for i := 0; i < 10; i++ {
 		senderCount := mathRand.Intn(10) + 1
 		MockExecuteTransferMultiContractRandom(t, ctx, test, agentTestData1, agentTestData2,
-			senderCount, false)
+			senderCount, agentsConfig.FeeRate, false)
 	}
 
 	agent1.Release(ctx)
@@ -107,7 +109,7 @@ func Test_Transfers_Random_Multi_Contract_P2PKH(t *testing.T) {
 }
 
 func MockExecuteTransferMultiContractRandom(t *testing.T, ctx context.Context,
-	test *agents.TestData, agent1, agent2 *agents.TestAgentData, senderCount int,
+	test *agents.TestData, agent1, agent2 *agents.TestAgentData, senderCount int, feeRate float64,
 	useMulti bool) {
 
 	var balances1, balances2 []*state.MockBalanceData
@@ -142,7 +144,6 @@ func MockExecuteTransferMultiContractRandom(t *testing.T, ctx context.Context,
 		Instruments: []*actions.InstrumentTransferField{instrumentTransfer1, instrumentTransfer2},
 	}
 
-	feeRate := float64(0.05)
 	dustFeeRate := float64(0.0)
 
 	tx := txbuilder.NewTxBuilder(float32(feeRate), float32(dustFeeRate))

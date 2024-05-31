@@ -290,6 +290,7 @@ func CalculateTransferResponseFee(transferTx *wire.MsgTx, inputLockingScriptSize
 	}
 
 	contractCount := len(result)
+	boomerangFees := uint64(0)
 	boomerangSize := 0
 	if contractCount > 1 {
 		// Add the response size of all other contract's responses into the master's since it must
@@ -308,7 +309,7 @@ func CalculateTransferResponseFee(transferTx *wire.MsgTx, inputLockingScriptSize
 		// Calculate boomerang message tx fees.
 		boomerangOutgoingPayloadSize := 0
 		for _, feeData := range result[:contractCount-1] { // the last contract doesn't send this
-			// Boomerang outgoing messages accumulating settlement data.
+			// Boomerang outgoing settlement request messages accumulating settlement data.
 			boomerangOutgoingPayloadSize += feeData.payloadSize
 
 			// Sender contract input and receiver contract output plus accumulated settlement
@@ -316,10 +317,23 @@ func CalculateTransferResponseFee(transferTx *wire.MsgTx, inputLockingScriptSize
 			boomerangSize += FlatContractSize + FlatEnvelopeSize
 			boomerangSize += boomerangOutgoingPayloadSize
 
-			// Boomerang returning messages containing full response tx and adding signatures.
+			// Boomerang returning signature request messages containing full response tx and adding
+			// signatures.
 			// Sender contract input and receiver contract output plus accumulated response tx.
 			boomerangSize += FlatContractSize + FlatEnvelopeSize
 			boomerangSize += masterFeeData.responseSize + masterFeeData.payloadSize
+
+			boomerangFees += fees.EstimateFeeValue(boomerangSize, miningFeeRate)
+		}
+
+		for i := contractCount - 1; i >= 1; i-- { // the last contract doesn't send this
+			// Boomerang returning signature request messages containing full response tx and adding
+			// signatures.
+			// Sender contract input and receiver contract output plus accumulated response tx.
+			boomerangSize += FlatContractSize + FlatEnvelopeSize
+			boomerangSize += masterFeeData.responseSize + masterFeeData.payloadSize
+
+			boomerangFees += fees.EstimateFeeValue(boomerangSize, miningFeeRate)
 		}
 	}
 
@@ -328,5 +342,5 @@ func CalculateTransferResponseFee(transferTx *wire.MsgTx, inputLockingScriptSize
 		feeData.Finalize(feeData == masterFeeData, miningFeeRate)
 	}
 
-	return result, fees.EstimateFeeValue(boomerangSize, miningFeeRate), nil
+	return result, boomerangFees, nil
 }
