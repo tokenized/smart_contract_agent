@@ -35,12 +35,15 @@ var (
 )
 
 type FeeData struct {
-	Index        uint32
-	Value        uint64
-	responseSize int    // size of response used to calculate response tx mining fee
-	payloadSize  int    // size of response used to calculate response tx mining fee
-	dust         uint64 // dust for settlement participant outputs
-	fee          uint64 // action and transfer fees
+	Index          uint32
+	Value          uint64
+	responseSize   int      // size of response used to calculate response tx mining fee
+	payloadSize    int      // size of response used to calculate response tx mining fee
+	dust           uint64   // dust for settlement participant outputs
+	fee            uint64   // action and transfer fees
+	contractDust   uint64   // dust value for contract outputs
+	boomerangSizes []int    // size of each transaction in a boomerang
+	boomerangFees  []uint64 // fee of each transaction in a boomerang
 }
 
 type ContractData struct {
@@ -174,6 +177,7 @@ func CalculateTransferResponseFee(transferTx *wire.MsgTx, inputLockingScriptSize
 			payloadSize:  FlatEnvelopeSize,
 			dust:         0,
 			fee:          contract.ActionFee,
+			contractDust: fees.DustLimitForLockingScriptSize(len(lockingScript), dustFeeRate),
 		}
 		result = append(result, masterFeeData)
 		break
@@ -291,7 +295,6 @@ func CalculateTransferResponseFee(transferTx *wire.MsgTx, inputLockingScriptSize
 
 	contractCount := len(result)
 	boomerangFees := uint64(0)
-	boomerangSize := 0
 	if contractCount > 1 {
 		// Add the response size of all other contract's responses into the master's since it must
 		// pay the mining fee for the entire settlement tx.
@@ -314,26 +317,30 @@ func CalculateTransferResponseFee(transferTx *wire.MsgTx, inputLockingScriptSize
 
 			// Sender contract input and receiver contract output plus accumulated settlement
 			// payload.
-			boomerangSize += FlatContractSize + FlatEnvelopeSize
-			boomerangSize += boomerangOutgoingPayloadSize
+			settlementRequestSize := FlatContractSize + FlatEnvelopeSize
+			settlementRequestSize += boomerangOutgoingPayloadSize
 
-			// Boomerang returning signature request messages containing full response tx and adding
-			// signatures.
-			// Sender contract input and receiver contract output plus accumulated response tx.
-			boomerangSize += FlatContractSize + FlatEnvelopeSize
-			boomerangSize += masterFeeData.responseSize + masterFeeData.payloadSize
-
-			boomerangFees += fees.EstimateFeeValue(boomerangSize, miningFeeRate)
+			miningFee := fees.EstimateFeeValue(settlementRequestSize, miningFeeRate)
+			masterFeeData.boomerangSizes = append(masterFeeData.boomerangSizes,
+				settlementRequestSize)
+			masterFeeData.boomerangFees = append(masterFeeData.boomerangFees, miningFee)
+			boomerangFees += miningFee
+			boomerangFees += feeData.contractDust // dust output to next contract
 		}
 
 		for i := contractCount - 1; i >= 1; i-- { // the last contract doesn't send this
 			// Boomerang returning signature request messages containing full response tx and adding
 			// signatures.
 			// Sender contract input and receiver contract output plus accumulated response tx.
-			boomerangSize += FlatContractSize + FlatEnvelopeSize
-			boomerangSize += masterFeeData.responseSize + masterFeeData.payloadSize
+			signatureRequestSize := FlatContractSize + FlatEnvelopeSize
+			signatureRequestSize += masterFeeData.responseSize + masterFeeData.payloadSize
 
-			boomerangFees += fees.EstimateFeeValue(boomerangSize, miningFeeRate)
+			miningFee := fees.EstimateFeeValue(signatureRequestSize, miningFeeRate)
+			masterFeeData.boomerangSizes = append(masterFeeData.boomerangSizes,
+				signatureRequestSize)
+			masterFeeData.boomerangFees = append(masterFeeData.boomerangFees, miningFee)
+			boomerangFees += miningFee
+			boomerangFees += result[i].contractDust // dust output to previous contract
 		}
 	}
 

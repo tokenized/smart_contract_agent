@@ -17,7 +17,98 @@ import (
 	"github.com/tokenized/txbuilder/fees"
 )
 
-func Test_Transfers_Random_Multi_Contract_P2PKH(t *testing.T) {
+func Test_Transfers_Random_Multi_Contract_P2PKH_RegularFee(t *testing.T) {
+	ctx := logger.ContextWithLogger(context.Background(), true, true, "")
+	test := agents.StartTestData(ctx, t)
+
+	broadcaster1 := state.NewMockTxBroadcaster()
+	broadcaster2 := state.NewMockTxBroadcaster()
+	agentsConfig := agents.DefaultConfig()
+	agentsConfig.FeeRate = 0.05
+	agentsConfig.MinFeeRate = 0.05
+
+	contractKey1, contractLockingScript1, adminKey1, adminLockingScript1, contract1, instrument1 := state.MockInstrument(ctx,
+		&test.Caches.TestCaches)
+	_, feeLockingScript1, _ := state.MockKey()
+
+	agentData1 := agents.AgentData{
+		Key:                contractKey1,
+		LockingScript:      contractLockingScript1,
+		MinimumContractFee: contract1.Formation.ContractFee,
+		FeeLockingScript:   feeLockingScript1,
+		IsActive:           true,
+	}
+
+	agent1, err := agents.NewAgent(ctx, agentData1, agentsConfig, test.Caches.Caches,
+		test.Caches.Transactions, test.Caches.Services, test.Locker, test.Store, broadcaster1, nil,
+		nil, nil, nil, test.PeerChannelsFactory, test.PeerChannelResponses, test.Statistics.Add,
+		test.DependencyTrigger.Trigger)
+	if err != nil {
+		t.Fatalf("Failed to create agent : %s", err)
+	}
+
+	agentTestData1 := &agents.TestAgentData{
+		Agent:                 agent1,
+		Contract:              contract1,
+		Instrument:            instrument1,
+		ContractKey:           contractKey1,
+		ContractLockingScript: contractLockingScript1,
+		AdminKey:              adminKey1,
+		AdminLockingScript:    adminLockingScript1,
+		FeeLockingScript:      feeLockingScript1,
+		Broadcaster:           broadcaster1,
+		Caches:                test.Caches,
+	}
+
+	contractKey2, contractLockingScript2, adminKey2, adminLockingScript2, contract2, instrument2 := state.MockInstrument(ctx,
+		&test.Caches.TestCaches)
+	_, feeLockingScript2, _ := state.MockKey()
+
+	agentData2 := agents.AgentData{
+		Key:                contractKey2,
+		LockingScript:      contractLockingScript2,
+		MinimumContractFee: contract2.Formation.ContractFee,
+		FeeLockingScript:   feeLockingScript2,
+		IsActive:           true,
+	}
+
+	agent2, err := agents.NewAgent(ctx, agentData2, agentsConfig, test.Caches.Caches,
+		test.Caches.Transactions, test.Caches.Services, test.Locker, test.Store, broadcaster2, nil,
+		nil, nil, nil, test.PeerChannelsFactory, test.PeerChannelResponses, test.Statistics.Add,
+		test.DependencyTrigger.Trigger)
+	if err != nil {
+		t.Fatalf("Failed to create agent : %s", err)
+	}
+
+	agentTestData2 := &agents.TestAgentData{
+		Agent:                 agent2,
+		Contract:              contract2,
+		Instrument:            instrument2,
+		ContractKey:           contractKey2,
+		ContractLockingScript: contractLockingScript2,
+		AdminKey:              adminKey2,
+		AdminLockingScript:    adminLockingScript2,
+		FeeLockingScript:      feeLockingScript2,
+		Broadcaster:           broadcaster2,
+		Caches:                test.Caches,
+	}
+
+	for i := 0; i < 10; i++ {
+		senderCount := mathRand.Intn(10) + 1
+		MockExecuteTransferMultiContractRandom(t, ctx, test, agentTestData1, agentTestData2,
+			senderCount, agentsConfig.FeeRate, false)
+	}
+
+	agent1.Release(ctx)
+	agent2.Release(ctx)
+	test.Caches.Caches.Instruments.Release(ctx, contractLockingScript1, instrument1.InstrumentCode)
+	test.Caches.Caches.Instruments.Release(ctx, contractLockingScript2, instrument2.InstrumentCode)
+	test.Caches.Caches.Contracts.Release(ctx, contractLockingScript1)
+	test.Caches.Caches.Contracts.Release(ctx, contractLockingScript2)
+	agents.StopTestAgent(ctx, t, test)
+}
+
+func Test_Transfers_Random_Multi_Contract_P2PKH_LowFee(t *testing.T) {
 	ctx := logger.ContextWithLogger(context.Background(), true, true, "")
 	test := agents.StartTestData(ctx, t)
 
@@ -355,19 +446,28 @@ func MockExecuteTransferMultiContractRandom(t *testing.T, ctx context.Context,
 	if len(responseTxs) == 0 {
 		t.Fatalf("No response tx")
 	}
-	responseTx := responseTxs[len(responseTxs)-1]
 
-	if len(responseTxs) < 2 {
+	if len(responseTxs) < 3 {
 		t.Fatalf("No signature request tx")
 	}
-	signatureRequestTx := responseTxs[len(responseTxs)-2]
+	// settlementRequestTx := responseTxs[0]
+	signatureRequestTx := responseTxs[1]
+	responseTx := responseTxs[2]
+
+	t.Logf("Created tx : %s", etx)
 
 	for _, tx := range responseTxs {
 		t.Logf("Response tx : %s", tx)
-	}
+		for _, txout := range tx.Tx.TxOut {
+			action, err := protocol.Deserialize(txout.LockingScript, true)
+			if err != nil {
+				continue
+			}
 
-	t.Logf("Boomerang overage : %d (%%%0.2f)", signatureRequestTx.Tx.TxOut[0].Value,
-		(float64(signatureRequestTx.Tx.TxOut[0].Value)/float64(boomerang))*100.0)
+			js, _ := json.MarshalIndent(action, "", "  ")
+			t.Logf("%s (%d bytes) : %s", action.TypeName(), len(txout.LockingScript), js)
+		}
+	}
 
 	// Find settlement action
 	var settlement *actions.Settlement
@@ -434,12 +534,39 @@ func MockExecuteTransferMultiContractRandom(t *testing.T, ctx context.Context,
 	t.Logf("Response payload size (senders %d, receivers %d) : estimated %d, actual %d",
 		senderCount, receiverCount, feeData[0].payloadSize, settlementSize)
 
-	t.Logf("Created tx : %s", tx.String(bitcoin.MainNet))
-	t.Logf("Response Tx : %s", responseTx)
-
 	js, _ := json.MarshalIndent(settlement, "", "  ")
 	t.Logf("Settlement : %s", js)
 	t.Logf("Settlement script : %s", settlementScript)
 	t.Logf("Settlement script : %x", []byte(settlementScript))
 	t.Logf("Settlement size : %d", settlementSize)
+
+	for _, tx := range responseTxs {
+		fee, _ := tx.CalculateFee()
+		t.Logf("Response tx : size %d, fee %d", tx.Tx.SerializeSize(), fee)
+		for _, txout := range tx.Tx.TxOut {
+			action, err := protocol.Deserialize(txout.LockingScript, true)
+			if err != nil {
+				continue
+			}
+
+			t.Logf("%s (%d bytes)", action.TypeName(), len(txout.LockingScript))
+		}
+	}
+
+	t.Logf("Boomerang : %d", boomerang)
+
+	for _, fee := range feeData {
+		for i, boomerang := range fee.boomerangSizes {
+			t.Logf("Boomerang : size %d, fee %d", boomerang, fee.boomerangFees[i])
+		}
+	}
+
+	t.Logf("Boomerang overage : %d (%%%0.2f)", signatureRequestTx.Tx.TxOut[0].Value,
+		(float64(signatureRequestTx.Tx.TxOut[0].Value)/float64(boomerang))*100.0)
+
+	if float64(signatureRequestTx.Tx.TxOut[0].Value) > float64(boomerang)*0.20 &&
+		signatureRequestTx.Tx.TxOut[0].Value > 3 {
+		t.Fatalf("Boomerang estimate is too high : estimate %d, overage %d", boomerang,
+			signatureRequestTx.Tx.TxOut[0].Value)
+	}
 }
