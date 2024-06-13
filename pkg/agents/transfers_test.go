@@ -235,7 +235,7 @@ func Test_Transfers_InsufficientQuantity(t *testing.T) {
 	}
 
 	// Add contract output
-	if err := tx.AddOutput(test.ContractLockingScript, 100, false, false); err != nil {
+	if err := tx.AddOutput(test.ContractLockingScript, 200, false, false); err != nil {
 		t.Fatalf("Failed to add contract output : %s", err)
 	}
 
@@ -300,8 +300,8 @@ func Test_Transfers_InsufficientQuantity(t *testing.T) {
 
 	test.Caches.Transactions.Release(ctx, transaction.GetTxID())
 
-	balances, err := test.Caches.TestCaches.Caches.Balances.GetMulti(ctx, test.ContractLockingScript,
-		test.Instrument.InstrumentCode, lockingScripts)
+	balances, err := test.Caches.TestCaches.Caches.Balances.GetMulti(ctx,
+		test.ContractLockingScript, test.Instrument.InstrumentCode, lockingScripts)
 	if err != nil {
 		t.Fatalf("Failed to get balances : %s", err)
 	}
@@ -419,6 +419,20 @@ func Test_Transfers_InsufficientQuantity(t *testing.T) {
 	if rejection.RejectionCode != actions.RejectionsInsufficientQuantity {
 		t.Errorf("Wrong rejection code : got %d, want %d", rejection.RejectionCode,
 			actions.RejectionsInsufficientQuantity)
+	}
+
+	for _, mockBalance := range mockBalances {
+		found := false
+		for _, txout := range responseTx.Tx.TxOut {
+			if txout.LockingScript.Equal(mockBalance.LockingScript) {
+				found = true
+				break
+			}
+		}
+
+		if !found {
+			t.Errorf("Sender locking script not found in rejection : %s", mockBalance.LockingScript)
+		}
 	}
 }
 

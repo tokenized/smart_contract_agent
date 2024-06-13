@@ -124,7 +124,7 @@ func updateBalance(ctx context.Context, caches *state.Caches, contractHash bitco
 		Quantity:      quantity,
 		Timestamp:     timestamp,
 		TxID:          &txid,
-		ActionIndex: actionIndex,
+		ActionIndex:   actionIndex,
 	}
 	balance.Initialize()
 

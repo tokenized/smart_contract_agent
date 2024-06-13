@@ -429,6 +429,7 @@ func (a *Agent) createRejection(ctx context.Context, transaction *transactions.T
 	var refundOutputs []*wire.TxOut
 	var otherContracts []bitcoin.Script
 	var unallocatedRefund uint64
+	var senderScripts []bitcoin.Script
 	if transfer, ok := action.(*actions.Transfer); ok {
 		var bitcoinTransfer *actions.InstrumentTransferField
 		var transferFeeTotal uint64
@@ -443,10 +444,19 @@ func (a *Agent) createRejection(ctx context.Context, transaction *transactions.T
 				continue
 			}
 
-			output := transaction.Output(int(instrumentTransfer.ContractIndex))
-			if !output.LockingScript.Equal(agentLockingScript) {
-				otherContracts = appendLockingScript(otherContracts, output.LockingScript)
+			contractOutput := transaction.Output(int(instrumentTransfer.ContractIndex))
+			if !contractOutput.LockingScript.Equal(agentLockingScript) {
+				otherContracts = appendLockingScript(otherContracts, contractOutput.LockingScript)
 				continue
+			}
+
+			for _, sender := range instrumentTransfer.InstrumentSenders {
+				senderOutput, err := transaction.InputOutput(int(sender.Index))
+				if err != nil {
+					continue
+				}
+
+				senderScripts = appendLockingScript(senderScripts, senderOutput.LockingScript)
 			}
 
 			var instrumentCode state.InstrumentCode
@@ -463,7 +473,9 @@ func (a *Agent) createRejection(ctx context.Context, transaction *transactions.T
 			}
 
 			instrument.Lock()
-			if instrument.Creation != nil && instrument.Creation.TransferFee != nil {
+			if instrument.Creation != nil && instrument.Creation.TransferFee != nil &&
+				!instrument.Creation.TransferFee.UseCurrentInstrument &&
+				len(instrument.Creation.TransferFee.InstrumentCode) == 0 {
 				transferFeeTotal += instrument.Creation.TransferFee.Quantity
 				transferFees[instrumentIndex] = instrument.Creation.TransferFee.Quantity
 			}
@@ -812,10 +824,63 @@ func (a *Agent) createRejection(ctx context.Context, transaction *transactions.T
 	}
 	transaction.Unlock()
 
+	// Add dust outputs to sender's locking scripts so they don't have to re-create UTXOs to access
+	// their tokens.
+	for _, senderScript := range senderScripts {
+		existingOutputIndex := -1
+		for outputIndex, txout := range rejectTx.MsgTx.TxOut {
+			if txout.LockingScript.Equal(senderScript) {
+				existingOutputIndex = outputIndex
+				break
+			}
+		}
+
+		if existingOutputIndex != -1 {
+			logger.InfoWithFields(ctx, []logger.Field{
+				logger.Stringer("locking_script", senderScript),
+			}, "Already have dust output")
+			continue // already have this output
+		}
+
+		outputIndex := len(rejectTx.MsgTx.TxOut)
+		if err := rejectTx.AddOutput(senderScript, 0, false, true); err != nil {
+			return nil, errors.Wrap(err, "add sender dust output")
+		}
+
+		estimatedFee := rejectTx.EstimatedFee()
+		actualFee := rejectTx.ActualFee()
+		if actualFee < 0 || estimatedFee > uint64(actualFee) {
+			logger.InfoWithFields(ctx, []logger.Field{
+				logger.Stringer("locking_script", senderScript),
+				logger.Uint64("estimated_fee", estimatedFee),
+				logger.Int64("actual_fee", actualFee),
+			}, "Not adding dust sender output")
+
+			rejectTx.RemoveOutput(outputIndex)
+			break
+		}
+
+		logger.InfoWithFields(ctx, []logger.Field{
+			logger.Stringer("locking_script", senderScript),
+		}, "Added dust sender output")
+	}
+
 	// Add outputs if there is enough bitcoin.
 	for _, refundOutput := range refundOutputs {
-		outputFee := fees.OutputFeeForLockingScript(refundOutput.LockingScript,
-			float64(rejectTx.FeeRate))
+		outputFee := uint64(0)
+		existingOutputIndex := -1
+		for outputIndex, txout := range rejectTx.MsgTx.TxOut {
+			if txout.LockingScript.Equal(refundOutput.LockingScript) {
+				existingOutputIndex = outputIndex
+				break
+			}
+		}
+
+		if existingOutputIndex == -1 {
+			outputFee = fees.OutputFeeForLockingScript(refundOutput.LockingScript,
+				float64(rejectTx.FeeRate))
+		}
+
 		estimatedFee := rejectTx.EstimatedFee()
 		actualFee := rejectTx.ActualFee()
 		if actualFee < 0 || uint64(actualFee) <= estimatedFee+outputFee {
@@ -824,27 +889,54 @@ func (a *Agent) createRejection(ctx context.Context, transaction *transactions.T
 
 		if uint64(actualFee) < estimatedFee+outputFee+refundOutput.Value {
 			remainingValue := uint64(actualFee) - (estimatedFee + outputFee)
-			logger.InfoWithFields(ctx, []logger.Field{
-				logger.Stringer("locking_script", refundOutput.LockingScript),
-				logger.Uint64("value", remainingValue),
-			}, "Adding remaining refund output")
 
-			if err := rejectTx.AddOutput(refundOutput.LockingScript, remainingValue, true,
-				false); err != nil {
-				return nil, errors.Wrap(err, "add refund output")
+			if existingOutputIndex == -1 {
+				logger.InfoWithFields(ctx, []logger.Field{
+					logger.Stringer("locking_script", refundOutput.LockingScript),
+					logger.Uint64("value", remainingValue),
+				}, "Adding refund output for remaining value")
+
+				if err := rejectTx.AddOutput(refundOutput.LockingScript, remainingValue, true,
+					false); err != nil {
+					return nil, errors.Wrap(err, "add refund output")
+				}
+			} else {
+				logger.InfoWithFields(ctx, []logger.Field{
+					logger.Stringer("locking_script", refundOutput.LockingScript),
+					logger.Uint64("value", remainingValue),
+					logger.Int("existing_output_index", existingOutputIndex),
+				}, "Adding refund for remaining value to existing output")
+
+				if err := rejectTx.AddValueToOutput(uint32(existingOutputIndex),
+					remainingValue); err != nil {
+					return nil, errors.Wrap(err, "add refund value")
+				}
 			}
 
 			break
 		}
 
-		logger.InfoWithFields(ctx, []logger.Field{
-			logger.Stringer("locking_script", refundOutput.LockingScript),
-			logger.Uint64("value", refundOutput.Value),
-		}, "Adding refund output")
+		if existingOutputIndex == -1 {
+			logger.InfoWithFields(ctx, []logger.Field{
+				logger.Stringer("locking_script", refundOutput.LockingScript),
+				logger.Uint64("value", refundOutput.Value),
+			}, "Adding refund output")
 
-		if err := rejectTx.AddOutput(refundOutput.LockingScript, refundOutput.Value, false,
-			false); err != nil {
-			return nil, errors.Wrap(err, "add refund output")
+			if err := rejectTx.AddOutput(refundOutput.LockingScript, refundOutput.Value, false,
+				false); err != nil {
+				return nil, errors.Wrap(err, "add refund output")
+			}
+		} else {
+			logger.InfoWithFields(ctx, []logger.Field{
+				logger.Stringer("locking_script", refundOutput.LockingScript),
+				logger.Uint64("value", refundOutput.Value),
+				logger.Int("existing_output_index", existingOutputIndex),
+			}, "Adding refund to existing output")
+
+			if err := rejectTx.AddValueToOutput(uint32(existingOutputIndex),
+				refundOutput.Value); err != nil {
+				return nil, errors.Wrap(err, "add refund value")
+			}
 		}
 	}
 
