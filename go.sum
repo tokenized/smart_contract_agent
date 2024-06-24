@@ -123,8 +123,8 @@ github.com/tokenized/logger v0.1.4-0.20230915152315-06e93587a3c5/go.mod h1:bA5Pf
 github.com/tokenized/metrics v0.1.0 h1:iOn8Eax2WsYas0AZj4F0KXAw5aD86B9B4Ojn6kwgKsA=
 github.com/tokenized/metrics v0.1.0/go.mod h1:mL3Vm5rNdp90hZrfY5oVk9b8GpM89YqYGyBaLVIo2wE=
 github.com/tokenized/pkg v0.6.0/go.mod h1:reIXdZflcfFbuX1RvX90yAjlYVJaUiYDc5CWJ6qCQww=
-github.com/tokenized/pkg v0.7.1-0.20240624195205-8ab4b4d14d2d h1:qw3NwDwPAdc/2ZZGHYT7aHZDmsv/dN0c2/AWW8UDjKE=
-github.com/tokenized/pkg v0.7.1-0.20240624195205-8ab4b4d14d2d/go.mod h1:se6T4bY4GsZ335u9UeyHN3x72bwcJ4yVhutTY4ZyGbI=
+github.com/tokenized/pkg v0.7.1-0.20240624220638-298bda528f25 h1:l2LNWXyCWAeYJogCkKwquCg/BGR4uVIgxZY34vBohEY=
+github.com/tokenized/pkg v0.7.1-0.20240624220638-298bda528f25/go.mod h1:y3c+sjQaRET7Kx+nMcbi7TIHXhf7AHGgFD319I2XPVM=
 github.com/tokenized/specification v1.3.2-0.20240423192016-a7de8d9a8fe7 h1:5yHdsLJG6whfu7/BfUzzMgOi8zG+3F9FkEbEQZ2Xskc=
 github.com/tokenized/specification v1.3.2-0.20240423192016-a7de8d9a8fe7/go.mod h1:WccmJEJTH69f71hY+oamzwFPXLnqKf7ocHEuVmcHIgU=
 github.com/tokenized/spynode v0.4.3-0.20240429200408-ca85020eff0a h1:W36jO4g6jSuFp0/yOmMHaJZKAeYJI6SK7jz35Tj8uDo=

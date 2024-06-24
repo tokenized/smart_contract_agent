@@ -13,7 +13,7 @@ require (
 	github.com/tokenized/config v0.2.2
 	github.com/tokenized/envelope v1.1.0
 	github.com/tokenized/logger v0.1.4-0.20230915152315-06e93587a3c5
-	github.com/tokenized/pkg v0.7.1-0.20240624195205-8ab4b4d14d2d
+	github.com/tokenized/pkg v0.7.1-0.20240624220638-298bda528f25
 	github.com/tokenized/specification v1.3.2-0.20240423192016-a7de8d9a8fe7
 	github.com/tokenized/spynode v0.4.3-0.20240429200408-ca85020eff0a
 	github.com/tokenized/threads v0.1.2
